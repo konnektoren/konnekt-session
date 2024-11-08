@@ -2,6 +2,24 @@
 name = "konnekt-session"
 version = "0.1.0"
 edition = "2021"
+description = "A session management library"
+
+[[bin]]
+name = "konnekt_session_app"
+path = "src/main.rs"
+
+[lib]
+name = "konnekt_session"
+path = "src/lib.rs"
+
+[features]
+default = []
+yew = ["dep:yew", "web-sys", "wasm-bindgen-futures", "gloo", "getrandom/js"]
 
 [dependencies]
 uuid = { version = "1.0.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
+getrandom = { version = "0.2" }
+gloo = { version = "0.11", features = ["timers"], optional = true }
+web-sys = { version = "0.3", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+yew = { version = "0.21", features = ["csr"], optional = true }
