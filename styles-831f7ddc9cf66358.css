@@ -1,0 +1,94 @@
+body {
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f0f0f0;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#app {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.konnekt-session-player {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 10px;
+}
+
+.konnekt-session-player__name {
+    font-size: 1.2em;
+    font-weight: bold;
+}
+
+.konnekt-session-player__name {
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: #333;
+}
+
+/* Player List Component Styles */
+.konnekt-session-player-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Lobby Component Styles */
+.konnekt-session-lobby {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    background-color: #fff;
+}
+
+.konnekt-session-lobby__title {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #333;
+    text-align: center;
+}
+
+.konnekt-session-lobby__players {
+    background-color: #f8f8f8;
+    padding: 15px;
+    border-radius: 5px;
+}
+
+.konnekt-session-lobby__activities {
+    background-color: #f8f8f8;
+    padding: 15px;
+    border-radius: 5px;
+}
+
+.konnekt-session-lobby__activities-title {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #333;
+}
+
+.konnekt-session-lobby__activities-list {
+    list-style-type: none;
+    padding: 0;
+}
+
+.konnekt-session-lobby__activities-list-item {
+    padding: 5px;
+    border-bottom: 1px solid #eee;
+}
+
+.konnekt-session-lobby__activities-list-item:last-child {
+    border-bottom: none;
+}
