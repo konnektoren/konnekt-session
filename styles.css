@@ -14,3 +14,18 @@ body {
     margin: 0 auto;
     padding: 20px;
 }
+
+.konnekt-session-player {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 10px;
+}
+
+.konnekt-session-player__name {
+    font-size: 1.2em;
+    font-weight: bold;
+}

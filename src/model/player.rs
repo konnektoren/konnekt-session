@@ -35,6 +35,7 @@ mod tests {
     use super::*;
     use crate::model::Role;
 
+    #[derive(PartialEq)]
     struct PlayerProfile {
         id: String,
         name: String,
