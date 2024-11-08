@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Konnekt Session</title>
+        <link rel="stylesheet" href="/konnekt-session/styles-e78bb8f5626b0903.css" integrity="sha384&#x2D;Z92h0KD0H0l90U7pJCcdKGwxFdS68wnDBUlrctnECZKlaLJHHSUPNfHCO1KhnWl1"/>
+        
+<script type="module" nonce="CkhxuzJD9Z3ArGC67ppLYA==">
+import init, * as bindings from '/konnekt-session/konnekt_session_app-c52de031f87ecf51.js';
+const wasm = await init({ module_or_path: '/konnekt-session/konnekt_session_app-c52de031f87ecf51_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+    <link rel="modulepreload" href="/konnekt-session/konnekt_session_app-c52de031f87ecf51.js" crossorigin=anonymous integrity="sha384-lvqMv6w4mFwBz+MFrwX/fZyN3U8x1flBt3Yc0S8WNZYy4A3zdZbMTtgvHG/VAeZw"><link rel="preload" href="/konnekt-session/konnekt_session_app-c52de031f87ecf51_bg.wasm" crossorigin=anonymous integrity="sha384-2BaJcQYj4PENImYidP6woHw+tiwy+tiqnYWVzNULC1YCJ4Ukdhjik2Jb6Nz1ibXN" as="fetch" type="application/wasm"></head>
+    <body>
+        <div id="app"></div>
+    </body>
+</html>
