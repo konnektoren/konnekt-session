@@ -1,8 +1,11 @@
-use crate::model::{Activity, Identifiable, Named, Player, Role};
+use crate::model::{Activity, Player, PlayerData, Role};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Lobby<T> {
+pub struct Lobby<T>
+where
+    T: PlayerData,
+{
     pub id: Uuid,
     pub participants: Vec<Player<T>>,
     pub activities: Vec<Activity>,
@@ -11,7 +14,7 @@ pub struct Lobby<T> {
 
 impl<T> Lobby<T>
 where
-    T: Identifiable + Named,
+    T: PlayerData,
 {
     pub fn new(admin: Player<T>, password: Option<String>) -> Self {
         Lobby {
@@ -49,8 +52,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Player, Role};
+    use crate::model::{Identifiable, Named, Player, PlayerData, Role};
 
+    #[derive(PartialEq, Clone)]
     struct PlayerProfile {
         pub id: String,
         pub name: String,
@@ -67,6 +71,8 @@ mod tests {
             &self.name
         }
     }
+
+    impl PlayerData for PlayerProfile {}
 
     #[test]
     fn create_lobby() {

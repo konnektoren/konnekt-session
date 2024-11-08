@@ -19,21 +19,32 @@ impl Named for PlayerProfile {
     }
 }
 
+impl PlayerData for PlayerProfile {}
+
 #[function_component(App)]
 pub fn app() -> Html {
-    // Define your PlayerProfile
     let player_profile = PlayerProfile {
         id: "123".to_string(),
         name: "Admin".to_string(),
     };
 
-    // Create a Player using PlayerProfile
     let player: Player<PlayerProfile> = Player::new(Role::Admin, player_profile);
+
+    let mut lobby = Lobby::new(player, None);
+
+    let participant = Player::new(
+        Role::Participant,
+        PlayerProfile {
+            id: "456".to_string(),
+            name: "Participant".to_string(),
+        },
+    );
+
+    lobby.add_participant(participant);
 
     html! {
         <div>
-            // Pass the Player<PlayerProfile> to PlayerComp
-            <PlayerComp<PlayerProfile> player={player} />
+            <LobbyComp<PlayerProfile> lobby={lobby} />
         </div>
     }
 }

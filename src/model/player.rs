@@ -1,8 +1,13 @@
 use crate::model::{Identifiable, Named, Role};
 use uuid::Uuid;
 
+pub trait PlayerData: Identifiable + Named + Clone + PartialEq {}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Player<T> {
+pub struct Player<T>
+where
+    T: PlayerData,
+{
     pub id: Uuid,
     pub role: Role,
     pub data: T,
@@ -10,7 +15,7 @@ pub struct Player<T> {
 
 impl<T> Player<T>
 where
-    T: Identifiable + Named,
+    T: PlayerData,
 {
     pub fn new(role: Role, data: T) -> Self {
         Player {
@@ -29,13 +34,12 @@ where
     }
 }
 
-// Example Usage
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::Role;
 
-    #[derive(PartialEq)]
+    #[derive(PartialEq, Clone)]
     struct PlayerProfile {
         id: String,
         name: String,
@@ -52,6 +56,8 @@ mod tests {
             &self.name
         }
     }
+
+    impl PlayerData for PlayerProfile {}
 
     #[test]
     fn create_player() {

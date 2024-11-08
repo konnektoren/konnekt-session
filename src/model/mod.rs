@@ -9,5 +9,5 @@ pub use activity::Activity;
 pub use identifiable::Identifiable;
 pub use lobby::Lobby;
 pub use named::Named;
-pub use player::Player;
+pub use player::{Player, PlayerData};
 pub use role::Role;
