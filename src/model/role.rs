@@ -3,6 +3,7 @@ pub enum Role {
     Admin,
     #[default]
     Participant,
+    Observer,
 }
 
 #[cfg(test)]
