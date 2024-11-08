@@ -13,7 +13,7 @@ name = "konnekt_session"
 path = "src/lib.rs"
 
 [features]
-default = []
+default = ["yew"]
 yew = ["dep:yew", "web-sys", "wasm-bindgen-futures", "gloo", "getrandom/js"]
 
 [dependencies]

@@ -1,4 +1,4 @@
-use crate::model::{Player, PlayerData};
+use crate::model::{Named, Player, PlayerData};
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq, Clone)]

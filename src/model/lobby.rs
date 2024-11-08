@@ -1,22 +1,24 @@
-use crate::model::{Activity, Player, PlayerData, Role};
+use crate::model::{Activity, ActivityData, Player, PlayerData, Role};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Lobby<T>
+pub struct Lobby<P, A>
 where
-    T: PlayerData,
+    P: PlayerData,
+    A: ActivityData,
 {
     pub id: Uuid,
-    pub participants: Vec<Player<T>>,
-    pub activities: Vec<Activity>,
+    pub participants: Vec<Player<P>>,
+    pub activities: Vec<Activity<A>>,
     pub password: Option<String>,
 }
 
-impl<T> Lobby<T>
+impl<P, A> Lobby<P, A>
 where
-    T: PlayerData,
+    P: PlayerData,
+    A: ActivityData,
 {
-    pub fn new(admin: Player<T>, password: Option<String>) -> Self {
+    pub fn new(admin: Player<P>, password: Option<String>) -> Self {
         Lobby {
             id: Uuid::new_v4(),
             participants: vec![admin],
@@ -25,26 +27,26 @@ where
         }
     }
 
-    pub fn add_participant(&mut self, participant: Player<T>) {
+    pub fn add_participant(&mut self, participant: Player<P>) {
         self.participants.push(participant);
     }
 
-    pub fn add_activity(&mut self, activity: Activity) {
+    pub fn add_activity(&mut self, activity: Activity<A>) {
         self.activities.push(activity);
     }
 
-    pub fn get_admin(&self) -> &Player<T> {
+    pub fn get_admin(&self) -> &Player<P> {
         self.participants
             .iter()
             .find(|player| player.role == Role::Admin)
             .unwrap()
     }
 
-    pub fn get_participants(&self) -> &Vec<Player<T>> {
+    pub fn get_participants(&self) -> &Vec<Player<P>> {
         &self.participants
     }
 
-    pub fn get_activities(&self) -> &Vec<Activity> {
+    pub fn get_activities(&self) -> &Vec<Activity<A>> {
         &self.activities
     }
 }
@@ -74,6 +76,26 @@ mod tests {
 
     impl PlayerData for PlayerProfile {}
 
+    #[derive(PartialEq, Clone)]
+    struct Challenge {
+        pub id: String,
+        pub name: String,
+    }
+
+    impl Named for Challenge {
+        fn name(&self) -> &str {
+            &self.name
+        }
+    }
+
+    impl Identifiable for Challenge {
+        fn identifier(&self) -> &str {
+            &self.id
+        }
+    }
+
+    impl ActivityData for Challenge {}
+
     #[test]
     fn create_lobby() {
         let admin = Player::new(
@@ -84,7 +106,7 @@ mod tests {
             },
         );
 
-        let lobby = Lobby::new(admin, None);
+        let lobby: Lobby<PlayerProfile, Challenge> = Lobby::new(admin, None);
 
         assert_eq!(lobby.get_admin().role, Role::Admin);
         assert_eq!(lobby.get_admin().data.identifier(), "123");
@@ -104,7 +126,7 @@ mod tests {
             },
         );
 
-        let mut lobby = Lobby::new(admin, None);
+        let mut lobby: Lobby<PlayerProfile, Challenge> = Lobby::new(admin, None);
 
         let participant = Player::new(
             Role::Participant,

@@ -24,12 +24,22 @@ where
             data,
         }
     }
+}
 
-    pub fn identifier(&self) -> &str {
+impl<T> Identifiable for Player<T>
+where
+    T: PlayerData,
+{
+    fn identifier(&self) -> &str {
         self.data.identifier()
     }
+}
 
-    pub fn name(&self) -> &str {
+impl<T> Named for Player<T>
+where
+    T: PlayerData,
+{
+    fn name(&self) -> &str {
         self.data.name()
     }
 }
