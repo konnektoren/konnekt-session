@@ -22,7 +22,7 @@ pub struct WebSocketLobbyCommandHandler<P: PlayerData, A: ActivityData> {
     websocket_url: String,
     lobby: UseStateHandle<RefCell<Lobby<P, A>>>,
     sender: Rc<RefCell<Option<WebSocketSender>>>,
-    update_ui: Callback<(Lobby<P, A>)>,
+    update_ui: Callback<Lobby<P, A>>,
 }
 
 impl<P, A> WebSocketLobbyCommandHandler<P, A>
@@ -35,7 +35,7 @@ where
         lobby_id: Uuid,
         local_handler: LocalLobbyCommandHandler<P>,
         lobby: UseStateHandle<RefCell<Lobby<P, A>>>,
-        update_ui: Callback<(Lobby<P, A>)>,
+        update_ui: Callback<Lobby<P, A>>,
     ) -> Self {
         let handler = Self {
             lobby_id,
