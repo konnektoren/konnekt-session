@@ -24,7 +24,7 @@ impl Named for PlayerProfile {
 impl PlayerData for PlayerProfile {}
 
 #[derive(PartialEq, Clone)]
-struct Challenge {
+pub struct Challenge {
     id: String,
     name: String,
 }
@@ -42,6 +42,28 @@ impl Identifiable for Challenge {
 }
 
 impl ActivityData for Challenge {}
+
+#[derive(PartialEq)]
+pub struct ChallengeComp;
+
+impl Component for ChallengeComp {
+    type Message = ();
+    type Properties = ActivityProps<Challenge>;
+
+    fn create(_ctx: &Context<Self>) -> Self {
+        Self
+    }
+
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        let props = ctx.props();
+        html! {
+            <div class="konnekt-session-challenge">
+                <h1 class="konnekt-session-challenge__title">{props.activity.name()}</h1>
+                <p>{"Complete the challenge to earn points!"}</p>
+            </div>
+        }
+    }
+}
 
 #[function_component(App)]
 pub fn app() -> Html {
@@ -124,9 +146,13 @@ pub fn app() -> Html {
             <LobbyComp<PlayerProfile, Challenge>
                 lobby={(*lobby).clone()}
                 role={*role}
-                on_command={on_command}
+                on_command={on_command.clone()}
                 {on_error}
             />
+            <RunningActivityComp<Challenge, ChallengeComp> activities={(*lobby).clone().activities.clone()}
+            role={*role}
+            on_command={on_command}
+                />
         </div>
     }
 }

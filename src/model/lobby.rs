@@ -55,6 +55,12 @@ where
     }
 
     pub fn select_activity(&mut self, activity_id: &str) -> Option<&Activity<A>> {
+        // Check if activity is already selected
+        if self.activities.iter().any(|a| a.id == activity_id) {
+            return self.activities.iter().find(|a| a.id == activity_id);
+        }
+
+        // If not already selected, get from catalog and add
         if let Some(activity) = self.catalog.get_activity(activity_id) {
             let activity = activity.clone();
             self.activities.push(activity);
@@ -199,5 +205,78 @@ mod tests {
         assert_eq!(lobby.participants[1].role, Role::Participant);
         assert_eq!(lobby.participants[1].data.identifier(), "456");
         assert_eq!(lobby.participants[1].data.name(), "Test Participant");
+    }
+
+    #[test]
+    fn test_select_activity() {
+        let admin = Player::new(
+            Role::Admin,
+            PlayerProfile {
+                id: "123".to_string(),
+                name: "Test Admin".to_string(),
+            },
+        );
+
+        let mut lobby: Lobby<PlayerProfile, Challenge> = Lobby::new(admin, None);
+
+        let activity = Activity {
+            id: "789".to_string(),
+            status: ActivityStatus::NotStarted,
+            data: Challenge {
+                id: "789".to_string(),
+                name: "Test Challenge".to_string(),
+            },
+        };
+
+        // Add activity to catalog
+        lobby.add_activity(activity.clone());
+
+        // First selection should work
+        assert!(lobby.select_activity(&activity.id).is_some());
+        assert_eq!(lobby.activities.len(), 1);
+
+        // Second selection should not add duplicate
+        assert!(lobby.select_activity(&activity.id).is_some());
+        assert_eq!(lobby.activities.len(), 1);
+
+        // Selecting non-existent activity should fail
+        assert!(lobby.select_activity("nonexistent").is_none());
+        assert_eq!(lobby.activities.len(), 1);
+    }
+
+    #[test]
+    fn test_activity_workflow() {
+        let admin = Player::new(
+            Role::Admin,
+            PlayerProfile {
+                id: "123".to_string(),
+                name: "Test Admin".to_string(),
+            },
+        );
+
+        let mut lobby: Lobby<PlayerProfile, Challenge> = Lobby::new(admin, None);
+
+        let activity = Activity {
+            id: "789".to_string(),
+            status: ActivityStatus::NotStarted,
+            data: Challenge {
+                id: "789".to_string(),
+                name: "Test Challenge".to_string(),
+            },
+        };
+
+        // Add to catalog and select
+        lobby.add_activity(activity.clone());
+        lobby.select_activity(&activity.id);
+
+        // Start activity
+        let started = lobby.start_activity(&activity.id);
+        assert!(started.is_some());
+        assert_eq!(started.unwrap().status, ActivityStatus::InProgress);
+
+        // Complete activity
+        let completed = lobby.complete_activity(&activity.id);
+        assert!(completed.is_some());
+        assert_eq!(completed.unwrap().status, ActivityStatus::Done);
     }
 }
