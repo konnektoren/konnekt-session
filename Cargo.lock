@@ -690,6 +690,7 @@ version = "0.1.0"
 dependencies = [
  "getrandom",
  "gloo 0.11.0",
+ "log",
  "uuid",
  "wasm-bindgen-futures",
  "web-sys",

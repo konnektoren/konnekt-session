@@ -1,5 +1,7 @@
 use crate::components::{ActivityCatalogComp, PlayerListComp};
-use crate::model::{Activity, ActivityData, Lobby, Named, PlayerData, Role};
+use crate::model::{
+    Activity, ActivityData, CommandError, Lobby, LobbyCommand, Named, PlayerData, Role,
+};
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq, Clone)]
@@ -10,6 +12,9 @@ where
 {
     pub lobby: Lobby<P, A>,
     pub role: Role,
+    pub on_command: Callback<LobbyCommand>,
+    #[prop_or_default]
+    pub on_error: Callback<CommandError>,
 }
 
 #[function_component(LobbyComp)]
@@ -18,37 +23,33 @@ where
     P: PlayerData + 'static,
     A: ActivityData + 'static,
 {
-    let lobby = use_state(|| props.lobby.clone());
-
     let is_admin = props.role == Role::Admin;
 
     let on_select = {
-        let lobby = lobby.clone();
+        let on_command = props.on_command.clone();
         Callback::from(move |activity: Activity<A>| {
-            let mut new_lobby = (&*lobby).clone();
-            new_lobby.select_activity(&activity.id);
-
-            lobby.set(new_lobby);
+            on_command.emit(LobbyCommand::SelectActivity {
+                activity_id: activity.id.clone(),
+            });
         })
     };
-
-    let catalog = (*lobby).catalog.clone();
-    let players = (*lobby).participants.clone();
-    let activities = (*lobby).activities.clone();
 
     html! {
         <div class="konnekt-session-lobby">
             <h1 class="konnekt-session-lobby__title">{"Lobby"}</h1>
             <div class="konnekt-session-lobby__players">
-                <PlayerListComp<P> {players} />
+                <PlayerListComp<P> players={props.lobby.participants.clone()} />
             </div>
             if is_admin {
-                <ActivityCatalogComp<A> {catalog} {on_select} />
+                <ActivityCatalogComp<A>
+                    catalog={props.lobby.catalog.clone()}
+                    {on_select}
+                />
             }
             <div class="konnekt-session-lobby__activities">
                 <h2 class="konnekt-session-lobby__activities-title">{"Activities"}</h2>
                 <ul class="konnekt-session-lobby__activities-list">
-                    {for activities.iter().map(|activity| {
+                    {for props.lobby.activities.iter().map(|activity| {
                         html! {
                             <li class="konnekt-session-lobby__activities-list-item">
                                 {activity.name().to_string()}

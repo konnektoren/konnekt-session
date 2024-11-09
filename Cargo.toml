@@ -17,6 +17,7 @@ default = ["yew"]
 yew = ["dep:yew", "web-sys", "wasm-bindgen-futures", "gloo", "getrandom/js"]
 
 [dependencies]
+log = { version = "0.4" }
 uuid = { version = "1.0.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
 getrandom = { version = "0.2" }
 gloo = { version = "0.11", features = ["timers"], optional = true }

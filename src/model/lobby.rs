@@ -1,4 +1,6 @@
-use crate::model::{Activity, ActivityCatalog, ActivityData, Player, PlayerData, Role};
+use crate::model::{
+    Activity, ActivityCatalog, ActivityData, ActivityStatus, Player, PlayerData, Role,
+};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -37,12 +39,6 @@ where
         self.catalog.add_activity(activity);
     }
 
-    pub fn select_activity(&mut self, id: &str) {
-        if let Some(activity) = self.catalog.get_activity(id) {
-            self.activities.push(activity.clone());
-        }
-    }
-
     pub fn get_admin(&self) -> &Player<P> {
         self.participants
             .iter()
@@ -56,6 +52,59 @@ where
 
     pub fn get_activities(&self) -> &Vec<Activity<A>> {
         &self.activities
+    }
+
+    pub fn select_activity(&mut self, activity_id: &str) -> Option<&Activity<A>> {
+        if let Some(activity) = self.catalog.get_activity(activity_id) {
+            let activity = activity.clone();
+            self.activities.push(activity);
+            Some(self.activities.last().unwrap())
+        } else {
+            None
+        }
+    }
+
+    pub fn remove_participant(&mut self, participant_id: Uuid) -> Option<Player<P>> {
+        if let Some(pos) = self
+            .participants
+            .iter()
+            .position(|p| p.id == participant_id)
+        {
+            Some(self.participants.remove(pos))
+        } else {
+            None
+        }
+    }
+
+    pub fn start_activity(&mut self, activity_id: &str) -> Option<&Activity<A>> {
+        if let Some(activity) = self.activities.iter_mut().find(|a| a.id == activity_id) {
+            activity.status = ActivityStatus::InProgress;
+            Some(activity)
+        } else {
+            None
+        }
+    }
+
+    pub fn complete_activity(&mut self, activity_id: &str) -> Option<&Activity<A>> {
+        if let Some(activity) = self.activities.iter_mut().find(|a| a.id == activity_id) {
+            activity.status = ActivityStatus::Done;
+            Some(activity)
+        } else {
+            None
+        }
+    }
+
+    pub fn update_activity_status(
+        &mut self,
+        activity_id: &str,
+        status: ActivityStatus,
+    ) -> Option<&Activity<A>> {
+        if let Some(activity) = self.activities.iter_mut().find(|a| a.id == activity_id) {
+            activity.status = status;
+            Some(activity)
+        } else {
+            None
+        }
     }
 }
 
