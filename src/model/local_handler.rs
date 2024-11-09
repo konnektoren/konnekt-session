@@ -1,20 +1,22 @@
 use crate::model::{
     ActivityData, CommandError, Lobby, LobbyCommand, LobbyCommandHandler, PlayerData,
 };
+use std::sync::Arc;
 
 use super::Player;
 
+#[derive(Clone)]
 pub struct LocalLobbyCommandHandler<P: PlayerData> {
-    player_data_deserializer: Box<dyn Fn(&str) -> P>,
+    player_data_deserializer: Arc<dyn Fn(&str) -> P + Send + Sync>,
 }
 
 impl<P> LocalLobbyCommandHandler<P>
 where
     P: PlayerData,
 {
-    pub fn new(deserializer: impl Fn(&str) -> P + 'static) -> Self {
+    pub fn new(deserializer: impl Fn(&str) -> P + Send + Sync + 'static) -> Self {
         Self {
-            player_data_deserializer: Box::new(deserializer),
+            player_data_deserializer: Arc::new(deserializer),
         }
     }
 }

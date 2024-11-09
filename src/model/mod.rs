@@ -8,6 +8,7 @@ mod local_handler;
 mod named;
 mod player;
 mod role;
+mod websocket_handler;
 
 pub use activity::{Activity, ActivityData, ActivityStatus};
 pub use activity_catalog::ActivityCatalog;
@@ -19,3 +20,4 @@ pub use local_handler::LocalLobbyCommandHandler;
 pub use named::Named;
 pub use player::{Player, PlayerData};
 pub use role::Role;
+pub use websocket_handler::WebSocketLobbyCommandHandler;
