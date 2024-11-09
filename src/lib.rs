@@ -1,5 +1,6 @@
 #[cfg(feature = "yew")]
 pub mod components;
+pub mod config;
 pub mod model;
 
 #[cfg(feature = "server")]
@@ -8,6 +9,7 @@ pub mod server;
 pub mod prelude {
     #[cfg(feature = "yew")]
     pub use crate::components::*;
+    pub use crate::config::Config;
     pub use crate::model::Activity;
     pub use crate::model::ActivityCatalog;
     pub use crate::model::ActivityData;
