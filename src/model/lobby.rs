@@ -1,4 +1,4 @@
-use crate::model::{Activity, ActivityData, Player, PlayerData, Role};
+use crate::model::{Activity, ActivityCatalog, ActivityData, Player, PlayerData, Role};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -9,6 +9,7 @@ where
 {
     pub id: Uuid,
     pub participants: Vec<Player<P>>,
+    pub catalog: ActivityCatalog<A>,
     pub activities: Vec<Activity<A>>,
     pub password: Option<String>,
 }
@@ -22,6 +23,7 @@ where
         Lobby {
             id: Uuid::new_v4(),
             participants: vec![admin],
+            catalog: ActivityCatalog::new(),
             activities: Vec::new(),
             password,
         }
@@ -32,7 +34,13 @@ where
     }
 
     pub fn add_activity(&mut self, activity: Activity<A>) {
-        self.activities.push(activity);
+        self.catalog.add_activity(activity);
+    }
+
+    pub fn select_activity(&mut self, id: &str) {
+        if let Some(activity) = self.catalog.get_activity(id) {
+            self.activities.push(activity.clone());
+        }
     }
 
     pub fn get_admin(&self) -> &Player<P> {

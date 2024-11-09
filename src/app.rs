@@ -1,4 +1,6 @@
 use konnekt_session::prelude::*;
+use web_sys::Event;
+use web_sys::HtmlSelectElement;
 use yew::prelude::*;
 
 #[derive(PartialEq, Clone)]
@@ -43,6 +45,8 @@ impl ActivityData for Challenge {}
 
 #[function_component(App)]
 pub fn app() -> Html {
+    let role = use_state(|| Role::Admin);
+
     let player_profile = PlayerProfile {
         id: "123".to_string(),
         name: "Admin".to_string(),
@@ -72,9 +76,27 @@ pub fn app() -> Html {
 
     lobby.add_participant(participant);
 
+    let on_change = {
+        let role = role.clone();
+        move |e: Event| {
+            let target = e.target_unchecked_into::<HtmlSelectElement>();
+            let value = target.value();
+            let selected_role = match value.as_str() {
+                "Admin" => Role::Admin,
+                "Participant" => Role::Participant,
+                _ => Role::Participant,
+            };
+            role.set(selected_role);
+        }
+    };
+
     html! {
         <div>
-            <LobbyComp<PlayerProfile, Challenge> lobby={lobby} />
+            <select onchange={on_change}>
+                <option value="Admin">{"Admin"}</option>
+                <option value="Participant">{"Participant"}</option>
+            </select>
+            <LobbyComp<PlayerProfile, Challenge> lobby={lobby} role={*role} />
         </div>
     }
 }

@@ -92,3 +92,48 @@ body {
 .konnekt-session-lobby__activities-list-item:last-child {
     border-bottom: none;
 }
+
+// Activity Catalog Component Styles
+
+.konnekt-session-activity-catalog {
+    background-color: #f8f8f8;
+    padding: 15px;
+    border-radius: 5px;
+    margin-top: 20px;
+}
+
+.konnekt-session-activity-catalog__title {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 15px;
+}
+
+.konnekt-session-activity-catalog__list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+}
+
+.konnekt-session-activity-catalog__item {
+    background-color: #fff;
+    border: 2px solid #e0e0e0;
+    border-radius: 5px;
+    padding: 10px 15px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 1rem;
+    color: #333;
+    text-align: left;
+    width: 100%;
+}
+
+.konnekt-session-activity-catalog__item:hover {
+    background-color: #f0f0f0;
+    border-color: #ccc;
+    transform: translateY(-2px);
+}
+
+.konnekt-session-activity-catalog__item:active {
+    transform: translateY(0);
+}
