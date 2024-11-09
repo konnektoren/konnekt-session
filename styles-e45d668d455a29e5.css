@@ -1,0 +1,199 @@
+body {
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f0f0f0;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#app {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.konnekt-session-player {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 10px;
+}
+
+.konnekt-session-player__name {
+    font-size: 1.2em;
+    font-weight: bold;
+}
+
+.konnekt-session-player__name {
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: #333;
+}
+
+/* Player List Component Styles */
+.konnekt-session-player-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Lobby Component Styles */
+.konnekt-session-lobby {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    background-color: #fff;
+}
+
+.konnekt-session-lobby__title {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #333;
+    text-align: center;
+}
+
+.konnekt-session-lobby__players {
+    background-color: #f8f8f8;
+    padding: 15px;
+    border-radius: 5px;
+}
+
+.konnekt-session-lobby__activities {
+    background-color: #f8f8f8;
+    padding: 15px;
+    border-radius: 5px;
+}
+
+.konnekt-session-lobby__activities-title {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #333;
+}
+
+.konnekt-session-lobby__activities-list {
+    list-style-type: none;
+    padding: 0;
+}
+
+.konnekt-session-lobby__activities-list-item {
+    padding: 5px;
+    border-bottom: 1px solid #eee;
+}
+
+.konnekt-session-lobby__activities-list-item:last-child {
+    border-bottom: none;
+}
+
+// Activity Catalog Component Styles
+
+.konnekt-session-activity-catalog {
+    background-color: #f8f8f8;
+    padding: 15px;
+    border-radius: 5px;
+    margin-top: 20px;
+}
+
+.konnekt-session-activity-catalog__title {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 15px;
+}
+
+.konnekt-session-activity-catalog__list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+}
+
+.konnekt-session-activity-catalog__item {
+    background-color: #fff;
+    border: 2px solid #e0e0e0;
+    border-radius: 5px;
+    padding: 10px 15px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 1rem;
+    color: #333;
+    text-align: left;
+    width: 100%;
+}
+
+.konnekt-session-activity-catalog__item:hover {
+    background-color: #f0f0f0;
+    border-color: #ccc;
+    transform: translateY(-2px);
+}
+
+.konnekt-session-activity-catalog__item:active {
+    transform: translateY(0);
+}
+
+.konnekt-session-activity {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px;
+    margin-bottom: 10px;
+    border-radius: 5px;
+    background-color: #fff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.konnekt-session-activity.not-started {
+    border-left: 4px solid #ffd700;
+}
+
+.konnekt-session-activity.in-progress {
+    border-left: 4px solid #4caf50;
+}
+
+.konnekt-session-activity.done {
+    border-left: 4px solid #2196f3;
+}
+
+.konnekt-session-activity__content {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.konnekt-session-activity__name {
+    font-weight: bold;
+    font-size: 1.1rem;
+}
+
+.konnekt-session-activity__status {
+    font-size: 0.9rem;
+    color: #666;
+}
+
+.konnekt-session-activity__start-button {
+    padding: 8px 16px;
+    background-color: #4caf50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.konnekt-session-activity__start-button:hover {
+    background-color: #45a049;
+}
+
+.konnekt-session-lobby__activities-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 15px;
+}
