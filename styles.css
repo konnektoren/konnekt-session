@@ -1,199 +1,247 @@
+/* Base Styles */
 body {
     font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
     margin: 0;
     padding: 0;
-    background-color: #f0f0f0;
-    height: 100vh;
+    background-color: #f5f7fa;
+    min-height: 100vh;
     display: flex;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
+    padding-top: 2rem;
 }
 
 #app {
-    max-width: 800px;
+    width: 100%;
+    max-width: 1200px;
     margin: 0 auto;
     padding: 20px;
 }
 
-.konnekt-session-player {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-    border: 1px solid #ccc;
-    border-radius: 5px;
-    padding: 10px;
+/* Common Components */
+.button-base {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+    font-size: 0.9rem;
+    letter-spacing: 0.5px;
 }
 
-.konnekt-session-player__name {
-    font-size: 1.2em;
-    font-weight: bold;
-}
-
-.konnekt-session-player__name {
-    font-size: 1.2rem;
-    font-weight: bold;
-    color: #333;
-}
-
-/* Player List Component Styles */
-.konnekt-session-player-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-/* Lobby Component Styles */
+/* Lobby Styles */
 .konnekt-session-lobby {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    padding: 20px;
-    border-radius: 10px;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-    background-color: #fff;
+    background-color: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    padding: 2rem;
+    margin-bottom: 2rem;
 }
 
 .konnekt-session-lobby__title {
-    font-size: 2rem;
-    font-weight: bold;
-    color: #333;
+    font-size: 2.5rem;
+    font-weight: 800;
+    color: #1a237e;
     text-align: center;
+    margin-bottom: 2rem;
 }
 
-.konnekt-session-lobby__players {
-    background-color: #f8f8f8;
-    padding: 15px;
-    border-radius: 5px;
+.konnekt-session-lobby__section {
+    background-color: #f8fafc;
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
 }
 
-.konnekt-session-lobby__activities {
-    background-color: #f8f8f8;
-    padding: 15px;
-    border-radius: 5px;
+/* Player Styles */
+.konnekt-session-player {
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+    transition: transform 0.2s ease;
 }
 
-.konnekt-session-lobby__activities-title {
-    font-size: 1.5rem;
-    font-weight: bold;
-    color: #333;
+.konnekt-session-player:hover {
+    transform: translateX(5px);
 }
 
-.konnekt-session-lobby__activities-list {
-    list-style-type: none;
-    padding: 0;
+.konnekt-session-player__name {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #2d3748;
 }
 
-.konnekt-session-lobby__activities-list-item {
-    padding: 5px;
-    border-bottom: 1px solid #eee;
-}
-
-.konnekt-session-lobby__activities-list-item:last-child {
-    border-bottom: none;
-}
-
-// Activity Catalog Component Styles
-
-.konnekt-session-activity-catalog {
-    background-color: #f8f8f8;
-    padding: 15px;
-    border-radius: 5px;
-    margin-top: 20px;
-}
-
-.konnekt-session-activity-catalog__title {
-    font-size: 1.5rem;
-    font-weight: bold;
-    color: #333;
-    margin-bottom: 15px;
-}
-
-.konnekt-session-activity-catalog__list {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 10px;
-}
-
-.konnekt-session-activity-catalog__item {
-    background-color: #fff;
-    border: 2px solid #e0e0e0;
-    border-radius: 5px;
-    padding: 10px 15px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-size: 1rem;
-    color: #333;
-    text-align: left;
-    width: 100%;
-}
-
-.konnekt-session-activity-catalog__item:hover {
-    background-color: #f0f0f0;
-    border-color: #ccc;
-    transform: translateY(-2px);
-}
-
-.konnekt-session-activity-catalog__item:active {
-    transform: translateY(0);
-}
-
+/* Activity Styles */
 .konnekt-session-activity {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 15px;
-    margin-bottom: 10px;
-    border-radius: 5px;
-    background-color: #fff;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    background-color: #ffffff;
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    border-left: 4px solid transparent;
+    transition: all 0.3s ease;
 }
 
 .konnekt-session-activity.not-started {
-    border-left: 4px solid #ffd700;
+    border-left-color: #ffd700;
 }
 
 .konnekt-session-activity.in-progress {
-    border-left: 4px solid #4caf50;
+    border-left-color: #4caf50;
 }
 
 .konnekt-session-activity.done {
-    border-left: 4px solid #2196f3;
+    border-left-color: #2196f3;
 }
 
 .konnekt-session-activity__content {
     display: flex;
-    flex-direction: column;
-    gap: 5px;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .konnekt-session-activity__name {
-    font-weight: bold;
-    font-size: 1.1rem;
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #1a237e;
 }
 
 .konnekt-session-activity__status {
     font-size: 0.9rem;
-    color: #666;
+    color: #64748b;
+    font-weight: 500;
 }
 
+.konnekt-session-activity__controls {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+/* Activity Buttons */
 .konnekt-session-activity__start-button {
-    padding: 8px 16px;
+    @extend .button-base;
     background-color: #4caf50;
     color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background-color 0.2s;
 }
 
 .konnekt-session-activity__start-button:hover {
-    background-color: #45a049;
+    background-color: #43a047;
+    transform: translateY(-2px);
 }
 
-.konnekt-session-lobby__activities-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-top: 15px;
+.konnekt-session-activity__complete-button {
+    @extend .button-base;
+    background-color: #2196f3;
+    color: white;
+}
+
+.konnekt-session-activity__complete-button:hover {
+    background-color: #1e88e5;
+    transform: translateY(-2px);
+}
+
+.konnekt-session-activity__restart-button {
+    @extend .button-base;
+    background-color: #ff9800;
+    color: white;
+}
+
+.konnekt-session-activity__restart-button:hover {
+    background-color: #f57c00;
+    transform: translateY(-2px);
+}
+
+/* Running Activity Styles */
+.konnekt-session-running-activity {
+    background-color: #ffffff;
+    border-radius: 12px;
+    padding: 2rem;
+    margin-top: 2rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.konnekt-session-running-activity__empty {
+    text-align: center;
+    color: #64748b;
+    padding: 3rem;
+    font-size: 1.1rem;
+    font-weight: 500;
+}
+
+.konnekt-session-running-activity__content {
+    min-height: 200px;
+    padding: 1.5rem;
+    background-color: #f8fafc;
+    border-radius: 8px;
+}
+
+/* Activity Catalog Styles */
+.konnekt-session-activity-catalog {
+    background-color: #ffffff;
+    border-radius: 12px;
+    padding: 2rem;
+    margin-top: 2rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.konnekt-session-activity-catalog__title {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #1a237e;
+    margin-bottom: 1.5rem;
+}
+
+.konnekt-session-activity-catalog__list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1rem;
+}
+
+.konnekt-session-activity-catalog__item {
+    background-color: #f8fafc;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 1rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 500;
+    color: #2d3748;
+}
+
+.konnekt-session-activity-catalog__item:hover {
+    background-color: #edf2f7;
+    border-color: #cbd5e0;
+    transform: translateY(-3px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    #app {
+        padding: 10px;
+    }
+
+    .konnekt-session-lobby {
+        padding: 1rem;
+    }
+
+    .konnekt-session-activity-catalog__list {
+        grid-template-columns: 1fr;
+    }
+
+    .konnekt-session-activity__content {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1rem;
+    }
+
+    .konnekt-session-activity__controls {
+        width: 100%;
+        justify-content: space-between;
+    }
 }
