@@ -1,4 +1,4 @@
-use crate::model::{LobbyCommand, LobbyCommandWrapper, Role};
+use crate::model::{LobbyCommand, LobbyCommandWrapper};
 use crate::server::Connection;
 use futures_util::{SinkExt, StreamExt};
 use std::collections::HashMap;

@@ -2,7 +2,8 @@
 
 use std::net::SocketAddr;
 
-use konnekt_session::server::WebSocketServer;
+use konnekt_session::server::WebSocketListener;
+use konnekt_session::server::WebSocketServerImpl;
 use tracing::debug;
 use tracing_subscriber::fmt;
 use tracing_subscriber::EnvFilter;
@@ -23,9 +24,7 @@ pub async fn main() {
         .init();
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    let ws_server = WebSocketServer::new();
-
-    debug!("Starting WebSocket server on {}", addr);
-
-    ws_server.run(addr).await;
+    let server = WebSocketServerImpl::new();
+    let listener = WebSocketListener::new(server, addr);
+    listener.run().await;
 }
