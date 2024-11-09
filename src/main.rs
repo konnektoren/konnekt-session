@@ -1,9 +1,9 @@
 #[cfg(feature = "yew")]
-mod app;
+use konnekt_session::example::App;
 
 #[cfg(feature = "yew")]
 fn main() {
-    yew::Renderer::<app::App>::new().render();
+    yew::Renderer::<App>::new().render();
 }
 #[cfg(not(feature = "yew"))]
 fn main() {

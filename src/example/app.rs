@@ -1,70 +1,12 @@
-use konnekt_session::prelude::*;
-use serde::{Deserialize, Serialize};
+use crate::components::{LobbyComp, RunningActivityComp};
+use crate::example::{Challenge, ChallengeComp, PlayerProfile};
+use crate::model::{
+    Activity, ActivityStatus, CommandError, Lobby, LobbyCommand, LobbyCommandHandler,
+    LocalLobbyCommandHandler, Player, Role,
+};
 use web_sys::Event;
 use web_sys::HtmlSelectElement;
 use yew::prelude::*;
-
-#[derive(PartialEq, Clone, Serialize, Deserialize)]
-struct PlayerProfile {
-    id: String,
-    name: String,
-}
-
-impl Identifiable for PlayerProfile {
-    fn identifier(&self) -> &str {
-        &self.id
-    }
-}
-
-impl Named for PlayerProfile {
-    fn name(&self) -> &str {
-        &self.name
-    }
-}
-
-impl PlayerData for PlayerProfile {}
-
-#[derive(PartialEq, Clone)]
-pub struct Challenge {
-    id: String,
-    name: String,
-}
-
-impl Named for Challenge {
-    fn name(&self) -> &str {
-        &self.name
-    }
-}
-
-impl Identifiable for Challenge {
-    fn identifier(&self) -> &str {
-        &self.id
-    }
-}
-
-impl ActivityData for Challenge {}
-
-#[derive(PartialEq)]
-pub struct ChallengeComp;
-
-impl Component for ChallengeComp {
-    type Message = ();
-    type Properties = ActivityProps<Challenge>;
-
-    fn create(_ctx: &Context<Self>) -> Self {
-        Self
-    }
-
-    fn view(&self, ctx: &Context<Self>) -> Html {
-        let props = ctx.props();
-        html! {
-            <div class="konnekt-session-challenge">
-                <h1 class="konnekt-session-challenge__title">{props.activity.name()}</h1>
-                <p>{"Complete the challenge to earn points!"}</p>
-            </div>
-        }
-    }
-}
 
 #[function_component(App)]
 pub fn app() -> Html {
