@@ -11,7 +11,7 @@ mod role;
 
 pub use activity::{Activity, ActivityData, ActivityStatus};
 pub use activity_catalog::ActivityCatalog;
-pub use command::{CommandError, LobbyCommand};
+pub use command::{CommandError, LobbyCommand, LobbyCommandWrapper};
 pub use handler::LobbyCommandHandler;
 pub use identifiable::Identifiable;
 pub use lobby::Lobby;

@@ -8,6 +8,11 @@ description = "A session management library"
 name = "konnekt_session_app"
 path = "src/main.rs"
 
+[[bin]]
+name = "server"
+path = "src/server/main.rs"
+needed-features = ["server"]
+
 [lib]
 name = "konnekt_session"
 path = "src/lib.rs"
@@ -15,6 +20,14 @@ path = "src/lib.rs"
 [features]
 default = ["yew"]
 yew = ["dep:yew", "web-sys", "wasm-bindgen-futures", "gloo", "getrandom/js"]
+server = [
+    "futures-util",
+    "tokio",
+    "tokio-tungstenite",
+    "url",
+    "tracing",
+    "tracing-subscriber",
+]
 
 [dependencies]
 log = { version = "0.4" }
@@ -26,7 +39,19 @@ uuid = { version = "1.0.0", features = [
 ] }
 getrandom = { version = "0.2" }
 serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+# Client Dependencies
 gloo = { version = "0.11", features = ["timers"], optional = true }
 web-sys = { version = "0.3", optional = true, features = ["HtmlSelectElement"] }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 yew = { version = "0.21", features = ["csr"], optional = true }
+# Server Dependencies
+futures-util = { version = "0.3", optional = true }
+tokio = { version = "1", features = ["full"], optional = true }
+tokio-tungstenite = { version = "0.24", optional = true }
+url = { version = "2.3", optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3.18", features = [
+    "env-filter",
+    "fmt",
+], optional = true }

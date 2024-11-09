@@ -1,9 +1,15 @@
-use crate::model::ActivityStatus;
+use crate::model::{ActivityStatus, Role};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LobbyCommand {
+    Join {
+        player_id: Uuid,
+        role: Role,
+        data: String,
+        password: Option<String>,
+    },
     SelectActivity {
         activity_id: String,
     },

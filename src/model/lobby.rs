@@ -31,6 +31,16 @@ where
         }
     }
 
+    pub fn join(&mut self, player: Player<P>, password: Option<String>) -> Result<(), String> {
+        if let Some(ref lobby_password) = self.password {
+            if password != Some(lobby_password.to_string()) {
+                return Err("Invalid password".to_string());
+            }
+        }
+        self.participants.push(player);
+        Ok(())
+    }
+
     pub fn add_participant(&mut self, participant: Player<P>) {
         self.participants.push(participant);
     }

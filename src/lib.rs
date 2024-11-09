@@ -2,6 +2,9 @@
 pub mod components;
 pub mod model;
 
+#[cfg(feature = "server")]
+pub mod server;
+
 pub mod prelude {
     #[cfg(feature = "yew")]
     pub use crate::components::*;

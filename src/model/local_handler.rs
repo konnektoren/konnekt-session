@@ -2,9 +2,24 @@ use crate::model::{
     ActivityData, CommandError, Lobby, LobbyCommand, LobbyCommandHandler, PlayerData,
 };
 
-pub struct LocalLobbyCommandHandler;
+use super::Player;
 
-impl<P, A> LobbyCommandHandler<P, A> for LocalLobbyCommandHandler
+pub struct LocalLobbyCommandHandler<P: PlayerData> {
+    player_data_deserializer: Box<dyn Fn(&str) -> P>,
+}
+
+impl<P> LocalLobbyCommandHandler<P>
+where
+    P: PlayerData,
+{
+    pub fn new(deserializer: impl Fn(&str) -> P + 'static) -> Self {
+        Self {
+            player_data_deserializer: Box::new(deserializer),
+        }
+    }
+}
+
+impl<P, A> LobbyCommandHandler<P, A> for LocalLobbyCommandHandler<P>
 where
     P: PlayerData,
     A: ActivityData,
@@ -15,6 +30,18 @@ where
         command: LobbyCommand,
     ) -> Result<(), CommandError> {
         match command {
+            LobbyCommand::Join {
+                player_id,
+                role,
+                data,
+                password,
+            } => {
+                let data = (self.player_data_deserializer)(&data);
+                let player: Player<P> = Player::new(role, data);
+
+                lobby.join(player, password).unwrap();
+                Ok(())
+            }
             LobbyCommand::SelectActivity { activity_id } => {
                 lobby
                     .select_activity(&activity_id)

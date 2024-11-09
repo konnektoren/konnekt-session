@@ -1,9 +1,10 @@
 use konnekt_session::prelude::*;
+use serde::{Deserialize, Serialize};
 use web_sys::Event;
 use web_sys::HtmlSelectElement;
 use yew::prelude::*;
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Serialize, Deserialize)]
 struct PlayerProfile {
     id: String,
     name: String,
@@ -100,7 +101,9 @@ pub fn app() -> Html {
         lobby
     });
 
-    let handler = LocalLobbyCommandHandler;
+    let handler = LocalLobbyCommandHandler::<PlayerProfile>::new(|data: &str| {
+        serde_json::from_str(data).expect("Failed to deserialize player data")
+    });
 
     let on_command = {
         let lobby = lobby.clone();
