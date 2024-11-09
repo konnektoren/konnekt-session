@@ -18,8 +18,14 @@ yew = ["dep:yew", "web-sys", "wasm-bindgen-futures", "gloo", "getrandom/js"]
 
 [dependencies]
 log = { version = "0.4" }
-uuid = { version = "1.0.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
+uuid = { version = "1.0.0", features = [
+    "v4",
+    "fast-rng",
+    "macro-diagnostics",
+    "serde",
+] }
 getrandom = { version = "0.2" }
+serde = { version = "1.0", features = ["derive"] }
 gloo = { version = "0.11", features = ["timers"], optional = true }
 web-sys = { version = "0.3", optional = true, features = ["HtmlSelectElement"] }
 wasm-bindgen-futures = { version = "0.4", optional = true }

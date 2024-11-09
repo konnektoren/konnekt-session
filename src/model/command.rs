@@ -1,7 +1,8 @@
 use crate::model::ActivityStatus;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LobbyCommand {
     SelectActivity {
         activity_id: String,
@@ -22,6 +23,13 @@ pub enum LobbyCommand {
         activity_id: String,
         status: ActivityStatus,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LobbyCommandWrapper {
+    pub lobby_id: Uuid,
+    pub password: Option<String>,
+    pub command: LobbyCommand,
 }
 
 #[derive(Debug)]

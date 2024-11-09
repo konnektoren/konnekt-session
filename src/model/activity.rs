@@ -1,10 +1,11 @@
 use crate::model::Named;
+use serde::{Deserialize, Serialize};
 
 use super::Identifiable;
 
 pub trait ActivityData: Named + Identifiable + Clone + PartialEq {}
 
-#[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ActivityStatus {
     #[default]
     NotStarted,
