@@ -1,7 +1,5 @@
-use crate::components::{ActivityCatalogComp, PlayerListComp};
-use crate::model::{
-    Activity, ActivityData, CommandError, Lobby, LobbyCommand, Named, PlayerData, Role,
-};
+use crate::components::{ActivityCatalogComp, ActivityComp, PlayerListComp};
+use crate::model::{Activity, ActivityData, CommandError, Lobby, LobbyCommand, PlayerData, Role};
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq, Clone)]
@@ -48,15 +46,18 @@ where
             }
             <div class="konnekt-session-lobby__activities">
                 <h2 class="konnekt-session-lobby__activities-title">{"Activities"}</h2>
-                <ul class="konnekt-session-lobby__activities-list">
+                <div class="konnekt-session-lobby__activities-list">
                     {for props.lobby.activities.iter().map(|activity| {
+                        let activity = activity.clone();
                         html! {
-                            <li class="konnekt-session-lobby__activities-list-item">
-                                {activity.name().to_string()}
-                            </li>
+                            <ActivityComp<A>
+                                {activity}
+                                role={props.role}
+                                on_command={props.on_command.clone()}
+                            />
                         }
                     })}
-                </ul>
+                </div>
             </div>
         </div>
     }

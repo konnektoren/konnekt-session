@@ -137,3 +137,63 @@ body {
 .konnekt-session-activity-catalog__item:active {
     transform: translateY(0);
 }
+
+.konnekt-session-activity {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px;
+    margin-bottom: 10px;
+    border-radius: 5px;
+    background-color: #fff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.konnekt-session-activity.not-started {
+    border-left: 4px solid #ffd700;
+}
+
+.konnekt-session-activity.in-progress {
+    border-left: 4px solid #4caf50;
+}
+
+.konnekt-session-activity.done {
+    border-left: 4px solid #2196f3;
+}
+
+.konnekt-session-activity__content {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.konnekt-session-activity__name {
+    font-weight: bold;
+    font-size: 1.1rem;
+}
+
+.konnekt-session-activity__status {
+    font-size: 0.9rem;
+    color: #666;
+}
+
+.konnekt-session-activity__start-button {
+    padding: 8px 16px;
+    background-color: #4caf50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.konnekt-session-activity__start-button:hover {
+    background-color: #45a049;
+}
+
+.konnekt-session-lobby__activities-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 15px;
+}
