@@ -10,43 +10,32 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
+use yew::Callback;
+use yew::UseStateHandle;
 
 type WebSocketSender = futures::stream::SplitSink<WebSocket, Message>;
 
+#[derive(Clone)]
 pub struct WebSocketLobbyCommandHandler<P: PlayerData, A: ActivityData> {
     lobby_id: Uuid,
     local_handler: LocalLobbyCommandHandler<P>,
     websocket_url: String,
-    lobby: Rc<RefCell<Lobby<P, A>>>,
+    lobby: UseStateHandle<RefCell<Lobby<P, A>>>,
     sender: Rc<RefCell<Option<WebSocketSender>>>,
-}
-
-impl<P, A> Clone for WebSocketLobbyCommandHandler<P, A>
-where
-    P: PlayerData,
-    A: ActivityData,
-{
-    fn clone(&self) -> Self {
-        Self {
-            lobby_id: self.lobby_id,
-            local_handler: self.local_handler.clone(),
-            websocket_url: self.websocket_url.clone(),
-            lobby: self.lobby.clone(),
-            sender: self.sender.clone(),
-        }
-    }
+    update_ui: Callback<(Lobby<P, A>)>,
 }
 
 impl<P, A> WebSocketLobbyCommandHandler<P, A>
 where
-    P: PlayerData + Serialize + for<'de> Deserialize<'de> + 'static,
-    A: ActivityData + 'static,
+    P: PlayerData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
+    A: ActivityData + 'static + std::fmt::Debug,
 {
     pub fn new(
         websocket_url: &str,
         lobby_id: Uuid,
         local_handler: LocalLobbyCommandHandler<P>,
-        lobby: Rc<RefCell<Lobby<P, A>>>,
+        lobby: UseStateHandle<RefCell<Lobby<P, A>>>,
+        update_ui: Callback<(Lobby<P, A>)>,
     ) -> Self {
         let handler = Self {
             lobby_id,
@@ -54,6 +43,7 @@ where
             websocket_url: websocket_url.to_string(),
             lobby,
             sender: Rc::new(RefCell::new(None)),
+            update_ui,
         };
         handler.connect();
         handler
@@ -80,25 +70,31 @@ where
         });
 
         // Handle incoming messages
-        let lobby = self.lobby.clone();
-        let local_handler = self.local_handler.clone();
+        let handler = self.clone();
         spawn_local(async move {
             while let Some(msg) = read.next().await {
                 if let Ok(Message::Text(text)) = msg {
                     if let Ok(command_wrapper) = serde_json::from_str::<LobbyCommandWrapper>(&text)
                     {
-                        log::debug!("Received command: {:?}", command_wrapper);
-                        let mut lobby = lobby.borrow_mut();
-                        if let Err(e) =
-                            local_handler.handle_command(&mut lobby, command_wrapper.command)
-                        {
-                            log::error!("Error handling command: {:?}", e);
-                        }
+                        handler.handle_incoming_message(command_wrapper);
                     }
                 }
             }
-            gloo::console::log!("WebSocket connection closed");
+            log::info!("WebSocket connection closed");
         });
+    }
+
+    fn handle_incoming_message(&self, command_wrapper: LobbyCommandWrapper) {
+        let mut lobby_borrow = self.lobby.borrow_mut();
+
+        if let Err(e) = self
+            .local_handler
+            .handle_command(&mut *lobby_borrow, command_wrapper.command)
+        {
+            log::error!("Error handling command: {:?}", e);
+        } else {
+            self.update_ui.emit((&*lobby_borrow).clone());
+        }
     }
 
     fn send_command(&self, command: LobbyCommand) -> Result<(), CommandError> {
@@ -133,8 +129,8 @@ where
 
 impl<P, A> LobbyCommandHandler<P, A> for WebSocketLobbyCommandHandler<P, A>
 where
-    P: PlayerData + Serialize + for<'de> Deserialize<'de> + 'static,
-    A: ActivityData + 'static,
+    P: PlayerData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
+    A: ActivityData + 'static + std::fmt::Debug,
 {
     fn handle_command(
         &self,
@@ -142,6 +138,13 @@ where
         command: LobbyCommand,
     ) -> Result<(), CommandError> {
         // If the sender is None, try to reconnect
+        if self.sender.borrow().is_none() {
+            self.reconnect();
+        }
+        self.send_command(command)
+    }
+
+    fn send_command(&self, command: LobbyCommand) -> Result<(), CommandError> {
         if self.sender.borrow().is_none() {
             self.reconnect();
         }

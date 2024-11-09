@@ -3,10 +3,12 @@ use crate::config::Config;
 use crate::example::{Challenge, ChallengeComp, PlayerProfile};
 use crate::handler::{LocalLobbyCommandHandler, WebSocketLobbyCommandHandler};
 use crate::model::{
-    Activity, ActivityStatus, CommandError, Lobby, LobbyCommand, LobbyCommandHandler, Player, Role,
+    Activity, ActivityData, ActivityStatus, CommandError, Lobby, LobbyCommand, LobbyCommandHandler,
+    Player, PlayerData, Role,
 };
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::hash::Hash;
+use std::hash::Hasher;
 use uuid::Uuid;
 use web_sys::Event;
 use web_sys::HtmlSelectElement;
@@ -45,40 +47,45 @@ fn init_lobby() -> Lobby<PlayerProfile, Challenge> {
     lobby
 }
 
+fn hash_lobby<P: PlayerData + Hash, A: ActivityData + Hash>(lobby: &Lobby<P, A>) -> u64 {
+    let mut hasher = std::hash::DefaultHasher::new();
+    lobby.hash(&mut hasher);
+    hasher.finish()
+}
+
 #[function_component(App)]
 pub fn app() -> Html {
     let config = use_state(|| Config::default());
     let role = use_state(|| Role::Admin);
     let lobby_id = use_state(|| Uuid::new_v4());
-    let lobby = use_state(|| Rc::new(RefCell::new(init_lobby())));
-
-    let event_counter = use_state(|| 0);
-
-    // Create local handler for deserializing player data
-    let local_handler = LocalLobbyCommandHandler::<PlayerProfile>::new(|data: &str| {
-        serde_json::from_str(data).expect("Failed to deserialize player data")
-    });
+    let lobby = use_state(|| RefCell::new(init_lobby()));
+    let last_event = use_state(|| 0);
 
     // Create WebSocket handler
     let websocket_handler = use_state(|| {
+        let local_handler = LocalLobbyCommandHandler::<PlayerProfile>::new(|data: &str| {
+            serde_json::from_str(data).expect("Failed to deserialize player data")
+        });
+
+        let update_ui = Callback::from(move |lobby: Lobby<PlayerProfile, Challenge>| {
+            last_event.set(hash_lobby(&lobby));
+        });
+
         WebSocketLobbyCommandHandler::new(
             &config.websocket_url,
             *lobby_id,
             local_handler.clone(),
-            (*lobby).clone(),
+            lobby.clone(),
+            update_ui,
         )
     });
 
     let on_command = {
-        let handler = (*websocket_handler).clone();
-        let lobby = (*lobby).clone();
-        let event_counter = event_counter.clone();
+        let handler = websocket_handler;
         Callback::from(move |command: LobbyCommand| {
-            if let Err(err) = handler.handle_command(&mut lobby.borrow_mut(), command) {
+            if let Err(err) = handler.send_command(command) {
                 log::info!("Command error: {:?}", err);
             }
-
-            event_counter.set(*event_counter + 1);
         })
     };
 
@@ -103,10 +110,7 @@ pub fn app() -> Html {
     };
 
     // Get current lobby state
-    let current_lobby = {
-        let lobby_ref = lobby.borrow();
-        (*lobby_ref).clone()
-    };
+    let current_lobby = (&*lobby.borrow()).clone();
 
     html! {
         <div>

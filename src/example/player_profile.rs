@@ -1,7 +1,7 @@
 use crate::model::{Identifiable, Named, PlayerData};
 use serde::{Deserialize, Serialize};
 
-#[derive(PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Hash, Serialize, Deserialize)]
 pub struct PlayerProfile {
     pub id: String,
     pub name: String,

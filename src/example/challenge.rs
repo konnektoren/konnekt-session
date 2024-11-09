@@ -1,6 +1,6 @@
 use crate::model::{ActivityData, Identifiable, Named};
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug, Hash)]
 pub struct Challenge {
     pub id: String,
     pub name: String,

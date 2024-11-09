@@ -10,4 +10,6 @@ where
         lobby: &mut Lobby<P, A>,
         command: LobbyCommand,
     ) -> Result<(), CommandError>;
+
+    fn send_command(&self, command: LobbyCommand) -> Result<(), CommandError>;
 }

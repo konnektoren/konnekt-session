@@ -81,4 +81,9 @@ where
             }
         }
     }
+
+    fn send_command(&self, _command: LobbyCommand) -> Result<(), CommandError> {
+        // Implementation needed when you have to send the command to a remote server
+        Ok(())
+    }
 }
