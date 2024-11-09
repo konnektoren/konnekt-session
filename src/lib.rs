@@ -1,6 +1,7 @@
 #[cfg(feature = "yew")]
 pub mod components;
 pub mod config;
+pub mod handler;
 pub mod model;
 
 #[cfg(feature = "server")]
@@ -13,6 +14,9 @@ pub mod prelude {
     #[cfg(feature = "yew")]
     pub use crate::components::*;
     pub use crate::config::Config;
+    pub use crate::handler::LocalLobbyCommandHandler;
+    #[cfg(feature = "yew")]
+    pub use crate::handler::WebSocketLobbyCommandHandler;
     pub use crate::model::Activity;
     pub use crate::model::ActivityCatalog;
     pub use crate::model::ActivityData;
@@ -22,7 +26,6 @@ pub mod prelude {
     pub use crate::model::Lobby;
     pub use crate::model::LobbyCommand;
     pub use crate::model::LobbyCommandHandler;
-    pub use crate::model::LocalLobbyCommandHandler;
     pub use crate::model::Named;
     pub use crate::model::Player;
     pub use crate::model::PlayerData;

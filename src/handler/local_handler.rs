@@ -1,9 +1,7 @@
 use crate::model::{
-    ActivityData, CommandError, Lobby, LobbyCommand, LobbyCommandHandler, PlayerData,
+    ActivityData, CommandError, Lobby, LobbyCommand, LobbyCommandHandler, Player, PlayerData,
 };
 use std::sync::Arc;
-
-use super::Player;
 
 #[derive(Clone)]
 pub struct LocalLobbyCommandHandler<P: PlayerData> {
