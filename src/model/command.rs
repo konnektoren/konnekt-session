@@ -11,6 +11,11 @@ pub enum LobbyCommand {
         data: String,
         password: Option<String>,
     },
+    ParticipantInfo {
+        player_id: Uuid,
+        role: Role,
+        data: String,
+    },
     SelectActivity {
         activity_id: String,
     },
@@ -30,7 +35,7 @@ pub enum LobbyCommand {
         activity_id: String,
         status: ActivityStatus,
     },
-    UpdateConnection {
+    UpdatePlayerId {
         player_id: Uuid,
     },
 }

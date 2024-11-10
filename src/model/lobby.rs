@@ -1,5 +1,5 @@
 use crate::model::{
-    Activity, ActivityCatalog, ActivityData, ActivityStatus, Player, PlayerData, Role,
+    Activity, ActivityCatalog, ActivityData, ActivityStatus, Identifiable, Player, PlayerData, Role,
 };
 use uuid::Uuid;
 
@@ -10,6 +10,7 @@ where
     A: ActivityData,
 {
     pub id: Uuid,
+    pub player_id: Uuid,
     pub participants: Vec<Player<P>>,
     pub catalog: ActivityCatalog<A>,
     pub activities: Vec<Activity<A>>,
@@ -24,6 +25,7 @@ where
     pub fn new(admin: Player<P>, password: Option<String>) -> Self {
         Lobby {
             id: Uuid::new_v4(),
+            player_id: admin.id,
             participants: vec![admin],
             catalog: ActivityCatalog::new(),
             activities: Vec::new(),
@@ -37,11 +39,45 @@ where
                 return Err("Invalid password".to_string());
             }
         }
-        self.participants.push(player);
+        self.add_participant(player);
         Ok(())
     }
 
+    pub fn update_player_id(&mut self, player_id: &Uuid) {
+        if let Some(player) = self
+            .participants
+            .iter_mut()
+            .find(|p| p.id == self.player_id)
+        {
+            log::debug!("Updating player ID from: {:?}", player.id);
+            player.id = *player_id;
+        }
+
+        log::debug!("Updating player ID to: {:?}", player_id);
+        self.player_id = *player_id;
+    }
+
     pub fn add_participant(&mut self, participant: Player<P>) {
+        log::debug!("Adding participant: {:?}", participant.id);
+        log::debug!(
+            "Current participants: {:?}",
+            self.participants
+                .iter()
+                .map(|p| p.id.to_string())
+                .collect::<Vec<String>>()
+        );
+
+        for p in &self.participants {
+            log::debug!("Existing participant ID: {:?}", p.id);
+        }
+        log::debug!("New participant ID: {:?}", participant.id);
+
+        if self.participants.iter().any(|p| p.id == participant.id) {
+            log::debug!("Participant already in lobby");
+            return;
+        }
+
+        log::debug!("Participant not found, adding");
         self.participants.push(participant);
     }
 
@@ -49,11 +85,15 @@ where
         self.catalog.add_activity(activity);
     }
 
-    pub fn get_admin(&self) -> &Player<P> {
+    pub fn get_admin(&self) -> Option<&Player<P>> {
         self.participants
             .iter()
             .find(|player| player.role == Role::Admin)
-            .unwrap()
+    }
+
+    pub fn is_admin(&self) -> bool {
+        self.get_admin()
+            .map_or(false, |admin| admin.id == self.player_id)
     }
 
     pub fn get_participants(&self) -> &Vec<Player<P>> {

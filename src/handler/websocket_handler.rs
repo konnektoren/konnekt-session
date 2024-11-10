@@ -107,15 +107,27 @@ where
     }
 
     fn handle_incoming_message(&self, command_wrapper: LobbyCommandWrapper) {
-        let mut lobby_borrow = self.lobby.borrow_mut();
-
         match command_wrapper.command {
-            LobbyCommand::UpdateConnection { player_id } => {
+            LobbyCommand::UpdatePlayerId { player_id } => {
+                let mut lobby_borrow = self.lobby.borrow_mut();
                 self.player.borrow_mut().id = player_id;
+                if let Err(e) = self
+                    .local_handler
+                    .handle_command(&mut *lobby_borrow, command_wrapper.command)
+                {
+                    log::error!("Error handling command: {:?}", e);
+                } else {
+                    self.update_ui.emit((&*lobby_borrow).clone());
+                }
+
                 self.join_lobby();
                 log::info!("Player ID updated: {}", player_id);
             }
-            _ => {
+            LobbyCommand::Join { .. } => {
+                if self.lobby.borrow().is_admin() {
+                    self.send_lobby_state();
+                }
+                let mut lobby_borrow = self.lobby.borrow_mut();
                 if let Err(e) = self
                     .local_handler
                     .handle_command(&mut *lobby_borrow, command_wrapper.command)
@@ -125,6 +137,29 @@ where
                     self.update_ui.emit((&*lobby_borrow).clone());
                 }
             }
+            _ => {
+                let mut lobby_borrow = self.lobby.borrow_mut();
+                if let Err(e) = self
+                    .local_handler
+                    .handle_command(&mut *lobby_borrow, command_wrapper.command)
+                {
+                    log::error!("Error handling command: {:?}", e);
+                } else {
+                    self.update_ui.emit((&*lobby_borrow).clone());
+                }
+            }
+        }
+    }
+
+    fn send_lobby_state(&self) {
+        log::info!("Sending lobby state");
+        for participant in self.lobby.borrow().participants.iter() {
+            let command = LobbyCommand::ParticipantInfo {
+                player_id: participant.id,
+                role: participant.role,
+                data: serde_json::to_string(&participant.data).unwrap(),
+            };
+            self.send_command(command).unwrap();
         }
     }
 

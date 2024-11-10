@@ -32,15 +32,27 @@ where
         match command {
             LobbyCommand::Join {
                 player_id,
-                lobby_id,
                 role,
                 data,
                 password,
+                ..
             } => {
                 let data = (self.player_data_deserializer)(&data);
-                let player: Player<P> = Player::new(role, data);
-
+                let mut player: Player<P> = Player::new(role, data);
+                player.id = player_id;
                 lobby.join(player, password).unwrap();
+
+                Ok(())
+            }
+            LobbyCommand::ParticipantInfo {
+                player_id,
+                role,
+                data,
+            } => {
+                let data = (self.player_data_deserializer)(&data);
+                let mut player: Player<P> = Player::new(role, data);
+                player.id = player_id;
+                lobby.add_participant(player);
                 Ok(())
             }
             LobbyCommand::SelectActivity { activity_id } => {
@@ -80,7 +92,10 @@ where
                     .ok_or(CommandError::ActivityNotFound(activity_id))?;
                 Ok(())
             }
-            LobbyCommand::UpdateConnection { .. } => Ok(()),
+            LobbyCommand::UpdatePlayerId { player_id } => {
+                lobby.update_player_id(&player_id);
+                Ok(())
+            }
         }
     }
 

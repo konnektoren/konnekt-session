@@ -18,27 +18,27 @@ fn init_lobby(
     player: Player<PlayerProfile>,
     password: Option<String>,
 ) -> Lobby<PlayerProfile, Challenge> {
-    let activity = Activity {
+    let activity1 = Activity {
+        id: "456".to_string(),
+        status: ActivityStatus::NotStarted,
+        data: Challenge {
+            id: "456".to_string(),
+            name: "Challenge 1".to_string(),
+        },
+    };
+
+    let activity2 = Activity {
         id: "789".to_string(),
         status: ActivityStatus::NotStarted,
         data: Challenge {
             id: "789".to_string(),
-            name: "Challenge".to_string(),
+            name: "Challenge 2".to_string(),
         },
     };
 
     let mut lobby = Lobby::<PlayerProfile, Challenge>::new(player, password);
-    lobby.add_activity(activity);
-
-    let participant = Player::new(
-        Role::Participant,
-        PlayerProfile {
-            id: "456".to_string(),
-            name: "Participant".to_string(),
-        },
-    );
-
-    lobby.add_participant(participant);
+    lobby.add_activity(activity1);
+    lobby.add_activity(activity2);
 
     lobby
 }

@@ -77,7 +77,12 @@ pub fn login_page(props: &LoginProps) -> Html {
                 name: (*username).clone(),
             };
 
-            let player = Player::new(*role, profile);
+            let role = match lobby_id.is_empty() {
+                true => Role::Admin,
+                false => (*role).clone(),
+            };
+
+            let player = Player::new(role, profile);
 
             let lobby_id = if lobby_id.is_empty() {
                 Uuid::new_v4().to_string()
@@ -85,7 +90,7 @@ pub fn login_page(props: &LoginProps) -> Html {
                 (*lobby_id).clone()
             };
 
-            on_login.emit((player, *role, lobby_id, (*password).clone()));
+            on_login.emit((player, role, lobby_id, (*password).clone()));
         })
     };
 

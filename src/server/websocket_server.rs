@@ -39,7 +39,7 @@ impl WebSocketServer {
             &LobbyCommandWrapper {
                 lobby_id,
                 password: None,
-                command: LobbyCommand::UpdateConnection { player_id },
+                command: LobbyCommand::UpdatePlayerId { player_id },
             },
             &connection,
         )
