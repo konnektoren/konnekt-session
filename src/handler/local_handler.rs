@@ -80,6 +80,7 @@ where
                     .ok_or(CommandError::ActivityNotFound(activity_id))?;
                 Ok(())
             }
+            LobbyCommand::UpdateConnection { .. } => Ok(()),
         }
     }
 

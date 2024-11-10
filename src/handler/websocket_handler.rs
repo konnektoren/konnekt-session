@@ -1,7 +1,7 @@
 use crate::handler::LocalLobbyCommandHandler;
 use crate::model::{
     ActivityData, CommandError, Lobby, LobbyCommand, LobbyCommandHandler, LobbyCommandWrapper,
-    PlayerData,
+    Player, PlayerData,
 };
 use futures::{SinkExt, StreamExt};
 use gloo::net::websocket::{futures::WebSocket, Message};
@@ -18,6 +18,8 @@ type WebSocketSender = futures::stream::SplitSink<WebSocket, Message>;
 #[derive(Clone)]
 pub struct WebSocketLobbyCommandHandler<P: PlayerData, A: ActivityData> {
     lobby_id: Uuid,
+    player: UseStateHandle<RefCell<Player<P>>>,
+    password: Option<String>,
     local_handler: LocalLobbyCommandHandler<P>,
     websocket_url: String,
     lobby: UseStateHandle<RefCell<Lobby<P, A>>>,
@@ -33,12 +35,16 @@ where
     pub fn new(
         websocket_url: &str,
         lobby_id: Uuid,
+        player: UseStateHandle<RefCell<Player<P>>>,
+        password: Option<String>,
         local_handler: LocalLobbyCommandHandler<P>,
         lobby: UseStateHandle<RefCell<Lobby<P, A>>>,
         update_ui: Callback<Lobby<P, A>>,
     ) -> Self {
         let handler = Self {
             lobby_id,
+            player,
+            password,
             local_handler,
             websocket_url: websocket_url.to_string(),
             lobby,
@@ -49,6 +55,34 @@ where
         handler
     }
 
+    fn join_lobby(&self) {
+        let sender = self.sender.clone();
+        let lobby_id = self.lobby_id;
+        let player = self.player.borrow().clone();
+
+        let join_command = LobbyCommandWrapper {
+            lobby_id,
+            password: self.password.clone(),
+            command: LobbyCommand::Join {
+                player_id: player.id,
+                role: player.role,
+                lobby_id,
+                data: serde_json::to_string(&player.data).unwrap(),
+                password: None,
+            },
+        };
+
+        spawn_local(async move {
+            if let Some(write) = sender.borrow_mut().as_mut() {
+                let init_message = serde_json::to_string(&join_command).unwrap();
+                write
+                    .send(Message::Text(init_message))
+                    .await
+                    .expect("Failed to send lobby ID");
+            }
+        });
+    }
+
     fn connect(&self) {
         let ws = WebSocket::open(&self.websocket_url).expect("Failed to connect to WebSocket");
         let (write, mut read) = ws.split();
@@ -56,24 +90,12 @@ where
         // Store the sender
         *self.sender.borrow_mut() = Some(write);
 
-        // Send initial lobby ID message
-        let sender = self.sender.clone();
-        let lobby_id = self.lobby_id;
-        spawn_local(async move {
-            if let Some(write) = sender.borrow_mut().as_mut() {
-                let init_message = serde_json::to_string(&lobby_id).unwrap();
-                write
-                    .send(Message::Text(init_message))
-                    .await
-                    .expect("Failed to send lobby ID");
-            }
-        });
-
         // Handle incoming messages
         let handler = self.clone();
         spawn_local(async move {
             while let Some(msg) = read.next().await {
                 if let Ok(Message::Text(text)) = msg {
+                    log::debug!("Received message: {:?}", text);
                     if let Ok(command_wrapper) = serde_json::from_str::<LobbyCommandWrapper>(&text)
                     {
                         handler.handle_incoming_message(command_wrapper);
@@ -87,13 +109,22 @@ where
     fn handle_incoming_message(&self, command_wrapper: LobbyCommandWrapper) {
         let mut lobby_borrow = self.lobby.borrow_mut();
 
-        if let Err(e) = self
-            .local_handler
-            .handle_command(&mut *lobby_borrow, command_wrapper.command)
-        {
-            log::error!("Error handling command: {:?}", e);
-        } else {
-            self.update_ui.emit((&*lobby_borrow).clone());
+        match command_wrapper.command {
+            LobbyCommand::UpdateConnection { player_id } => {
+                self.player.borrow_mut().id = player_id;
+                self.join_lobby();
+                log::info!("Player ID updated: {}", player_id);
+            }
+            _ => {
+                if let Err(e) = self
+                    .local_handler
+                    .handle_command(&mut *lobby_borrow, command_wrapper.command)
+                {
+                    log::error!("Error handling command: {:?}", e);
+                } else {
+                    self.update_ui.emit((&*lobby_borrow).clone());
+                }
+            }
         }
     }
 

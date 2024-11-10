@@ -30,6 +30,9 @@ pub enum LobbyCommand {
         activity_id: String,
         status: ActivityStatus,
     },
+    UpdateConnection {
+        player_id: Uuid,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
