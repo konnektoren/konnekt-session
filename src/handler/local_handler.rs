@@ -32,6 +32,7 @@ where
         match command {
             LobbyCommand::Join {
                 player_id,
+                lobby_id,
                 role,
                 data,
                 password,

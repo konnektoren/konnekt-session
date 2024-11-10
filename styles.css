@@ -220,6 +220,79 @@ body {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
+/* Login Component Styles */
+.konnekt-session-login {
+    background-color: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    padding: 2rem;
+    margin-bottom: 2rem;
+    width: 100%;
+    max-width: 400px;
+}
+
+.konnekt-session-login__title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #1a237e;
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+
+.konnekt-session-login__form {
+    display: flex;
+    flex-direction: column;
+}
+
+.konnekt-session-login__label {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #2d3748;
+    margin-bottom: 0.5rem;
+}
+
+.konnekt-session-login__input {
+    padding: 0.75rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    font-size: 1rem;
+    color: #2d3748;
+    transition: border-color 0.2s ease;
+}
+
+.konnekt-session-login__input:focus {
+    border-color: #1a237e;
+    outline: none;
+}
+
+.konnekt-session-login__select {
+    padding: 0.75rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    font-size: 1rem;
+    color: #2d3748;
+    transition: border-color 0.2s ease;
+}
+
+.konnekt-session-login__select:focus {
+    border-color: #1a237e;
+    outline: none;
+}
+
+.konnekt-session-login__button {
+    @extend .button-base;
+    background-color: #1a237e;
+    color: white;
+    margin-top: 1rem;
+}
+
+.konnekt-session-login__button:hover {
+    background-color: #3949ab;
+    transform: translateY(-2px);
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     #app {

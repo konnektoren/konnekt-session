@@ -4,7 +4,6 @@ use std::net::SocketAddr;
 
 use konnekt_session::server::WebSocketListener;
 use konnekt_session::server::WebSocketServerImpl;
-use tracing::debug;
 use tracing_subscriber::fmt;
 use tracing_subscriber::EnvFilter;
 

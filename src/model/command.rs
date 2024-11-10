@@ -6,6 +6,7 @@ use uuid::Uuid;
 pub enum LobbyCommand {
     Join {
         player_id: Uuid,
+        lobby_id: Uuid,
         role: Role,
         data: String,
         password: Option<String>,

@@ -1,6 +1,6 @@
 use crate::components::{LobbyComp, RunningActivityComp};
 use crate::config::Config;
-use crate::example::{Challenge, ChallengeComp, PlayerProfile};
+use crate::example::{Challenge, ChallengeComp, LoginCallback, LoginComp, PlayerProfile};
 use crate::handler::{LocalLobbyCommandHandler, WebSocketLobbyCommandHandler};
 use crate::model::{
     Activity, ActivityData, ActivityStatus, CommandError, Lobby, LobbyCommand, LobbyCommandHandler,
@@ -9,10 +9,18 @@ use crate::model::{
 use std::cell::RefCell;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::str::FromStr;
 use uuid::Uuid;
 use web_sys::Event;
 use web_sys::HtmlSelectElement;
 use yew::prelude::*;
+
+#[derive(Debug, Default)]
+enum AppState {
+    #[default]
+    Login,
+    Lobby,
+}
 
 fn init_lobby() -> Lobby<PlayerProfile, Challenge> {
     let player_profile = PlayerProfile {
@@ -55,11 +63,14 @@ fn hash_lobby<P: PlayerData + Hash, A: ActivityData + Hash>(lobby: &Lobby<P, A>)
 
 #[function_component(App)]
 pub fn app() -> Html {
+    let state = use_state(|| AppState::Login);
     let config = use_state(|| Config::default());
     let role = use_state(|| Role::Admin);
     let lobby_id = use_state(|| Uuid::new_v4());
     let lobby = use_state(|| RefCell::new(init_lobby()));
     let last_event = use_state(|| 0);
+    let password = use_state(|| None::<String>);
+    let player = use_state(|| None::<Player<PlayerProfile>>);
 
     // Create WebSocket handler
     let websocket_handler = use_state(|| {
@@ -81,7 +92,7 @@ pub fn app() -> Html {
     });
 
     let on_command = {
-        let handler = websocket_handler;
+        let handler = websocket_handler.clone();
         Callback::from(move |command: LobbyCommand| {
             if let Err(err) = handler.send_command(command) {
                 log::info!("Command error: {:?}", err);
@@ -109,27 +120,68 @@ pub fn app() -> Html {
         }
     };
 
+    let on_login = {
+        let state = state.clone();
+        let role_state = role.clone();
+        let lobby_id_state = lobby_id.clone();
+        let password_state = password.clone();
+        let player_state = player.clone();
+        let websocket_handler = websocket_handler.clone();
+        Callback::from(move |(player, role, lobby_id, password): LoginCallback| {
+            player_state.set(Some(player.clone()));
+            role_state.set(role);
+            let lobby_id = Uuid::from_str(&lobby_id).unwrap();
+            lobby_id_state.set(lobby_id);
+            password_state.set(password.clone());
+            state.set(AppState::Lobby);
+
+            let command = LobbyCommand::Join {
+                player_id: player.id.clone(),
+                lobby_id,
+                role,
+                data: serde_json::to_string(&player.data).unwrap(),
+                password,
+            };
+
+            if let Err(err) = websocket_handler.send_command(command) {
+                log::info!("Command error: {:?}", err);
+            }
+        })
+    };
+
     // Get current lobby state
     let current_lobby = (&*lobby.borrow()).clone();
 
-    html! {
-        <div>
-            <div>{"Connected to lobby: "}{lobby_id.to_string()}</div>
-            <select onchange={on_change}>
-                <option value="Admin">{"Admin"}</option>
-                <option value="Participant">{"Participant"}</option>
-            </select>
-            <LobbyComp<PlayerProfile, Challenge>
-                lobby={current_lobby.clone()}
-                role={*role}
-                on_command={on_command.clone()}
-                {on_error}
-            />
-            <RunningActivityComp<Challenge, ChallengeComp>
-                activities={current_lobby.activities.clone()}
-                role={*role}
-                on_command={on_command}
-            />
-        </div>
+    match *state {
+        AppState::Login => {
+            html! {
+                <LoginComp
+                    on_login={on_login}
+                />
+            }
+        }
+        AppState::Lobby => {
+            html! {
+                <div>
+                    <div>{"Connected to lobby: "}{lobby_id.to_string()}</div>
+                    <select onchange={on_change} value={role.to_string()}>
+                        <option value="Admin">{"Admin"}</option>
+                        <option value="Participant">{"Participant"}</option>
+                        <option value="Observer">{"Observer"}</option>
+                    </select>
+                    <LobbyComp<PlayerProfile, Challenge>
+                        lobby={current_lobby.clone()}
+                        role={*role}
+                        on_command={on_command.clone()}
+                        {on_error}
+                    />
+                    <RunningActivityComp<Challenge, ChallengeComp>
+                        activities={current_lobby.activities.clone()}
+                        role={*role}
+                        on_command={on_command}
+                    />
+                </div>
+            }
+        }
     }
 }
