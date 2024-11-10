@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct Connection {
-    pub sender: UnboundedSender<Message>,
     pub player_id: Uuid,
+    pub sender: UnboundedSender<Message>,
     pub lobby_id: Uuid,
     pub role: Role,
 }

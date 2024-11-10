@@ -49,7 +49,9 @@ impl WebSocketListener {
                             role,
                         };
 
-                        server.add_connection(lobby_id, player_id, connection).await;
+                        server.add_connection(connection).await;
+
+                        // Send a welcome message to the client with connection ID
 
                         // Spawn a task to handle outgoing messages to the client
                         tokio::spawn(async move {
@@ -65,6 +67,8 @@ impl WebSocketListener {
                         while let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
                             match serde_json::from_str::<LobbyCommandWrapper>(&text) {
                                 Ok(command_wrapper) => {
+                                    server.handle_command(&command_wrapper).await;
+
                                     server
                                         .broadcast_to_lobby(
                                             command_wrapper.lobby_id,
