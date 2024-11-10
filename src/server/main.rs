@@ -1,9 +1,9 @@
 #![cfg(feature = "server")]
 
-use std::net::SocketAddr;
-
 use konnekt_session::server::WebSocketListener;
 use konnekt_session::server::WebSocketServerImpl;
+use std::net::SocketAddr;
+use tokio::net::TcpListener;
 use tracing_subscriber::fmt;
 use tracing_subscriber::EnvFilter;
 
@@ -23,7 +23,10 @@ pub async fn main() {
         .init();
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    let server = WebSocketServerImpl::new();
-    let listener = WebSocketListener::new(server, addr);
-    listener.run().await;
+    let listener = TcpListener::bind(&addr)
+        .await
+        .expect("Failed to bind to address");
+    let websocket_server = WebSocketServerImpl::new();
+    let websocket_listener = WebSocketListener::new(websocket_server, listener);
+    websocket_listener.run().await;
 }

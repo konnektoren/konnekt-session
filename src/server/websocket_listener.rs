@@ -1,7 +1,6 @@
 use crate::model::{LobbyCommandWrapper, Role};
 use crate::server::{websocket_server::WebSocketServer, Connection};
 use futures::{SinkExt, StreamExt};
-use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
@@ -9,24 +8,19 @@ use uuid::Uuid;
 
 pub struct WebSocketListener {
     server: WebSocketServer,
-    address: SocketAddr,
+    listener: TcpListener,
 }
 
 impl WebSocketListener {
-    pub fn new(server: WebSocketServer, address: SocketAddr) -> Self {
-        WebSocketListener { server, address }
+    pub fn new(server: WebSocketServer, listener: TcpListener) -> Self {
+        WebSocketListener { server, listener }
     }
 
     pub async fn run(&self) {
-        // Bind TCP listener to the specified address
-        let listener = TcpListener::bind(&self.address)
-            .await
-            .expect("Failed to bind to address");
-
-        log::info!("WebSocket server listening on ws://{}", self.address);
+        log::info!("WebSocket server listening");
 
         // Accept incoming connections
-        while let Ok((stream, _)) = listener.accept().await {
+        while let Ok((stream, _)) = self.listener.accept().await {
             let server = self.server.clone();
 
             // Spawn a new task to handle each connection
