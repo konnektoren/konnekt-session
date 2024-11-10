@@ -1,6 +1,6 @@
 use crate::model::Role;
+use axum::extract::ws::Message;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
 #[derive(Debug)]

@@ -1,9 +1,9 @@
 use crate::model::{LobbyCommand, LobbyCommandWrapper};
 use crate::server::Connection;
+use axum::extract::ws::Message;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
 #[derive(Clone)]
