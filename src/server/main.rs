@@ -1,8 +1,9 @@
 #![cfg(feature = "server")]
 
 use axum::Router;
-use konnekt_session::server::{create_session_route, WebSocketServer};
+use konnekt_session::server::{create_session_route, MemoryStorage, WebSocketServer};
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing_subscriber::fmt;
 use tracing_subscriber::EnvFilter;
@@ -27,9 +28,10 @@ pub async fn main() {
         .await
         .expect("Failed to bind to address");
 
-    let websocket_server = WebSocketServer::new();
+    let memory_storage = Arc::new(MemoryStorage::new());
+    let websocket_server = WebSocketServer::new(memory_storage.clone(), memory_storage.clone());
 
-    let app = Router::new().nest("/session", create_session_route(websocket_server));
+    let app = Router::new().nest("/", create_session_route(websocket_server));
 
     log::info!("Server running at http://{}", addr);
 

@@ -524,7 +524,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen 0.5.0",
  "serde_urlencoded",
- "thiserror",
+ "thiserror 1.0.68",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -541,7 +541,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen 0.6.5",
  "serde_urlencoded",
- "thiserror",
+ "thiserror 1.0.68",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -561,7 +561,7 @@ dependencies = [
  "pin-project",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.68",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -582,7 +582,7 @@ dependencies = [
  "pin-project",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.68",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -603,7 +603,7 @@ dependencies = [
  "pin-project",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.68",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -624,7 +624,7 @@ dependencies = [
  "pin-project",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.68",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -660,7 +660,7 @@ dependencies = [
  "js-sys",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.68",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -675,7 +675,7 @@ dependencies = [
  "js-sys",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.68",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -756,7 +756,7 @@ dependencies = [
  "js-sys",
  "pinned",
  "serde",
- "thiserror",
+ "thiserror 1.0.68",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -775,7 +775,7 @@ dependencies = [
  "js-sys",
  "pinned",
  "serde",
- "thiserror",
+ "thiserror 1.0.68",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -946,6 +946,7 @@ dependencies = [
 name = "konnekt-session"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "futures",
  "futures-util",
@@ -957,6 +958,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "thiserror 2.0.2",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1153,7 +1155,7 @@ checksum = "a829027bd95e54cfe13e3e258a1ae7b645960553fb82b75ff852c29688ee595b"
 dependencies = [
  "futures",
  "rustversion",
- "thiserror",
+ "thiserror 1.0.68",
 ]
 
 [[package]]
@@ -1520,7 +1522,16 @@ version = "1.0.68"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02dd99dc800bbb97186339685293e1cc5d9df1f8fae2d0aecd9ff1c77efea892"
 dependencies = [
- "thiserror-impl",
+ "thiserror-impl 1.0.68",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "037e29b009aa709f293b974da5cd33b15783c049e07f8435778ce8c4871525d8"
+dependencies = [
+ "thiserror-impl 2.0.2",
 ]
 
 [[package]]
@@ -1528,6 +1539,17 @@ name = "thiserror-impl"
 version = "1.0.68"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7c61ec9a6f64d2793d8a45faba21efbe3ced62a886d44c36a009b2b519b4c7e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea4778c7e8ff768bdb32a58a2349903859fe719a320300d7d4ce8636f19a1e69"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1717,7 +1739,7 @@ dependencies = [
  "log",
  "rand",
  "sha1",
- "thiserror",
+ "thiserror 1.0.68",
  "utf-8",
 ]
 
@@ -1988,7 +2010,7 @@ dependencies = [
  "rustversion",
  "serde",
  "slab",
- "thiserror",
+ "thiserror 1.0.68",
  "tokio",
  "tracing",
  "wasm-bindgen",

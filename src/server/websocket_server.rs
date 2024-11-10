@@ -1,22 +1,23 @@
 use crate::model::{LobbyCommand, LobbyCommandWrapper};
-use crate::server::Connection;
+use crate::server::{Connection, ConnectionRepository, LobbyRepository};
 use axum::extract::ws::Message;
-use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct WebSocketServer {
-    connections: Arc<RwLock<HashMap<Uuid, Connection>>>, // player_id -> Connection
-    lobbies: Arc<RwLock<HashMap<Uuid, Vec<Uuid>>>>,      // lobby_id -> Vec<player_id>
+    connection_repo: Arc<dyn ConnectionRepository>,
+    lobby_repo: Arc<dyn LobbyRepository>,
 }
 
 impl WebSocketServer {
-    pub fn new() -> Self {
+    pub fn new(
+        connection_repo: Arc<dyn ConnectionRepository>,
+        lobby_repo: Arc<dyn LobbyRepository>,
+    ) -> Self {
         WebSocketServer {
-            connections: Arc::new(RwLock::new(HashMap::new())),
-            lobbies: Arc::new(RwLock::new(HashMap::new())),
+            connection_repo,
+            lobby_repo,
         }
     }
 
@@ -24,12 +25,14 @@ impl WebSocketServer {
         let player_id: Uuid = connection.player_id.clone();
         let lobby_id: Uuid = connection.lobby_id.clone();
 
-        let mut lobbies = self.lobbies.write().await;
-        lobbies
-            .entry(lobby_id)
-            .or_insert_with(Vec::new)
-            .push(player_id.clone());
-
+        if let Err(e) = self
+            .lobby_repo
+            .add_player_to_lobby(lobby_id, player_id)
+            .await
+        {
+            log::error!("Failed to add player to lobby: {:?}", e);
+            return;
+        }
         log::info!("Player {} joined lobby {}", player_id, lobby_id);
 
         self.send_command(
@@ -41,8 +44,10 @@ impl WebSocketServer {
             &connection,
         )
         .await;
-        let mut connections = self.connections.write().await;
-        connections.insert(player_id, connection);
+
+        if let Err(e) = self.connection_repo.add_connection(connection).await {
+            log::error!("Failed to add connection: {:?}", e);
+        }
     }
 
     pub async fn handle_command(&self, command: &LobbyCommandWrapper) {
@@ -52,28 +57,32 @@ impl WebSocketServer {
                 lobby_id,
                 ..
             } => {
-                let mut lobbies = self.lobbies.write().await;
-                lobbies
-                    .entry(lobby_id)
-                    .or_insert_with(Vec::new)
-                    .push(player_id);
-
-                log::info!("Player {} joined lobby {}", player_id, lobby_id);
+                if let Err(e) = self
+                    .lobby_repo
+                    .add_player_to_lobby(lobby_id, player_id)
+                    .await
+                {
+                    log::error!("Failed to add player to lobby: {:?}", e);
+                } else {
+                    log::info!("Player {} joined lobby {}", player_id, lobby_id);
+                }
             }
             _ => {}
         }
     }
 
     pub async fn broadcast_to_lobby(&self, lobby_id: Uuid, command: &LobbyCommandWrapper) {
-        let lobbies = self.lobbies.read().await;
-        if let Some(player_ids) = lobbies.get(&lobby_id) {
-            let connections = self.connections.read().await;
-            for player_id in player_ids {
-                log::debug!("Sending message to player {}", player_id);
-                if let Some(connection) = connections.get(player_id) {
-                    self.send_command(command, connection).await;
+        match self.lobby_repo.get_players_in_lobby(lobby_id).await {
+            Ok(player_ids) => {
+                for player_id in player_ids {
+                    if let Ok(Some(connection)) =
+                        self.connection_repo.get_connection(player_id).await
+                    {
+                        self.send_command(command, &connection).await;
+                    }
                 }
             }
+            Err(e) => log::error!("Failed to get players in lobby: {:?}", e),
         }
     }
 
@@ -96,15 +105,16 @@ impl WebSocketServer {
     }
 
     pub async fn remove_connection(&self, lobby_id: Uuid, player_id: Uuid) {
-        let mut connections = self.connections.write().await;
-        connections.remove(&player_id);
+        if let Err(e) = self.connection_repo.remove_connection(player_id).await {
+            log::error!("Failed to remove connection: {:?}", e);
+        }
 
-        let mut lobbies = self.lobbies.write().await;
-        if let Some(player_ids) = lobbies.get_mut(&lobby_id) {
-            player_ids.retain(|&id| id != player_id);
-            if player_ids.is_empty() {
-                lobbies.remove(&lobby_id);
-            }
+        if let Err(e) = self
+            .lobby_repo
+            .remove_player_from_lobby(lobby_id, player_id)
+            .await
+        {
+            log::error!("Failed to remove player from lobby: {:?}", e);
         }
     }
 }
