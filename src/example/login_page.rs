@@ -9,12 +9,12 @@ type Password = Option<String>;
 pub type LoginCallback = (Player<PlayerProfile>, Role, LobbyId, Password);
 
 #[derive(Properties, PartialEq)]
-pub struct LoginCompProps {
+pub struct LoginProps {
     pub on_login: Callback<LoginCallback>,
 }
 
-#[function_component(LoginComp)]
-pub fn login_comp(props: &LoginCompProps) -> Html {
+#[function_component(LoginPage)]
+pub fn login_page(props: &LoginProps) -> Html {
     let username = use_state(|| "".to_string());
     let password = use_state(|| Password::default());
     let role = use_state(|| Role::Participant);
