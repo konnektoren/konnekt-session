@@ -71,9 +71,10 @@ pub fn lobby_page(props: &LobbyProps) -> Html {
 
     // Create WebSocket handler
     let websocket_handler = use_state(|| {
-        let local_handler = LocalLobbyCommandHandler::<PlayerProfile>::new(|data: &str| {
-            serde_json::from_str(data).expect("Failed to deserialize player data")
-        });
+        let local_handler = LocalLobbyCommandHandler::<PlayerProfile, Challenge>::new(
+            |data: &str| serde_json::from_str(data).expect("Failed to deserialize player data"),
+            |data: &str| serde_json::from_str(data).expect("Failed to deserialize challenge data"),
+        );
 
         let update_ui = Callback::from(move |lobby: Lobby<PlayerProfile, Challenge>| {
             last_event.set(hash_lobby(&lobby));

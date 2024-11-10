@@ -16,6 +16,11 @@ pub enum LobbyCommand {
         role: Role,
         data: String,
     },
+    ActivityInfo {
+        activity_id: String,
+        status: ActivityStatus,
+        data: String,
+    },
     SelectActivity {
         activity_id: String,
     },

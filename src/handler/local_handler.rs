@@ -1,25 +1,32 @@
 use crate::model::{
-    ActivityData, CommandError, Lobby, LobbyCommand, LobbyCommandHandler, Player, PlayerData,
+    Activity, ActivityData, CommandError, Lobby, LobbyCommand, LobbyCommandHandler, Player,
+    PlayerData,
 };
 use std::sync::Arc;
 
 #[derive(Clone)]
-pub struct LocalLobbyCommandHandler<P: PlayerData> {
+pub struct LocalLobbyCommandHandler<P: PlayerData, A: ActivityData> {
     player_data_deserializer: Arc<dyn Fn(&str) -> P + Send + Sync>,
+    activity_data_deserializer: Arc<dyn Fn(&str) -> A + Send + Sync>,
 }
 
-impl<P> LocalLobbyCommandHandler<P>
+impl<P, A> LocalLobbyCommandHandler<P, A>
 where
     P: PlayerData,
+    A: ActivityData,
 {
-    pub fn new(deserializer: impl Fn(&str) -> P + Send + Sync + 'static) -> Self {
+    pub fn new(
+        player_data_deserializer: impl Fn(&str) -> P + Send + Sync + 'static,
+        activity_data_deserializer: impl Fn(&str) -> A + Send + Sync + 'static,
+    ) -> Self {
         Self {
-            player_data_deserializer: Arc::new(deserializer),
+            player_data_deserializer: Arc::new(player_data_deserializer),
+            activity_data_deserializer: Arc::new(activity_data_deserializer),
         }
     }
 }
 
-impl<P, A> LobbyCommandHandler<P, A> for LocalLobbyCommandHandler<P>
+impl<P, A> LobbyCommandHandler<P, A> for LocalLobbyCommandHandler<P, A>
 where
     P: PlayerData,
     A: ActivityData,
@@ -53,6 +60,19 @@ where
                 let mut player: Player<P> = Player::new(role, data);
                 player.id = player_id;
                 lobby.add_participant(player);
+                Ok(())
+            }
+            LobbyCommand::ActivityInfo {
+                activity_id,
+                status,
+                data,
+            } => {
+                let data = (self.activity_data_deserializer)(&data);
+                lobby.add_activity(Activity {
+                    id: activity_id,
+                    status,
+                    data,
+                });
                 Ok(())
             }
             LobbyCommand::SelectActivity { activity_id } => {

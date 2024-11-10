@@ -20,7 +20,7 @@ pub struct WebSocketLobbyCommandHandler<P: PlayerData, A: ActivityData> {
     lobby_id: Uuid,
     player: UseStateHandle<RefCell<Player<P>>>,
     password: Option<String>,
-    local_handler: LocalLobbyCommandHandler<P>,
+    local_handler: LocalLobbyCommandHandler<P, A>,
     websocket_url: String,
     lobby: UseStateHandle<RefCell<Lobby<P, A>>>,
     sender: Rc<RefCell<Option<WebSocketSender>>>,
@@ -30,14 +30,14 @@ pub struct WebSocketLobbyCommandHandler<P: PlayerData, A: ActivityData> {
 impl<P, A> WebSocketLobbyCommandHandler<P, A>
 where
     P: PlayerData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
-    A: ActivityData + 'static + std::fmt::Debug,
+    A: ActivityData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
 {
     pub fn new(
         websocket_url: &str,
         lobby_id: Uuid,
         player: UseStateHandle<RefCell<Player<P>>>,
         password: Option<String>,
-        local_handler: LocalLobbyCommandHandler<P>,
+        local_handler: LocalLobbyCommandHandler<P, A>,
         lobby: UseStateHandle<RefCell<Lobby<P, A>>>,
         update_ui: Callback<Lobby<P, A>>,
     ) -> Self {
@@ -161,6 +161,14 @@ where
             };
             self.send_command(command).unwrap();
         }
+        for activity in self.lobby.borrow().activities.iter() {
+            let command = LobbyCommand::ActivityInfo {
+                activity_id: activity.id.clone(),
+                data: serde_json::to_string(&activity.data).unwrap(),
+                status: activity.status.clone(),
+            };
+            self.send_command(command).unwrap();
+        }
     }
 
     fn send_command(&self, command: LobbyCommand) -> Result<(), CommandError> {
@@ -196,7 +204,7 @@ where
 impl<P, A> LobbyCommandHandler<P, A> for WebSocketLobbyCommandHandler<P, A>
 where
     P: PlayerData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
-    A: ActivityData + 'static + std::fmt::Debug,
+    A: ActivityData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
 {
     fn handle_command(
         &self,

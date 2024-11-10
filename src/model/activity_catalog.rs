@@ -25,6 +25,9 @@ where
     }
 
     pub fn add_activity(&mut self, activity: Activity<T>) {
+        if self.activities.iter().any(|a| a.id == activity.id) {
+            return;
+        }
         self.activities.push(activity);
     }
 

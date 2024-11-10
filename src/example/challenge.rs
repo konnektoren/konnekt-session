@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use crate::model::{ActivityData, Identifiable, Named};
 
-#[derive(PartialEq, Clone, Debug, Hash)]
+#[derive(PartialEq, Clone, Debug, Hash, Serialize, Deserialize)]
 pub struct Challenge {
     pub id: String,
     pub name: String,
