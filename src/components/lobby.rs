@@ -35,28 +35,30 @@ where
     html! {
         <div class="konnekt-session-lobby">
             <h1 class="konnekt-session-lobby__title">{"Lobby"}</h1>
-            <div class="konnekt-session-lobby__players">
-                <PlayerListComp<P> players={props.lobby.participants.clone()} />
-            </div>
-            if is_admin {
-                <ActivityCatalogComp<A>
-                    catalog={props.lobby.catalog.clone()}
-                    {on_select}
-                />
-            }
-            <div class="konnekt-session-lobby__activities">
-                <h2 class="konnekt-session-lobby__activities-title">{"Activities"}</h2>
-                <div class="konnekt-session-lobby__activities-list">
-                    {for props.lobby.activities.iter().map(|activity| {
-                        let activity = activity.clone();
-                        html! {
-                            <ActivityComp<A>
-                                {activity}
-                                role={props.role}
-                                on_command={props.on_command.clone()}
-                            />
-                        }
-                    })}
+            <div class="konnekt-session-lobby__content">
+                <div class="konnekt-session-lobby__players">
+                    <PlayerListComp<P> players={props.lobby.participants.clone()} />
+                </div>
+                <div class="konnekt-session-lobby__activities">
+                    if is_admin {
+                        <ActivityCatalogComp<A>
+                            catalog={props.lobby.catalog.clone()}
+                            {on_select}
+                        />
+                    }
+                    <h2 class="konnekt-session-lobby__activities-title">{"Activities"}</h2>
+                    <div class="konnekt-session-lobby__activities-list">
+                        {for props.lobby.activities.iter().map(|activity| {
+                            let activity = activity.clone();
+                            html! {
+                                <ActivityComp<A>
+                                    {activity}
+                                    role={props.role}
+                                    on_command={props.on_command.clone()}
+                                />
+                            }
+                        })}
+                    </div>
                 </div>
             </div>
         </div>

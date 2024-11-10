@@ -1,5 +1,5 @@
 use crate::model::{
-    Activity, ActivityCatalog, ActivityData, ActivityStatus, Identifiable, Player, PlayerData, Role,
+    Activity, ActivityCatalog, ActivityData, ActivityStatus, Player, PlayerData, Role,
 };
 use uuid::Uuid;
 
