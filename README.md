@@ -1,2 +1,0 @@
-# konnekt-session
-Konnekt Session

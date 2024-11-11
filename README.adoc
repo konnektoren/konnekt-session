@@ -1,0 +1,249 @@
+= Konnekt Session
+
+Konnekt Session is a library for managing multiplayer game sessions, including player management, activity tracking, and WebSocket communication.
+
+== Introduction and Goals
+
+Konnekt Session aims to provide a flexible framework for managing multiplayer game sessions. It supports both client-side and server-side implementations, allowing for seamless integration with front-end and back-end.
+
+== Constraints
+
+- The library is implemented in Rust.
+- It supports WebSocket communication for real-time updates.
+- It is designed to be extensible and modular.
+
+== Context and Scope
+
+Konnekt Session is intended to be used in simple multiplayer game applications where people play their own games, but manage which to play at the same time. It provides the necessary components to manage players, activities, and communication between clients and servers.
+
+== Solution Strategy
+
+The solution is divided into several modules, each responsible for a specific aspect of session management. The main components include:
+
+- `model`: Defines the core data structures and traits.
+- `handler`: Provides command handling logic.
+- `components`: Contains Yew components for the front-end.
+- `server`: Implements the server-side logic using Axum and WebSocket.
+
+== Building Block View
+
+=== Overall System
+
+[plantuml, "overall-system", png]
+----
+@startuml
+package "Konnekt Session" {
+    [Model] --> [Handler]
+    [Handler] --> [Components]
+    [Handler] --> [Server]
+}
+@enduml
+----
+
+=== Model
+
+The `model` module defines the core data structures and traits used throughout the library.
+
+[plantuml, "model-module", png]
+----
+@startuml
+package "Model" {
+    class Activity {
+        +id: String
+        +data: T
+        +status: ActivityStatus
+    }
+    class ActivityStatus {
+        +NotStarted
+        +InProgress
+        +Done
+    }
+    class Player {
+        +id: Uuid
+        +role: Role
+        +data: T
+    }
+    class Role {
+        +Admin
+        +Participant
+        +Observer
+    }
+    class Lobby {
+        +id: Uuid
+        +player_id: Uuid
+        +participants: Vec<Player<P>>
+        +catalog: ActivityCatalog<A>
+        +activities: Vec<Activity<A>>
+        +password: Option<String>
+    }
+    Activity --> ActivityStatus
+    Player --> Role
+    Lobby --> Player
+    Lobby --> Activity
+}
+@enduml
+----
+
+=== Handler
+
+The `handler` module provides the logic for handling commands and updating the state of the lobby.
+
+[plantuml, "handler-module", png]
+----
+@startuml
+package "Handler" {
+    class LocalLobbyCommandHandler {
+        +handle_command(lobby: &mut Lobby<P, A>, command: LobbyCommand) -> Result<(), CommandError>
+        +send_command(command: LobbyCommand) -> Result<(), CommandError>
+    }
+    class WebSocketLobbyCommandHandler {
+        +handle_command(lobby: &mut Lobby<P, A>, command: LobbyCommand) -> Result<(), CommandError>
+        +send_command(command: LobbyCommand) -> Result<(), CommandError>
+    }
+    LocalLobbyCommandHandler --> Lobby
+    WebSocketLobbyCommandHandler --> Lobby
+}
+@enduml
+----
+
+=== Components
+
+The `components` module contains Yew components for the front-end.
+
+[plantuml, "components-module", png]
+----
+@startuml
+package "Components" {
+    class ActivityComp {
+        +activity: Activity<T>
+        +role: Role
+        +on_command: Callback<LobbyCommand>
+    }
+    class LobbyComp {
+        +lobby: Lobby<P, A>
+        +role: Role
+        +on_command: Callback<LobbyCommand>
+        +on_error: Callback<CommandError>
+    }
+    class PlayerComp {
+        +player: Player<T>
+    }
+    class PlayerListComp {
+        +players: Vec<Player<T>>
+    }
+    class RunningActivityComp {
+        +activities: Vec<Activity<T>>
+        +role: Role
+        +on_command: Callback<LobbyCommand>
+    }
+    ActivityComp --> Activity
+    LobbyComp --> Lobby
+    PlayerComp --> Player
+    PlayerListComp --> Player
+    RunningActivityComp --> Activity
+}
+@enduml
+----
+
+=== Server
+
+The `server` module implements the server-side logic using Axum and WebSocket.
+
+[plantuml, "server-module", png]
+----
+@startuml
+package "Server" {
+    class WebSocketServer {
+        +add_connection(connection: Connection)
+        +handle_command(command: &LobbyCommandWrapper)
+        +broadcast_to_lobby(lobby_id: Uuid, command: &LobbyCommandWrapper)
+        +send_command(command: &LobbyCommandWrapper, connection: &Connection)
+        +remove_connection(lobby_id: Uuid, player_id: Uuid)
+    }
+    class WebSocketListener {
+        +handle_websocket(ws: WebSocketUpgrade, lobby_id: Option<Uuid>, server: WebSocketServer)
+        +websocket_connection(socket: WebSocket, lobby_id: Option<Uuid>, server: WebSocketServer)
+    }
+    class MemoryStorage {
+        +add_connection(connection: Connection)
+        +remove_connection(player_id: Uuid)
+        +get_connection(player_id: Uuid)
+        +get_all_connections()
+        +add_player_to_lobby(lobby_id: Uuid, player_id: Uuid)
+        +remove_player_from_lobby(lobby_id: Uuid, player_id: Uuid)
+        +get_players_in_lobby(lobby_id: Uuid)
+        +get_all_lobbies()
+    }
+    WebSocketServer --> Connection
+    WebSocketListener --> WebSocketServer
+    MemoryStorage --> Connection
+    MemoryStorage --> Lobby
+}
+@enduml
+----
+
+== Runtime View
+
+The runtime view describes how the components interact at runtime.
+
+[plantuml, "runtime-view", png]
+----
+@startuml
+actor User
+participant "WebSocketClient" as Client
+participant "WebSocketServer" as Server
+participant "Lobby" as Lobby
+
+User -> Client: Send Command
+Client -> Server: WebSocket Message
+Server -> Lobby: Handle Command
+Server -> Client: Broadcast Update
+@enduml
+----
+
+== Deployment View
+
+The deployment view describes the physical deployment of the system.
+
+[plantuml, "deployment-view", png]
+----
+@startuml
+node "Client" {
+    [WebSocketClient]
+}
+node "Server" {
+    [WebSocketServer]
+    [Lobby]
+}
+Client --> Server: WebSocket Connection
+@enduml
+----
+
+== Crosscutting Concepts
+
+- **Logging**: The library uses the `log` crate for logging.
+- **Serialization**: The library uses `serde` for serialization and deserialization.
+- **Concurrency**: The server-side components use `tokio` for asynchronous operations.
+
+== Design Decisions
+
+- The library is implemented in Rust for performance and safety.
+- WebSocket is used for real-time communication.
+- The library is designed to be modular and extensible.
+
+== Risks and Technical Debt
+
+- The current implementation assumes a single server instance. Scalability and fault tolerance need to be addressed in future versions.
+- Error handling and validation can be improved.
+
+== Glossary
+
+- **Lobby**: A session where players can join and participate in activities.
+- **Activity**: A task or challenge that players can complete within a lobby.
+- **Player**: A participant in a lobby, identified by a unique ID and role.
+
+== References
+
+- https://docs.rs/yew/
+- https://docs.rs/axum/
+- https://docs.rs/tokio/
