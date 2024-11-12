@@ -159,6 +159,10 @@ where
         }
     }
 
+    pub fn add_activity_result(&mut self, result: ActivityResult<AR>) {
+        self.results.push(result);
+    }
+
     pub fn update_activity_status(
         &mut self,
         activity_id: &str,

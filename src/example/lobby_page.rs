@@ -79,6 +79,9 @@ pub fn lobby_page(props: &LobbyProps) -> Html {
                 |data: &str| {
                     serde_json::from_str(data).expect("Failed to deserialize challenge data")
                 },
+                |data: &str| {
+                    serde_json::from_str(data).expect("Failed to deserialize challenge result data")
+                },
             );
 
         let update_ui = Callback::from(

@@ -38,6 +38,11 @@ pub enum LobbyCommand {
     CompleteActivity {
         activity_id: ActivityId,
     },
+    AddActivityResult {
+        activity_id: ActivityId,
+        player_id: PlayerId,
+        data: String,
+    },
     UpdateActivityStatus {
         activity_id: ActivityId,
         status: ActivityStatus,

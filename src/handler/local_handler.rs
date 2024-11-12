@@ -1,5 +1,5 @@
 use crate::model::{
-    Activity, ActivityData, ActivityResultTrait, CommandError, Lobby, LobbyCommand,
+    Activity, ActivityData, ActivityResult, ActivityResultTrait, CommandError, Lobby, LobbyCommand,
     LobbyCommandHandler, Player, PlayerTrait,
 };
 use std::sync::Arc;
@@ -8,7 +8,7 @@ use std::sync::Arc;
 pub struct LocalLobbyCommandHandler<P: PlayerTrait, A: ActivityData, AR: ActivityResultTrait> {
     player_data_deserializer: Arc<dyn Fn(&str) -> P + Send + Sync>,
     activity_data_deserializer: Arc<dyn Fn(&str) -> A + Send + Sync>,
-    phantom: std::marker::PhantomData<AR>,
+    activity_result_data_deserializer: Arc<dyn Fn(&str) -> AR + Send + Sync>,
 }
 
 impl<P, A, AR> LocalLobbyCommandHandler<P, A, AR>
@@ -20,11 +20,12 @@ where
     pub fn new(
         player_data_deserializer: impl Fn(&str) -> P + Send + Sync + 'static,
         activity_data_deserializer: impl Fn(&str) -> A + Send + Sync + 'static,
+        activity_result_data_deserializer: impl Fn(&str) -> AR + Send + Sync + 'static,
     ) -> Self {
         Self {
             player_data_deserializer: Arc::new(player_data_deserializer),
             activity_data_deserializer: Arc::new(activity_data_deserializer),
-            phantom: std::marker::PhantomData,
+            activity_result_data_deserializer: Arc::new(activity_result_data_deserializer),
         }
     }
 }
@@ -105,6 +106,17 @@ where
                 lobby
                     .complete_activity(&activity_id)
                     .ok_or(CommandError::ActivityNotFound(activity_id))?;
+                Ok(())
+            }
+            LobbyCommand::AddActivityResult {
+                activity_id,
+                player_id,
+                data,
+            } => {
+                let data = (self.activity_result_data_deserializer)(&data);
+                let activity_result: ActivityResult<AR> =
+                    ActivityResult::new(activity_id, player_id, data);
+                lobby.add_activity_result(activity_result);
                 Ok(())
             }
             LobbyCommand::UpdateActivityStatus {
