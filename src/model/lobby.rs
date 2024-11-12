@@ -221,9 +221,9 @@ mod tests {
 
         let lobby: Lobby<PlayerProfile, Challenge> = Lobby::new(admin, None);
 
-        assert_eq!(lobby.get_admin().role, Role::Admin);
-        assert_eq!(lobby.get_admin().data.identifier(), "123");
-        assert_eq!(lobby.get_admin().data.name(), "Test Admin");
+        assert_eq!(lobby.get_admin().unwrap().role, Role::Admin);
+        assert_eq!(lobby.get_admin().unwrap().data.identifier(), "123");
+        assert_eq!(lobby.get_admin().unwrap().data.name(), "Test Admin");
         assert_eq!(lobby.participants.len(), 1);
         assert_eq!(lobby.activities.len(), 0);
         assert_eq!(lobby.password, None);

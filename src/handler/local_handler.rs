@@ -81,7 +81,7 @@ where
                     .ok_or(CommandError::ActivityNotFound(activity_id))?;
                 Ok(())
             }
-            LobbyCommand::AddParticipant { participant_id } => {
+            LobbyCommand::AddParticipant { .. } => {
                 // Implementation needed when you have the participant data
                 Ok(())
             }
