@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 pub trait ActivityData: Named + Identifiable + Clone + PartialEq {}
 
-#[derive(Default, Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
 pub enum ActivityStatus {
     #[default]
     NotStarted,
@@ -12,7 +12,7 @@ pub enum ActivityStatus {
     Done,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Activity<T>
 where
     T: ActivityData,

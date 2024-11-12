@@ -1,10 +1,10 @@
 use crate::model::{
-    Activity, ActivityCatalog, ActivityData, ActivityResultTrait, ActivityStatus, Player,
-    PlayerTrait, Role,
+    Activity, ActivityCatalog, ActivityData, ActivityResult, ActivityResultTrait, ActivityStatus,
+    Player, PlayerTrait, Role,
 };
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Lobby<P, A, AR>
 where
     P: PlayerTrait,
@@ -17,7 +17,7 @@ where
     pub catalog: ActivityCatalog<A>,
     pub activities: Vec<Activity<A>>,
     pub password: Option<String>,
-    phantom: std::marker::PhantomData<AR>,
+    pub results: Vec<ActivityResult<AR>>,
 }
 
 impl<P, A, AR> Lobby<P, A, AR>
@@ -34,7 +34,7 @@ where
             catalog: ActivityCatalog::new(),
             activities: Vec::new(),
             password,
-            phantom: std::marker::PhantomData,
+            results: Vec::new(),
         }
     }
 

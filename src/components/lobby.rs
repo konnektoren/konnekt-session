@@ -1,4 +1,6 @@
-use crate::components::{ActivityCatalogComp, ActivityComp, PlayerListComp};
+use crate::components::{
+    ActivityCatalogComp, ActivityComp, ActivityResultListComp, PlayerListComp,
+};
 use crate::model::{
     Activity, ActivityData, ActivityResultTrait, CommandError, Lobby, LobbyCommand, PlayerTrait,
     Role,
@@ -64,6 +66,9 @@ where
                             }
                         })}
                     </div>
+                </div>
+                <div class="konnekt-session-lobby_results">
+                <ActivityResultListComp<AR> results={props.lobby.results.clone()} />
                 </div>
             </div>
         </div>

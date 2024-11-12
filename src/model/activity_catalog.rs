@@ -2,7 +2,7 @@ use crate::model::ActivityData;
 
 use super::Activity;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct ActivityCatalog<T>
 where
     T: ActivityData,
