@@ -20,6 +20,8 @@ pub mod prelude {
     pub use crate::model::Activity;
     pub use crate::model::ActivityCatalog;
     pub use crate::model::ActivityData;
+    pub use crate::model::ActivityResult;
+    pub use crate::model::ActivityResultTrait;
     pub use crate::model::ActivityStatus;
     pub use crate::model::CommandError;
     pub use crate::model::Identifiable;
@@ -28,6 +30,7 @@ pub mod prelude {
     pub use crate::model::LobbyCommandHandler;
     pub use crate::model::Named;
     pub use crate::model::Player;
-    pub use crate::model::PlayerData;
+    pub use crate::model::PlayerId;
+    pub use crate::model::PlayerTrait;
     pub use crate::model::Role;
 }

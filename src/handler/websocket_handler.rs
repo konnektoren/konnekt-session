@@ -1,7 +1,7 @@
 use crate::handler::LocalLobbyCommandHandler;
 use crate::model::{
-    ActivityData, ActivityResultData, CommandError, Lobby, LobbyCommand, LobbyCommandHandler,
-    LobbyCommandWrapper, Player, PlayerData,
+    ActivityData, ActivityResultTrait, CommandError, Lobby, LobbyCommand, LobbyCommandHandler,
+    LobbyCommandWrapper, Player, PlayerTrait,
 };
 use futures::{SinkExt, StreamExt};
 use gloo::net::websocket::{futures::WebSocket, Message};
@@ -16,7 +16,7 @@ use yew::UseStateHandle;
 type WebSocketSender = futures::stream::SplitSink<WebSocket, Message>;
 
 #[derive(Clone)]
-pub struct WebSocketLobbyCommandHandler<P: PlayerData, A: ActivityData, AR: ActivityResultData> {
+pub struct WebSocketLobbyCommandHandler<P: PlayerTrait, A: ActivityData, AR: ActivityResultTrait> {
     lobby_id: Uuid,
     player: UseStateHandle<RefCell<Player<P>>>,
     password: Option<String>,
@@ -29,9 +29,9 @@ pub struct WebSocketLobbyCommandHandler<P: PlayerData, A: ActivityData, AR: Acti
 
 impl<P, A, AR> WebSocketLobbyCommandHandler<P, A, AR>
 where
-    P: PlayerData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
+    P: PlayerTrait + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
     A: ActivityData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
-    AR: ActivityResultData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
+    AR: ActivityResultTrait + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
 {
     pub fn new(
         websocket_url: &str,
@@ -204,9 +204,9 @@ where
 
 impl<P, A, AR> LobbyCommandHandler<P, A, AR> for WebSocketLobbyCommandHandler<P, A, AR>
 where
-    P: PlayerData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
+    P: PlayerTrait + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
     A: ActivityData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
-    AR: ActivityResultData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
+    AR: ActivityResultTrait + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
 {
     fn handle_command(
         &self,

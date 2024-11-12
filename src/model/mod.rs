@@ -11,11 +11,11 @@ mod role;
 
 pub use activity::{Activity, ActivityData, ActivityStatus};
 pub use activity_catalog::ActivityCatalog;
-pub use activity_result::{ActivityResult, ActivityResultData};
+pub use activity_result::{ActivityResult, ActivityResultTrait};
 pub use command::{CommandError, LobbyCommand, LobbyCommandWrapper};
 pub use handler::LobbyCommandHandler;
 pub use identifiable::Identifiable;
 pub use lobby::Lobby;
 pub use named::Named;
-pub use player::{Player, PlayerData, PlayerId};
+pub use player::{Player, PlayerId, PlayerTrait};
 pub use role::Role;

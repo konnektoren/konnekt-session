@@ -1,4 +1,4 @@
-use crate::model::{Identifiable, Named, PlayerData};
+use crate::model::{Identifiable, Named, PlayerTrait};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Clone, Hash, Serialize, Deserialize)]
@@ -19,4 +19,4 @@ impl Named for PlayerProfile {
     }
 }
 
-impl PlayerData for PlayerProfile {}
+impl PlayerTrait for PlayerProfile {}

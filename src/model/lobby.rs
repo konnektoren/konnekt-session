@@ -1,15 +1,15 @@
 use crate::model::{
-    Activity, ActivityCatalog, ActivityData, ActivityResultData, ActivityStatus, Player,
-    PlayerData, Role,
+    Activity, ActivityCatalog, ActivityData, ActivityResultTrait, ActivityStatus, Player,
+    PlayerTrait, Role,
 };
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Lobby<P, A, AR>
 where
-    P: PlayerData,
+    P: PlayerTrait,
     A: ActivityData,
-    AR: ActivityResultData,
+    AR: ActivityResultTrait,
 {
     pub id: Uuid,
     pub player_id: Uuid,
@@ -22,9 +22,9 @@ where
 
 impl<P, A, AR> Lobby<P, A, AR>
 where
-    P: PlayerData,
+    P: PlayerTrait,
     A: ActivityData,
-    AR: ActivityResultData,
+    AR: ActivityResultTrait,
 {
     pub fn new(admin: Player<P>, password: Option<String>) -> Self {
         Lobby {
@@ -172,7 +172,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Identifiable, Named, Player, PlayerData, Role};
+    use crate::model::{Identifiable, Named, Player, PlayerTrait, Role};
 
     #[derive(PartialEq, Clone)]
     struct PlayerProfile {
@@ -192,7 +192,7 @@ mod tests {
         }
     }
 
-    impl PlayerData for PlayerProfile {}
+    impl PlayerTrait for PlayerProfile {}
 
     #[derive(PartialEq, Clone)]
     struct Challenge {
@@ -223,7 +223,7 @@ mod tests {
         }
     }
 
-    impl ActivityResultData for ChallengeResult {}
+    impl ActivityResultTrait for ChallengeResult {}
 
     #[test]
     fn create_lobby() {

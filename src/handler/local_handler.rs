@@ -1,11 +1,11 @@
 use crate::model::{
-    Activity, ActivityData, ActivityResultData, CommandError, Lobby, LobbyCommand,
-    LobbyCommandHandler, Player, PlayerData,
+    Activity, ActivityData, ActivityResultTrait, CommandError, Lobby, LobbyCommand,
+    LobbyCommandHandler, Player, PlayerTrait,
 };
 use std::sync::Arc;
 
 #[derive(Clone)]
-pub struct LocalLobbyCommandHandler<P: PlayerData, A: ActivityData, AR: ActivityResultData> {
+pub struct LocalLobbyCommandHandler<P: PlayerTrait, A: ActivityData, AR: ActivityResultTrait> {
     player_data_deserializer: Arc<dyn Fn(&str) -> P + Send + Sync>,
     activity_data_deserializer: Arc<dyn Fn(&str) -> A + Send + Sync>,
     phantom: std::marker::PhantomData<AR>,
@@ -13,9 +13,9 @@ pub struct LocalLobbyCommandHandler<P: PlayerData, A: ActivityData, AR: Activity
 
 impl<P, A, AR> LocalLobbyCommandHandler<P, A, AR>
 where
-    P: PlayerData,
+    P: PlayerTrait,
     A: ActivityData,
-    AR: ActivityResultData,
+    AR: ActivityResultTrait,
 {
     pub fn new(
         player_data_deserializer: impl Fn(&str) -> P + Send + Sync + 'static,
@@ -31,9 +31,9 @@ where
 
 impl<P, A, AR> LobbyCommandHandler<P, A, AR> for LocalLobbyCommandHandler<P, A, AR>
 where
-    P: PlayerData,
+    P: PlayerTrait,
     A: ActivityData,
-    AR: ActivityResultData,
+    AR: ActivityResultTrait,
 {
     fn handle_command(
         &self,

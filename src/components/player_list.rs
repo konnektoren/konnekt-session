@@ -1,11 +1,11 @@
 use crate::components::PlayerComp;
-use crate::model::{Player, PlayerData};
+use crate::model::{Player, PlayerTrait};
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq, Clone)]
 pub struct PlayerListProps<T>
 where
-    T: PlayerData + 'static,
+    T: PlayerTrait + 'static,
 {
     pub players: Vec<Player<T>>,
 }
@@ -13,7 +13,7 @@ where
 #[function_component(PlayerListComp)]
 pub fn player_list_comp<T>(props: &PlayerListProps<T>) -> Html
 where
-    T: PlayerData + 'static,
+    T: PlayerTrait + 'static,
 {
     html! {
         <div class="konnekt-session-player-list">

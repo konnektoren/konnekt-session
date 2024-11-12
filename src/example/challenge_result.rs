@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::model::{ActivityResultData, Identifiable};
+use crate::model::{ActivityResultTrait, Identifiable};
 
 #[derive(PartialEq, Clone, Debug, Hash, Serialize, Deserialize)]
 pub struct ChallengeResult {
@@ -14,4 +14,4 @@ impl Identifiable for ChallengeResult {
     }
 }
 
-impl ActivityResultData for ChallengeResult {}
+impl ActivityResultTrait for ChallengeResult {}

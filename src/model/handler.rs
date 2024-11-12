@@ -1,10 +1,10 @@
-use super::{ActivityData, ActivityResultData, CommandError, Lobby, LobbyCommand, PlayerData};
+use super::{ActivityData, ActivityResultTrait, CommandError, Lobby, LobbyCommand, PlayerTrait};
 
 pub trait LobbyCommandHandler<P, A, AR>
 where
-    P: PlayerData,
+    P: PlayerTrait,
     A: ActivityData,
-    AR: ActivityResultData,
+    AR: ActivityResultTrait,
 {
     fn handle_command(
         &self,

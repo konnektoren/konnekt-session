@@ -1,10 +1,10 @@
 use crate::model::{Identifiable, PlayerId};
 
-pub trait ActivityResultData: Identifiable + Clone + PartialEq {}
+pub trait ActivityResultTrait: Identifiable + Clone + PartialEq {}
 
 pub struct ActivityResult<T>
 where
-    T: ActivityResultData,
+    T: ActivityResultTrait,
 {
     pub id: String,
     pub player_id: PlayerId,
@@ -13,7 +13,7 @@ where
 
 impl<T> ActivityResult<T>
 where
-    T: ActivityResultData,
+    T: ActivityResultTrait,
 {
     pub fn new(player_id: PlayerId, data: T) -> Self {
         ActivityResult {

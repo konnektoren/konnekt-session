@@ -3,12 +3,12 @@ use uuid::Uuid;
 
 pub type PlayerId = Uuid;
 
-pub trait PlayerData: Identifiable + Named + Clone + PartialEq {}
+pub trait PlayerTrait: Identifiable + Named + Clone + PartialEq {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Player<T>
 where
-    T: PlayerData,
+    T: PlayerTrait,
 {
     pub id: PlayerId,
     pub role: Role,
@@ -17,7 +17,7 @@ where
 
 impl<T> Player<T>
 where
-    T: PlayerData,
+    T: PlayerTrait,
 {
     pub fn new(role: Role, data: T) -> Self {
         Player {
@@ -30,7 +30,7 @@ where
 
 impl<T> Identifiable for Player<T>
 where
-    T: PlayerData,
+    T: PlayerTrait,
 {
     fn identifier(&self) -> &str {
         self.data.identifier()
@@ -39,7 +39,7 @@ where
 
 impl<T> Named for Player<T>
 where
-    T: PlayerData,
+    T: PlayerTrait,
 {
     fn name(&self) -> &str {
         self.data.name()
@@ -69,7 +69,7 @@ mod tests {
         }
     }
 
-    impl PlayerData for PlayerProfile {}
+    impl PlayerTrait for PlayerProfile {}
 
     #[test]
     fn create_player() {

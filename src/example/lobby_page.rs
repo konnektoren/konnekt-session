@@ -3,8 +3,8 @@ use crate::config::Config;
 use crate::example::{Challenge, ChallengeComp, ChallengeResult, PlayerProfile};
 use crate::handler::{LocalLobbyCommandHandler, WebSocketLobbyCommandHandler};
 use crate::model::{
-    Activity, ActivityData, ActivityResultData, ActivityStatus, CommandError, Lobby, LobbyCommand,
-    LobbyCommandHandler, Player, PlayerData, Role,
+    Activity, ActivityData, ActivityResultTrait, ActivityStatus, CommandError, Lobby, LobbyCommand,
+    LobbyCommandHandler, Player, PlayerTrait, Role,
 };
 use std::cell::RefCell;
 use std::hash::Hash;
@@ -43,7 +43,7 @@ fn init_lobby(
     lobby
 }
 
-fn hash_lobby<P: PlayerData + Hash, A: ActivityData + Hash, AR: ActivityResultData + Hash>(
+fn hash_lobby<P: PlayerTrait + Hash, A: ActivityData + Hash, AR: ActivityResultTrait + Hash>(
     lobby: &Lobby<P, A, AR>,
 ) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
