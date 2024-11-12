@@ -1,6 +1,8 @@
 use crate::model::{Identifiable, PlayerId};
 
-pub trait ActivityResultTrait: Identifiable + Clone + PartialEq {}
+use super::{Scorable, Timable};
+
+pub trait ActivityResultTrait: Identifiable + Timable + Scorable + Clone + PartialEq {}
 
 pub struct ActivityResult<T>
 where

@@ -172,7 +172,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Identifiable, Named, Player, PlayerTrait, Role};
+    use crate::model::{Identifiable, Named, Player, PlayerTrait, Role, Scorable, Timable};
 
     #[derive(PartialEq, Clone)]
     struct PlayerProfile {
@@ -222,6 +222,10 @@ mod tests {
             "result"
         }
     }
+
+    impl Timable for ChallengeResult {}
+
+    impl Scorable for ChallengeResult {}
 
     impl ActivityResultTrait for ChallengeResult {}
 
