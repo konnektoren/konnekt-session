@@ -4,6 +4,7 @@ use super::{Scorable, Timable};
 
 pub trait ActivityResultTrait: Identifiable + Timable + Scorable + Clone + PartialEq {}
 
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct ActivityResult<T>
 where
     T: ActivityResultTrait,

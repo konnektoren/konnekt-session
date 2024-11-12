@@ -1,5 +1,6 @@
 mod activity;
 mod activity_catalog;
+mod activity_result;
 mod lobby;
 mod player;
 mod player_list;
