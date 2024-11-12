@@ -2,6 +2,8 @@ use crate::model::{ActivityStatus, Role};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::{ActivityId, PlayerId};
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LobbyCommand {
     Join {
@@ -12,36 +14,36 @@ pub enum LobbyCommand {
         password: Option<String>,
     },
     ParticipantInfo {
-        player_id: Uuid,
+        player_id: PlayerId,
         role: Role,
         data: String,
     },
     ActivityInfo {
-        activity_id: String,
+        activity_id: ActivityId,
         status: ActivityStatus,
         data: String,
     },
     SelectActivity {
-        activity_id: String,
+        activity_id: ActivityId,
     },
     AddParticipant {
-        participant_id: Uuid,
+        participant_id: PlayerId,
     },
     RemoveParticipant {
-        participant_id: Uuid,
+        participant_id: PlayerId,
     },
     StartActivity {
-        activity_id: String,
+        activity_id: ActivityId,
     },
     CompleteActivity {
-        activity_id: String,
+        activity_id: ActivityId,
     },
     UpdateActivityStatus {
-        activity_id: String,
+        activity_id: ActivityId,
         status: ActivityStatus,
     },
     UpdatePlayerId {
-        player_id: Uuid,
+        player_id: PlayerId,
     },
 }
 

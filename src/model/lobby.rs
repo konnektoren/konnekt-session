@@ -4,6 +4,10 @@ use crate::model::{
 };
 use uuid::Uuid;
 
+use super::PlayerId;
+
+pub type LobbyId = Uuid;
+
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Lobby<P, A, AR>
 where
@@ -11,8 +15,8 @@ where
     A: ActivityData,
     AR: ActivityResultTrait,
 {
-    pub id: Uuid,
-    pub player_id: Uuid,
+    pub id: LobbyId,
+    pub player_id: PlayerId,
     pub participants: Vec<Player<P>>,
     pub catalog: ActivityCatalog<A>,
     pub activities: Vec<Activity<A>>,

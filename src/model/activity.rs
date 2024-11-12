@@ -2,6 +2,8 @@ use crate::model::Identifiable;
 use crate::model::Named;
 use serde::{Deserialize, Serialize};
 
+pub type ActivityId = String;
+
 pub trait ActivityData: Named + Identifiable + Clone + PartialEq {}
 
 #[derive(Default, Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
