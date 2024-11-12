@@ -16,7 +16,11 @@ use yew::UseStateHandle;
 type WebSocketSender = futures::stream::SplitSink<WebSocket, Message>;
 
 #[derive(Clone)]
-pub struct WebSocketLobbyCommandHandler<P: PlayerTrait, A: ActivityData, AR: ActivityResultTrait> {
+pub struct WebSocketLobbyCommandHandler<
+    P: PlayerTrait,
+    A: ActivityData,
+    AR: ActivityResultTrait + Serialize,
+> {
     lobby_id: Uuid,
     player: UseStateHandle<RefCell<Player<P>>>,
     password: Option<String>,

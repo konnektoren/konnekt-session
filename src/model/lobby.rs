@@ -2,6 +2,7 @@ use crate::model::{
     Activity, ActivityCatalog, ActivityData, ActivityResult, ActivityResultTrait, ActivityStatus,
     Player, PlayerTrait, Role,
 };
+use serde::Serialize;
 use uuid::Uuid;
 
 use super::PlayerId;
@@ -13,7 +14,7 @@ pub struct Lobby<P, A, AR>
 where
     P: PlayerTrait,
     A: ActivityData,
-    AR: ActivityResultTrait,
+    AR: ActivityResultTrait + Serialize,
 {
     pub id: LobbyId,
     pub player_id: PlayerId,
@@ -28,7 +29,7 @@ impl<P, A, AR> Lobby<P, A, AR>
 where
     P: PlayerTrait,
     A: ActivityData,
-    AR: ActivityResultTrait,
+    AR: ActivityResultTrait + Serialize,
 {
     pub fn new(admin: Player<P>, password: Option<String>) -> Self {
         Lobby {
@@ -222,7 +223,7 @@ mod tests {
 
     impl ActivityData for Challenge {}
 
-    #[derive(PartialEq, Clone)]
+    #[derive(PartialEq, Clone, Serialize)]
     struct ChallengeResult {}
 
     impl Identifiable for ChallengeResult {

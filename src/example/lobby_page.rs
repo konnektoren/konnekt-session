@@ -6,6 +6,7 @@ use crate::model::{
     Activity, ActivityData, ActivityResultTrait, ActivityStatus, CommandError, Lobby, LobbyCommand,
     LobbyCommandHandler, Player, PlayerTrait, Role,
 };
+use serde::Serialize;
 use std::cell::RefCell;
 use std::hash::Hash;
 use std::hash::Hasher;
@@ -43,7 +44,11 @@ fn init_lobby(
     lobby
 }
 
-fn hash_lobby<P: PlayerTrait + Hash, A: ActivityData + Hash, AR: ActivityResultTrait + Hash>(
+fn hash_lobby<
+    P: PlayerTrait + Hash,
+    A: ActivityData + Hash,
+    AR: ActivityResultTrait + Hash + Serialize,
+>(
     lobby: &Lobby<P, A, AR>,
 ) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
@@ -151,6 +156,7 @@ pub fn lobby_page(props: &LobbyProps) -> Html {
                 {on_error}
             />
             <RunningActivityComp<Challenge, ChallengeComp>
+                player_id={props.player.id.clone()}
                 activities={current_lobby.activities.clone()}
                 role={*role}
                 on_command={on_command}

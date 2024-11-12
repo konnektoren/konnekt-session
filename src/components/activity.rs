@@ -1,4 +1,4 @@
-use crate::model::{Activity, ActivityData, ActivityStatus, LobbyCommand, Named, Role};
+use crate::model::{Activity, ActivityData, ActivityStatus, LobbyCommand, Named, PlayerId, Role};
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq, Clone)]
@@ -6,6 +6,7 @@ pub struct ActivityProps<T>
 where
     T: ActivityData + 'static,
 {
+    pub player_id: PlayerId,
     pub activity: Activity<T>,
     pub role: Role,
     pub on_command: Callback<LobbyCommand>,

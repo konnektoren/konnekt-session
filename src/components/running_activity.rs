@@ -1,5 +1,5 @@
 use super::ActivityProps;
-use crate::model::{Activity, ActivityData, ActivityStatus, LobbyCommand, Role};
+use crate::model::{Activity, ActivityData, ActivityStatus, LobbyCommand, PlayerId, Role};
 use std::marker::PhantomData;
 use yew::prelude::*;
 
@@ -9,6 +9,7 @@ where
     T: ActivityData + 'static,
     C: Component<Properties = ActivityProps<T>> + PartialEq + 'static,
 {
+    pub player_id: PlayerId,
     pub activities: Vec<Activity<T>>,
     pub role: Role,
     pub on_command: Callback<LobbyCommand>,
@@ -32,6 +33,7 @@ where
             if let Some(activity) = current_activity {
                 <div class="konnekt-session-running-activity__content">
                     <C
+                        player_id={props.player_id}
                         activity={activity.clone()}
                         role={props.role}
                         on_command={props.on_command.clone()}

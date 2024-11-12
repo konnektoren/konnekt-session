@@ -5,6 +5,7 @@ use crate::model::{
     Activity, ActivityData, ActivityResultTrait, CommandError, Lobby, LobbyCommand, PlayerTrait,
     Role,
 };
+use serde::Serialize;
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq, Clone)]
@@ -12,7 +13,7 @@ pub struct LobbyProps<P, A, AR>
 where
     P: PlayerTrait + 'static,
     A: ActivityData + 'static,
-    AR: ActivityResultTrait + 'static,
+    AR: ActivityResultTrait + Serialize + 'static,
 {
     pub lobby: Lobby<P, A, AR>,
     pub role: Role,
@@ -26,7 +27,7 @@ pub fn lobby_comp<P, A, AR>(props: &LobbyProps<P, A, AR>) -> Html
 where
     P: PlayerTrait + 'static,
     A: ActivityData + 'static,
-    AR: ActivityResultTrait + 'static,
+    AR: ActivityResultTrait + Serialize + 'static,
 {
     let is_admin = props.role == Role::Admin;
 
@@ -59,6 +60,7 @@ where
                             let activity = activity.clone();
                             html! {
                                 <ActivityComp<A>
+                                    player_id={props.lobby.player_id.clone()}
                                     {activity}
                                     role={props.role}
                                     on_command={props.on_command.clone()}

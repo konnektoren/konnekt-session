@@ -1,3 +1,5 @@
+use serde::Serialize;
+
 use crate::model::{
     Activity, ActivityData, ActivityResult, ActivityResultTrait, CommandError, Lobby, LobbyCommand,
     LobbyCommandHandler, Player, PlayerTrait,
@@ -34,7 +36,7 @@ impl<P, A, AR> LobbyCommandHandler<P, A, AR> for LocalLobbyCommandHandler<P, A, 
 where
     P: PlayerTrait,
     A: ActivityData,
-    AR: ActivityResultTrait,
+    AR: ActivityResultTrait + Serialize,
 {
     fn handle_command(
         &self,
