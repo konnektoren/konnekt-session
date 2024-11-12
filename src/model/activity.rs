@@ -1,7 +1,6 @@
+use crate::model::Identifiable;
 use crate::model::Named;
 use serde::{Deserialize, Serialize};
-
-use super::Identifiable;
 
 pub trait ActivityData: Named + Identifiable + Clone + PartialEq {}
 

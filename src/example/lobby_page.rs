@@ -1,10 +1,10 @@
 use crate::components::{LobbyComp, RunningActivityComp};
 use crate::config::Config;
-use crate::example::{Challenge, ChallengeComp, PlayerProfile};
+use crate::example::{Challenge, ChallengeComp, ChallengeResult, PlayerProfile};
 use crate::handler::{LocalLobbyCommandHandler, WebSocketLobbyCommandHandler};
 use crate::model::{
-    Activity, ActivityData, ActivityStatus, CommandError, Lobby, LobbyCommand, LobbyCommandHandler,
-    Player, PlayerData, Role,
+    Activity, ActivityData, ActivityResultData, ActivityStatus, CommandError, Lobby, LobbyCommand,
+    LobbyCommandHandler, Player, PlayerData, Role,
 };
 use std::cell::RefCell;
 use std::hash::Hash;
@@ -17,7 +17,7 @@ use yew::prelude::*;
 fn init_lobby(
     player: Player<PlayerProfile>,
     password: Option<String>,
-) -> Lobby<PlayerProfile, Challenge> {
+) -> Lobby<PlayerProfile, Challenge, ChallengeResult> {
     let activity1 = Activity {
         id: "456".to_string(),
         status: ActivityStatus::NotStarted,
@@ -36,14 +36,16 @@ fn init_lobby(
         },
     };
 
-    let mut lobby = Lobby::<PlayerProfile, Challenge>::new(player, password);
+    let mut lobby = Lobby::<PlayerProfile, Challenge, ChallengeResult>::new(player, password);
     lobby.add_activity(activity1);
     lobby.add_activity(activity2);
 
     lobby
 }
 
-fn hash_lobby<P: PlayerData + Hash, A: ActivityData + Hash>(lobby: &Lobby<P, A>) -> u64 {
+fn hash_lobby<P: PlayerData + Hash, A: ActivityData + Hash, AR: ActivityResultData + Hash>(
+    lobby: &Lobby<P, A, AR>,
+) -> u64 {
     let mut hasher = std::hash::DefaultHasher::new();
     lobby.hash(&mut hasher);
     hasher.finish()
@@ -71,14 +73,19 @@ pub fn lobby_page(props: &LobbyProps) -> Html {
 
     // Create WebSocket handler
     let websocket_handler = use_state(|| {
-        let local_handler = LocalLobbyCommandHandler::<PlayerProfile, Challenge>::new(
-            |data: &str| serde_json::from_str(data).expect("Failed to deserialize player data"),
-            |data: &str| serde_json::from_str(data).expect("Failed to deserialize challenge data"),
-        );
+        let local_handler =
+            LocalLobbyCommandHandler::<PlayerProfile, Challenge, ChallengeResult>::new(
+                |data: &str| serde_json::from_str(data).expect("Failed to deserialize player data"),
+                |data: &str| {
+                    serde_json::from_str(data).expect("Failed to deserialize challenge data")
+                },
+            );
 
-        let update_ui = Callback::from(move |lobby: Lobby<PlayerProfile, Challenge>| {
-            last_event.set(hash_lobby(&lobby));
-        });
+        let update_ui = Callback::from(
+            move |lobby: Lobby<PlayerProfile, Challenge, ChallengeResult>| {
+                last_event.set(hash_lobby(&lobby));
+            },
+        );
 
         let player = player.clone();
         let password = props.password.clone();
@@ -134,7 +141,7 @@ pub fn lobby_page(props: &LobbyProps) -> Html {
                 <option value="Participant">{"Participant"}</option>
                 <option value="Observer">{"Observer"}</option>
             </select>
-            <LobbyComp<PlayerProfile, Challenge>
+            <LobbyComp<PlayerProfile, Challenge, ChallengeResult>
                 lobby={current_lobby.clone()}
                 role={*role}
                 on_command={on_command.clone()}

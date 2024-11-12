@@ -1,6 +1,8 @@
 use crate::model::{Identifiable, Named, Role};
 use uuid::Uuid;
 
+pub type PlayerId = Uuid;
+
 pub trait PlayerData: Identifiable + Named + Clone + PartialEq {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -8,7 +10,7 @@ pub struct Player<T>
 where
     T: PlayerData,
 {
-    pub id: Uuid,
+    pub id: PlayerId,
     pub role: Role,
     pub data: T,
 }

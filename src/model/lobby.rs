@@ -1,13 +1,15 @@
 use crate::model::{
-    Activity, ActivityCatalog, ActivityData, ActivityStatus, Player, PlayerData, Role,
+    Activity, ActivityCatalog, ActivityData, ActivityResultData, ActivityStatus, Player,
+    PlayerData, Role,
 };
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Lobby<P, A>
+pub struct Lobby<P, A, AR>
 where
     P: PlayerData,
     A: ActivityData,
+    AR: ActivityResultData,
 {
     pub id: Uuid,
     pub player_id: Uuid,
@@ -15,12 +17,14 @@ where
     pub catalog: ActivityCatalog<A>,
     pub activities: Vec<Activity<A>>,
     pub password: Option<String>,
+    phantom: std::marker::PhantomData<AR>,
 }
 
-impl<P, A> Lobby<P, A>
+impl<P, A, AR> Lobby<P, A, AR>
 where
     P: PlayerData,
     A: ActivityData,
+    AR: ActivityResultData,
 {
     pub fn new(admin: Player<P>, password: Option<String>) -> Self {
         Lobby {
@@ -30,6 +34,7 @@ where
             catalog: ActivityCatalog::new(),
             activities: Vec::new(),
             password,
+            phantom: std::marker::PhantomData,
         }
     }
 
@@ -209,6 +214,17 @@ mod tests {
 
     impl ActivityData for Challenge {}
 
+    #[derive(PartialEq, Clone)]
+    struct ChallengeResult {}
+
+    impl Identifiable for ChallengeResult {
+        fn identifier(&self) -> &str {
+            "result"
+        }
+    }
+
+    impl ActivityResultData for ChallengeResult {}
+
     #[test]
     fn create_lobby() {
         let admin = Player::new(
@@ -219,7 +235,7 @@ mod tests {
             },
         );
 
-        let lobby: Lobby<PlayerProfile, Challenge> = Lobby::new(admin, None);
+        let lobby: Lobby<PlayerProfile, Challenge, ChallengeResult> = Lobby::new(admin, None);
 
         assert_eq!(lobby.get_admin().unwrap().role, Role::Admin);
         assert_eq!(lobby.get_admin().unwrap().data.identifier(), "123");
@@ -239,7 +255,7 @@ mod tests {
             },
         );
 
-        let mut lobby: Lobby<PlayerProfile, Challenge> = Lobby::new(admin, None);
+        let mut lobby: Lobby<PlayerProfile, Challenge, ChallengeResult> = Lobby::new(admin, None);
 
         let participant = Player::new(
             Role::Participant,
@@ -267,7 +283,7 @@ mod tests {
             },
         );
 
-        let mut lobby: Lobby<PlayerProfile, Challenge> = Lobby::new(admin, None);
+        let mut lobby: Lobby<PlayerProfile, Challenge, ChallengeResult> = Lobby::new(admin, None);
 
         let activity = Activity {
             id: "789".to_string(),
@@ -304,7 +320,7 @@ mod tests {
             },
         );
 
-        let mut lobby: Lobby<PlayerProfile, Challenge> = Lobby::new(admin, None);
+        let mut lobby: Lobby<PlayerProfile, Challenge, ChallengeResult> = Lobby::new(admin, None);
 
         let activity = Activity {
             id: "789".to_string(),

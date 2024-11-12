@@ -1,14 +1,17 @@
 use crate::components::{ActivityCatalogComp, ActivityComp, PlayerListComp};
-use crate::model::{Activity, ActivityData, CommandError, Lobby, LobbyCommand, PlayerData, Role};
+use crate::model::{
+    Activity, ActivityData, ActivityResultData, CommandError, Lobby, LobbyCommand, PlayerData, Role,
+};
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq, Clone)]
-pub struct LobbyProps<P, A>
+pub struct LobbyProps<P, A, AR>
 where
     P: PlayerData + 'static,
     A: ActivityData + 'static,
+    AR: ActivityResultData + 'static,
 {
-    pub lobby: Lobby<P, A>,
+    pub lobby: Lobby<P, A, AR>,
     pub role: Role,
     pub on_command: Callback<LobbyCommand>,
     #[prop_or_default]
@@ -16,10 +19,11 @@ where
 }
 
 #[function_component(LobbyComp)]
-pub fn lobby_comp<P, A>(props: &LobbyProps<P, A>) -> Html
+pub fn lobby_comp<P, A, AR>(props: &LobbyProps<P, A, AR>) -> Html
 where
     P: PlayerData + 'static,
     A: ActivityData + 'static,
+    AR: ActivityResultData + 'static,
 {
     let is_admin = props.role == Role::Admin;
 

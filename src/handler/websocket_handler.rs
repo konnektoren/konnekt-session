@@ -1,7 +1,7 @@
 use crate::handler::LocalLobbyCommandHandler;
 use crate::model::{
-    ActivityData, CommandError, Lobby, LobbyCommand, LobbyCommandHandler, LobbyCommandWrapper,
-    Player, PlayerData,
+    ActivityData, ActivityResultData, CommandError, Lobby, LobbyCommand, LobbyCommandHandler,
+    LobbyCommandWrapper, Player, PlayerData,
 };
 use futures::{SinkExt, StreamExt};
 use gloo::net::websocket::{futures::WebSocket, Message};
@@ -16,30 +16,31 @@ use yew::UseStateHandle;
 type WebSocketSender = futures::stream::SplitSink<WebSocket, Message>;
 
 #[derive(Clone)]
-pub struct WebSocketLobbyCommandHandler<P: PlayerData, A: ActivityData> {
+pub struct WebSocketLobbyCommandHandler<P: PlayerData, A: ActivityData, AR: ActivityResultData> {
     lobby_id: Uuid,
     player: UseStateHandle<RefCell<Player<P>>>,
     password: Option<String>,
-    local_handler: LocalLobbyCommandHandler<P, A>,
+    local_handler: LocalLobbyCommandHandler<P, A, AR>,
     websocket_url: String,
-    lobby: UseStateHandle<RefCell<Lobby<P, A>>>,
+    lobby: UseStateHandle<RefCell<Lobby<P, A, AR>>>,
     sender: Rc<RefCell<Option<WebSocketSender>>>,
-    update_ui: Callback<Lobby<P, A>>,
+    update_ui: Callback<Lobby<P, A, AR>>,
 }
 
-impl<P, A> WebSocketLobbyCommandHandler<P, A>
+impl<P, A, AR> WebSocketLobbyCommandHandler<P, A, AR>
 where
     P: PlayerData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
     A: ActivityData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
+    AR: ActivityResultData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
 {
     pub fn new(
         websocket_url: &str,
         lobby_id: Uuid,
         player: UseStateHandle<RefCell<Player<P>>>,
         password: Option<String>,
-        local_handler: LocalLobbyCommandHandler<P, A>,
-        lobby: UseStateHandle<RefCell<Lobby<P, A>>>,
-        update_ui: Callback<Lobby<P, A>>,
+        local_handler: LocalLobbyCommandHandler<P, A, AR>,
+        lobby: UseStateHandle<RefCell<Lobby<P, A, AR>>>,
+        update_ui: Callback<Lobby<P, A, AR>>,
     ) -> Self {
         let handler = Self {
             lobby_id,
@@ -201,14 +202,15 @@ where
     }
 }
 
-impl<P, A> LobbyCommandHandler<P, A> for WebSocketLobbyCommandHandler<P, A>
+impl<P, A, AR> LobbyCommandHandler<P, A, AR> for WebSocketLobbyCommandHandler<P, A, AR>
 where
     P: PlayerData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
     A: ActivityData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
+    AR: ActivityResultData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
 {
     fn handle_command(
         &self,
-        _lobby: &mut Lobby<P, A>,
+        _lobby: &mut Lobby<P, A, AR>,
         command: LobbyCommand,
     ) -> Result<(), CommandError> {
         // If the sender is None, try to reconnect
