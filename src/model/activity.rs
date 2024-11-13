@@ -19,7 +19,7 @@ pub struct Activity<T>
 where
     T: ActivityData,
 {
-    pub id: String,
+    pub id: ActivityId,
     pub data: T,
     pub status: ActivityStatus,
 }

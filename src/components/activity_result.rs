@@ -24,6 +24,8 @@ where
     let minutes = result.data.time_taken() / 60;
     let seconds = result.data.time_taken() % 60;
 
+    log::debug!("{:?}", player.id);
+
     html! {
         <div class="konnekt-session-activity-result">
             <div class="konnekt-session-activity-result__player">

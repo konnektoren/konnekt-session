@@ -40,6 +40,17 @@ where
         })
     };
 
+    log::debug!("Rendering lobby: {:?}", props.lobby.player_id);
+    log::debug!(
+        "{:?}",
+        props
+            .lobby
+            .participants
+            .iter()
+            .map(|p| p.id.clone())
+            .collect::<Vec<_>>()
+    );
+
     html! {
         <div class="konnekt-session-lobby">
             <h1 class="konnekt-session-lobby__title">{"Lobby"}</h1>

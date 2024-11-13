@@ -358,4 +358,23 @@ mod tests {
         assert!(completed.is_some());
         assert_eq!(completed.unwrap().status, ActivityStatus::Done);
     }
+
+    #[test]
+    fn test_update_player_id() {
+        let admin = Player::new(
+            Role::Admin,
+            PlayerProfile {
+                id: "123".to_string(),
+                name: "Test Admin".to_string(),
+            },
+        );
+
+        let mut lobby: Lobby<PlayerProfile, Challenge, ChallengeResult> = Lobby::new(admin, None);
+
+        let new_id = Uuid::new_v4();
+        lobby.update_player_id(&new_id);
+
+        assert_eq!(lobby.player_id, new_id);
+        assert_eq!(lobby.get_admin().unwrap().id, new_id);
+    }
 }

@@ -32,6 +32,8 @@ where
                         }
                     }
                     None => {
+                        log::warn!("Player not found for result: {:?}", result.player_id);
+                        log::warn!("Players: {:?}", players.iter().map(|p| p.id.clone()).collect::<Vec<_>>());
                         html! {
                             <div class="konnekt-session-activity-result">
                                 <div class="konnekt-session-activity-result__player">
