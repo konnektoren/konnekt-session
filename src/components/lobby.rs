@@ -70,7 +70,7 @@ where
                     </div>
                 </div>
                 <div class="konnekt-session-lobby_results">
-                <ActivityResultListComp<AR> results={props.lobby.results.clone()} />
+                <ActivityResultListComp<P, AR> players={props.lobby.participants.clone()} results={props.lobby.results.clone()} />
                 </div>
             </div>
         </div>

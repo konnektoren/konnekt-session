@@ -5,7 +5,7 @@ pub type PlayerId = Uuid;
 
 pub trait PlayerTrait: Identifiable + Named + Clone + PartialEq {}
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Player<T>
 where
     T: PlayerTrait,

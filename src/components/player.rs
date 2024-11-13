@@ -16,7 +16,9 @@ where
 {
     html! {
         <div class="konnekt-session-player">
-            <h2 class="konnekt-session-player__name">{props.player.name()}</h2>
+            <h2 class="konnekt-session-player__name">
+            <i class="fas fa-user konnekt-session-player__icon"></i>
+            {props.player.name()}</h2>
         </div>
     }
 }
