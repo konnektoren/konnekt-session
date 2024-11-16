@@ -2,7 +2,7 @@ use crate::components::PlayerComp;
 use crate::model::{Player, PlayerTrait};
 use yew::prelude::*;
 
-#[derive(Properties, PartialEq, Clone)]
+#[derive(Properties, PartialEq)]
 pub struct PlayerListProps<T>
 where
     T: PlayerTrait + 'static,
@@ -18,9 +18,8 @@ where
     html! {
         <div class="konnekt-session-player-list">
             {for props.players.iter().map(|player| {
-                let player: Player<T> = player.clone();
                 html! {
-                    <PlayerComp<T> {player} />
+                    <PlayerComp<T> player={player.clone()} />
                 }
             })}
         </div>

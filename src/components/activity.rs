@@ -1,10 +1,10 @@
-use crate::model::{Activity, ActivityData, ActivityStatus, LobbyCommand, Named, PlayerId, Role};
+use crate::model::{Activity, ActivityStatus, ActivityTrait, LobbyCommand, Named, PlayerId, Role};
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq, Clone)]
 pub struct ActivityProps<T>
 where
-    T: ActivityData + 'static,
+    T: ActivityTrait + 'static,
 {
     pub player_id: PlayerId,
     pub activity: Activity<T>,
@@ -15,7 +15,7 @@ where
 #[function_component(ActivityComp)]
 pub fn activity_comp<T>(props: &ActivityProps<T>) -> Html
 where
-    T: ActivityData + 'static,
+    T: ActivityTrait + 'static,
 {
     let is_admin = props.role == Role::Admin;
     let activity = &props.activity;

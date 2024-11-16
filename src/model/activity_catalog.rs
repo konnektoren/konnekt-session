@@ -1,18 +1,27 @@
-use crate::model::ActivityData;
+use crate::model::{ActivityId, ActivityTrait};
 
 use super::Activity;
 
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct ActivityCatalog<T>
 where
-    T: ActivityData,
+    T: ActivityTrait,
 {
     pub activities: Vec<Activity<T>>,
 }
 
+impl<T> Default for ActivityCatalog<T>
+where
+    T: ActivityTrait,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> ActivityCatalog<T>
 where
-    T: ActivityData,
+    T: ActivityTrait,
 {
     pub fn new() -> Self {
         ActivityCatalog {
@@ -31,8 +40,8 @@ where
         self.activities.push(activity);
     }
 
-    pub fn get_activity(&self, id: &str) -> Option<&Activity<T>> {
-        self.activities.iter().find(|activity| activity.id == id)
+    pub fn get_activity(&self, id: &ActivityId) -> Option<&Activity<T>> {
+        self.activities.iter().find(|activity| activity.id.eq(id))
     }
 }
 
@@ -59,7 +68,7 @@ mod tests {
         }
     }
 
-    impl ActivityData for Challenge {}
+    impl ActivityTrait for Challenge {}
 
     #[test]
     fn create_activity_catalog() {
@@ -82,7 +91,13 @@ mod tests {
         assert_eq!(activities[0].data, challenge1);
         assert_eq!(activities[1].data, challenge2);
 
-        assert_eq!(catalog.get_activity("123").unwrap().data, challenge1);
-        assert_eq!(catalog.get_activity("456").unwrap().data, challenge2);
+        assert_eq!(
+            catalog.get_activity(&"123".to_string()).unwrap().data,
+            challenge1
+        );
+        assert_eq!(
+            catalog.get_activity(&"456".to_string()).unwrap().data,
+            challenge2
+        );
     }
 }

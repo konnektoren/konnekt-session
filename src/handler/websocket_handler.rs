@@ -1,6 +1,6 @@
 use crate::handler::LocalLobbyCommandHandler;
 use crate::model::{
-    ActivityData, ActivityResultTrait, CommandError, Lobby, LobbyCommand, LobbyCommandHandler,
+    ActivityResultTrait, ActivityTrait, CommandError, Lobby, LobbyCommand, LobbyCommandHandler,
     LobbyCommandWrapper, Player, PlayerTrait,
 };
 use futures::{SinkExt, StreamExt};
@@ -18,7 +18,7 @@ type WebSocketSender = futures::stream::SplitSink<WebSocket, Message>;
 #[derive(Clone)]
 pub struct WebSocketLobbyCommandHandler<
     P: PlayerTrait,
-    A: ActivityData,
+    A: ActivityTrait,
     AR: ActivityResultTrait + Serialize,
 > {
     lobby_id: Uuid,
@@ -34,7 +34,7 @@ pub struct WebSocketLobbyCommandHandler<
 impl<P, A, AR> WebSocketLobbyCommandHandler<P, A, AR>
 where
     P: PlayerTrait + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
-    A: ActivityData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
+    A: ActivityTrait + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
     AR: ActivityResultTrait + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
 {
     pub fn new(
@@ -122,7 +122,7 @@ where
                 {
                     log::error!("Error handling command: {:?}", e);
                 } else {
-                    self.update_ui.emit((&*lobby_borrow).clone());
+                    self.update_ui.emit((*lobby_borrow).clone());
                 }
 
                 self.join_lobby();
@@ -139,7 +139,7 @@ where
                 {
                     log::error!("Error handling command: {:?}", e);
                 } else {
-                    self.update_ui.emit((&*lobby_borrow).clone());
+                    self.update_ui.emit((*lobby_borrow).clone());
                 }
             }
             _ => {
@@ -150,7 +150,7 @@ where
                 {
                     log::error!("Error handling command: {:?}", e);
                 } else {
-                    self.update_ui.emit((&*lobby_borrow).clone());
+                    self.update_ui.emit((*lobby_borrow).clone());
                 }
             }
         }
@@ -159,7 +159,7 @@ where
     fn send_lobby_state(&self) {
         log::info!("Sending lobby state");
         for participant in self.lobby.borrow().participants.iter() {
-            let command = LobbyCommand::ParticipantInfo {
+            let command = LobbyCommand::PlayerInfo {
                 player_id: participant.id,
                 role: participant.role,
                 data: serde_json::to_string(&participant.data).unwrap(),
@@ -209,7 +209,7 @@ where
 impl<P, A, AR> LobbyCommandHandler<P, A, AR> for WebSocketLobbyCommandHandler<P, A, AR>
 where
     P: PlayerTrait + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
-    A: ActivityData + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
+    A: ActivityTrait + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
     AR: ActivityResultTrait + Serialize + for<'de> Deserialize<'de> + 'static + std::fmt::Debug,
 {
     fn handle_command(

@@ -3,8 +3,8 @@ use crate::config::Config;
 use crate::example::{Challenge, ChallengeComp, ChallengeResult, PlayerProfile};
 use crate::handler::{LocalLobbyCommandHandler, WebSocketLobbyCommandHandler};
 use crate::model::{
-    Activity, ActivityData, ActivityResultTrait, ActivityStatus, CommandError, Lobby, LobbyCommand,
-    LobbyCommandHandler, Player, PlayerTrait, Role,
+    Activity, ActivityResultTrait, ActivityStatus, ActivityTrait, CommandError, Lobby,
+    LobbyCommand, LobbyCommandHandler, Player, PlayerTrait, Role,
 };
 use serde::Serialize;
 use std::cell::RefCell;
@@ -46,7 +46,7 @@ fn init_lobby(
 
 fn hash_lobby<
     P: PlayerTrait + Hash,
-    A: ActivityData + Hash,
+    A: ActivityTrait + Hash,
     AR: ActivityResultTrait + Hash + Serialize,
 >(
     lobby: &Lobby<P, A, AR>,
@@ -66,9 +66,9 @@ pub struct LobbyProps {
 
 #[function_component(LobbyPage)]
 pub fn lobby_page(props: &LobbyProps) -> Html {
-    let config = use_state(|| Config::default());
-    let role = use_state(|| props.player.role.clone());
-    let lobby_id = use_state(|| props.lobby_id.clone());
+    let config = use_state(Config::default);
+    let role = use_state(|| props.player.role);
+    let lobby_id = use_state(|| props.lobby_id);
 
     let player = use_state(|| RefCell::new(props.player.clone()));
     let lobby =
@@ -131,15 +131,15 @@ pub fn lobby_page(props: &LobbyProps) -> Html {
             let value = target.value();
             let selected_role = match value.as_str() {
                 "Admin" => Role::Admin,
-                "Participant" => Role::Participant,
-                _ => Role::Participant,
+                "Participant" => Role::Player,
+                _ => Role::Player,
             };
             role.set(selected_role);
         }
     };
 
     // Get current lobby state
-    let current_lobby = (&*lobby.borrow()).clone();
+    let current_lobby = (*lobby.borrow()).clone();
 
     html! {
         <div>
@@ -156,7 +156,7 @@ pub fn lobby_page(props: &LobbyProps) -> Html {
                 {on_error}
             />
             <RunningActivityComp<Challenge, ChallengeComp>
-                player_id={props.player.id.clone()}
+                player_id={props.player.id}
                 activities={current_lobby.activities.clone()}
                 role={*role}
                 on_command={on_command}

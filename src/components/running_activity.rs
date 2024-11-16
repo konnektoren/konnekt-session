@@ -1,12 +1,12 @@
 use super::ActivityProps;
-use crate::model::{Activity, ActivityData, ActivityStatus, LobbyCommand, PlayerId, Role};
+use crate::model::{Activity, ActivityStatus, ActivityTrait, LobbyCommand, PlayerId, Role};
 use std::marker::PhantomData;
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct RunningActivityProps<T, C>
 where
-    T: ActivityData + 'static,
+    T: ActivityTrait + 'static,
     C: Component<Properties = ActivityProps<T>> + PartialEq + 'static,
 {
     pub player_id: PlayerId,
@@ -20,7 +20,7 @@ where
 #[function_component(RunningActivityComp)]
 pub fn running_activity<T, C>(props: &RunningActivityProps<T, C>) -> Html
 where
-    T: ActivityData + 'static,
+    T: ActivityTrait + 'static,
     C: Component<Properties = ActivityProps<T>> + PartialEq + 'static,
 {
     let current_activity = props

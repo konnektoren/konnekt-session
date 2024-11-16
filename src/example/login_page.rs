@@ -16,8 +16,8 @@ pub struct LoginProps {
 #[function_component(LoginPage)]
 pub fn login_page(props: &LoginProps) -> Html {
     let username = use_state(|| "".to_string());
-    let password = use_state(|| Password::default());
-    let role = use_state(|| Role::Participant);
+    let password = use_state(Password::default);
+    let role = use_state(|| Role::Player);
     let lobby_id = use_state(|| "".to_string());
 
     let on_username_change = {
@@ -46,9 +46,9 @@ pub fn login_page(props: &LoginProps) -> Html {
             let select = e.target_unchecked_into::<web_sys::HtmlSelectElement>();
             let selected_role = match select.value().as_str() {
                 "Admin" => Role::Admin,
-                "Participant" => Role::Participant,
+                "Participant" => Role::Player,
                 "Observer" => Role::Observer,
-                _ => Role::Participant,
+                _ => Role::Player,
             };
             role.set(selected_role);
         })
@@ -79,7 +79,7 @@ pub fn login_page(props: &LoginProps) -> Html {
 
             let role = match lobby_id.is_empty() {
                 true => Role::Admin,
-                false => (*role).clone(),
+                false => *role,
             };
 
             let player = Player::new(role, profile);

@@ -1,19 +1,17 @@
-use crate::model::{ActivityStatus, Role};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
 use super::{ActivityId, PlayerId};
+use crate::model::{ActivityStatus, LobbyId, Role};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LobbyCommand {
     Join {
-        player_id: Uuid,
-        lobby_id: Uuid,
+        player_id: PlayerId,
+        lobby_id: LobbyId,
         role: Role,
         data: String,
         password: Option<String>,
     },
-    ParticipantInfo {
+    PlayerInfo {
         player_id: PlayerId,
         role: Role,
         data: String,
@@ -26,10 +24,7 @@ pub enum LobbyCommand {
     SelectActivity {
         activity_id: ActivityId,
     },
-    AddParticipant {
-        participant_id: PlayerId,
-    },
-    RemoveParticipant {
+    RemovePlayer {
         participant_id: PlayerId,
     },
     StartActivity {
@@ -54,7 +49,7 @@ pub enum LobbyCommand {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LobbyCommandWrapper {
-    pub lobby_id: Uuid,
+    pub lobby_id: LobbyId,
     pub password: Option<String>,
     pub command: LobbyCommand,
 }
@@ -62,7 +57,7 @@ pub struct LobbyCommandWrapper {
 #[derive(Debug)]
 pub enum CommandError {
     ActivityNotFound(String),
-    ParticipantNotFound(Uuid),
+    PlayerNotFound(PlayerId),
     NotAuthorized,
     InvalidOperation(String),
 }

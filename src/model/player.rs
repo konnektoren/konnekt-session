@@ -5,7 +5,7 @@ pub type PlayerId = Uuid;
 
 pub trait PlayerTrait: Identifiable + Named + Clone + PartialEq {}
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Hash, Default)]
 pub struct Player<T>
 where
     T: PlayerTrait,
@@ -78,7 +78,7 @@ mod tests {
             name: "Test Player".to_string(),
         };
 
-        let player: Player<PlayerProfile> = Player::new(Role::Participant, player_profile);
+        let player: Player<PlayerProfile> = Player::new(Role::Player, player_profile);
 
         assert_eq!(player.identifier(), "123");
         assert_eq!(player.name(), "Test Player");

@@ -1,11 +1,11 @@
 use serde::Serialize;
 
-use super::{ActivityData, ActivityResultTrait, CommandError, Lobby, LobbyCommand, PlayerTrait};
+use super::{ActivityResultTrait, ActivityTrait, CommandError, Lobby, LobbyCommand, PlayerTrait};
 
 pub trait LobbyCommandHandler<P, A, AR>
 where
     P: PlayerTrait,
-    A: ActivityData,
+    A: ActivityTrait,
     AR: ActivityResultTrait + Serialize,
 {
     fn handle_command(

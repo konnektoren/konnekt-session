@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Hash, Serialize, Deserialize)]
 pub enum Role {
     Admin,
     #[default]
-    Participant,
+    Player,
     Observer,
 }
 
@@ -13,7 +13,7 @@ impl fmt::Display for Role {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Role::Admin => write!(f, "Admin"),
-            Role::Participant => write!(f, "Participant"),
+            Role::Player => write!(f, "Player"),
             Role::Observer => write!(f, "Observer"),
         }
     }
@@ -23,9 +23,9 @@ impl From<String> for Role {
     fn from(s: String) -> Self {
         match s.as_str() {
             "Admin" => Role::Admin,
-            "Participant" => Role::Participant,
+            "Player" => Role::Player,
             "Observer" => Role::Observer,
-            _ => Role::Participant,
+            _ => Role::Player,
         }
     }
 }
@@ -34,9 +34,9 @@ impl From<&str> for Role {
     fn from(s: &str) -> Self {
         match s {
             "Admin" => Role::Admin,
-            "Participant" => Role::Participant,
+            "Player" => Role::Player,
             "Observer" => Role::Observer,
-            _ => Role::Participant,
+            _ => Role::Player,
         }
     }
 }
@@ -48,29 +48,29 @@ mod tests {
     #[test]
     fn default_role() {
         let role = Role::default();
-        assert_eq!(role, Role::Participant);
+        assert_eq!(role, Role::Player);
     }
 
     #[test]
     fn role_to_string() {
         assert_eq!(Role::Admin.to_string(), "Admin");
-        assert_eq!(Role::Participant.to_string(), "Participant");
+        assert_eq!(Role::Player.to_string(), "Player");
         assert_eq!(Role::Observer.to_string(), "Observer");
     }
 
     #[test]
     fn string_to_role() {
         assert_eq!(Role::from("Admin".to_string()), Role::Admin);
-        assert_eq!(Role::from("Participant".to_string()), Role::Participant);
+        assert_eq!(Role::from("Player".to_string()), Role::Player);
         assert_eq!(Role::from("Observer".to_string()), Role::Observer);
-        assert_eq!(Role::from("Unknown".to_string()), Role::Participant);
+        assert_eq!(Role::from("Unknown".to_string()), Role::Player);
     }
 
     #[test]
     fn str_to_role() {
         assert_eq!(Role::from("Admin"), Role::Admin);
-        assert_eq!(Role::from("Participant"), Role::Participant);
+        assert_eq!(Role::from("Player"), Role::Player);
         assert_eq!(Role::from("Observer"), Role::Observer);
-        assert_eq!(Role::from("Unknown"), Role::Participant);
+        assert_eq!(Role::from("Unknown"), Role::Player);
     }
 }

@@ -1,6 +1,6 @@
 use crate::model::{
-    Activity, ActivityCatalog, ActivityData, ActivityResult, ActivityResultTrait, ActivityStatus,
-    Player, PlayerTrait, Role,
+    Activity, ActivityCatalog, ActivityId, ActivityResult, ActivityResultTrait, ActivityStatus,
+    ActivityTrait, Player, PlayerTrait, Role,
 };
 use serde::Serialize;
 use uuid::Uuid;
@@ -13,7 +13,7 @@ pub type LobbyId = Uuid;
 pub struct Lobby<P, A, AR>
 where
     P: PlayerTrait,
-    A: ActivityData,
+    A: ActivityTrait,
     AR: ActivityResultTrait + Serialize,
 {
     pub id: LobbyId,
@@ -28,7 +28,7 @@ where
 impl<P, A, AR> Lobby<P, A, AR>
 where
     P: PlayerTrait,
-    A: ActivityData,
+    A: ActivityTrait,
     AR: ActivityResultTrait + Serialize,
 {
     pub fn new(admin: Player<P>, password: Option<String>) -> Self {
@@ -114,13 +114,11 @@ where
         &self.activities
     }
 
-    pub fn select_activity(&mut self, activity_id: &str) -> Option<&Activity<A>> {
-        // Check if activity is already selected
-        if self.activities.iter().any(|a| a.id == activity_id) {
-            return self.activities.iter().find(|a| a.id == activity_id);
+    pub fn select_activity(&mut self, activity_id: &ActivityId) -> Option<&Activity<A>> {
+        if self.activities.iter().any(|a| a.id.eq(activity_id)) {
+            return self.activities.iter().find(|a| a.id.eq(activity_id));
         }
 
-        // If not already selected, get from catalog and add
         if let Some(activity) = self.catalog.get_activity(activity_id) {
             let activity = activity.clone();
             self.activities.push(activity);
@@ -221,7 +219,7 @@ mod tests {
         }
     }
 
-    impl ActivityData for Challenge {}
+    impl ActivityTrait for Challenge {}
 
     #[derive(PartialEq, Clone, Serialize)]
     struct ChallengeResult {}
@@ -271,7 +269,7 @@ mod tests {
         let mut lobby: Lobby<PlayerProfile, Challenge, ChallengeResult> = Lobby::new(admin, None);
 
         let participant = Player::new(
-            Role::Participant,
+            Role::Player,
             PlayerProfile {
                 id: "456".to_string(),
                 name: "Test Participant".to_string(),
@@ -281,7 +279,7 @@ mod tests {
         lobby.add_participant(participant);
 
         assert_eq!(lobby.participants.len(), 2);
-        assert_eq!(lobby.participants[1].role, Role::Participant);
+        assert_eq!(lobby.participants[1].role, Role::Player);
         assert_eq!(lobby.participants[1].data.identifier(), "456");
         assert_eq!(lobby.participants[1].data.name(), "Test Participant");
     }
@@ -319,7 +317,7 @@ mod tests {
         assert_eq!(lobby.activities.len(), 1);
 
         // Selecting non-existent activity should fail
-        assert!(lobby.select_activity("nonexistent").is_none());
+        assert!(lobby.select_activity(&"nonexistent".to_string()).is_none());
         assert_eq!(lobby.activities.len(), 1);
     }
 

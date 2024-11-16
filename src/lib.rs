@@ -19,10 +19,10 @@ pub mod prelude {
     pub use crate::handler::WebSocketLobbyCommandHandler;
     pub use crate::model::Activity;
     pub use crate::model::ActivityCatalog;
-    pub use crate::model::ActivityData;
     pub use crate::model::ActivityResult;
     pub use crate::model::ActivityResultTrait;
     pub use crate::model::ActivityStatus;
+    pub use crate::model::ActivityTrait;
     pub use crate::model::CommandError;
     pub use crate::model::Identifiable;
     pub use crate::model::Lobby;

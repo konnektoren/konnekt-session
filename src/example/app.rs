@@ -24,7 +24,7 @@ pub fn app() -> Html {
         })
     };
 
-    match (&*state).clone() {
+    match (*state).clone() {
         AppState::Login => {
             html! {
                 <LoginPage
@@ -35,9 +35,9 @@ pub fn app() -> Html {
         AppState::Lobby((role, player, lobby_id, password)) => {
             html! {
                 <LobbyPage
-                    role={role.clone()}
+                    role={role}
                     player={player.clone()}
-                    lobby_id={lobby_id.clone()}
+                    lobby_id={lobby_id}
                     password={password.clone()}
                 />
             }

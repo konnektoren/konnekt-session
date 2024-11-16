@@ -32,7 +32,7 @@ impl WebSocketListener {
         // Generate unique player ID
         let player_id = Uuid::new_v4();
         let lobby_id = lobby_id.unwrap_or_else(Uuid::new_v4);
-        let role = Role::Participant; // Assume role; this could be set dynamically
+        let role = Role::Player; // Assume role; this could be set dynamically
 
         // Create a new Connection and add it to the WebSocketServer
         let connection = Connection {

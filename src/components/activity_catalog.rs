@@ -1,10 +1,10 @@
-use crate::model::{Activity, ActivityCatalog, ActivityData, Named};
+use crate::model::{Activity, ActivityCatalog, ActivityTrait, Named};
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq, Clone)]
 pub struct ActivityCatalogProps<T>
 where
-    T: ActivityData + 'static,
+    T: ActivityTrait + 'static,
 {
     pub catalog: ActivityCatalog<T>,
     pub on_select: Callback<Activity<T>>,
@@ -13,7 +13,7 @@ where
 #[function_component(ActivityCatalogComp)]
 pub fn activity_catalog_comp<T>(props: &ActivityCatalogProps<T>) -> Html
 where
-    T: ActivityData + 'static,
+    T: ActivityTrait + 'static,
 {
     html! {
         <div class="konnekt-session-activity-catalog">

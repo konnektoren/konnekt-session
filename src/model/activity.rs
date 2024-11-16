@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 pub type ActivityId = String;
 
-pub trait ActivityData: Named + Identifiable + Clone + PartialEq {}
+pub trait ActivityTrait: Named + Identifiable + Clone + PartialEq {}
 
 #[derive(Default, Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
 pub enum ActivityStatus {
@@ -17,7 +17,7 @@ pub enum ActivityStatus {
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Activity<T>
 where
-    T: ActivityData,
+    T: ActivityTrait,
 {
     pub id: ActivityId,
     pub data: T,
@@ -26,7 +26,7 @@ where
 
 impl<T> Activity<T>
 where
-    T: ActivityData,
+    T: ActivityTrait,
 {
     pub fn new(data: T) -> Self {
         Activity {
@@ -39,7 +39,7 @@ where
 
 impl<T> Named for Activity<T>
 where
-    T: ActivityData,
+    T: ActivityTrait,
 {
     fn name(&self) -> &str {
         self.data.name()
@@ -71,7 +71,7 @@ mod tests {
             }
         }
 
-        impl ActivityData for Challenge {}
+        impl ActivityTrait for Challenge {}
 
         let challenge = Challenge {
             id: "123".to_string(),

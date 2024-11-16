@@ -1,33 +1,33 @@
 use serde::Serialize;
+use std::rc::Rc;
 
 use crate::model::{
-    Activity, ActivityData, ActivityResult, ActivityResultTrait, CommandError, Lobby, LobbyCommand,
-    LobbyCommandHandler, Player, PlayerTrait,
+    Activity, ActivityResult, ActivityResultTrait, ActivityTrait, CommandError, Lobby,
+    LobbyCommand, LobbyCommandHandler, Player, PlayerTrait,
 };
-use std::sync::Arc;
 
 #[derive(Clone)]
-pub struct LocalLobbyCommandHandler<P: PlayerTrait, A: ActivityData, AR: ActivityResultTrait> {
-    player_data_deserializer: Arc<dyn Fn(&str) -> P + Send + Sync>,
-    activity_data_deserializer: Arc<dyn Fn(&str) -> A + Send + Sync>,
-    activity_result_data_deserializer: Arc<dyn Fn(&str) -> AR + Send + Sync>,
+pub struct LocalLobbyCommandHandler<P: PlayerTrait, A: ActivityTrait, AR: ActivityResultTrait> {
+    player_data_deserializer: Rc<dyn Fn(&str) -> P>,
+    activity_data_deserializer: Rc<dyn Fn(&str) -> A>,
+    activity_result_data_deserializer: Rc<dyn Fn(&str) -> AR>,
 }
 
 impl<P, A, AR> LocalLobbyCommandHandler<P, A, AR>
 where
     P: PlayerTrait,
-    A: ActivityData,
+    A: ActivityTrait,
     AR: ActivityResultTrait,
 {
     pub fn new(
-        player_data_deserializer: impl Fn(&str) -> P + Send + Sync + 'static,
-        activity_data_deserializer: impl Fn(&str) -> A + Send + Sync + 'static,
-        activity_result_data_deserializer: impl Fn(&str) -> AR + Send + Sync + 'static,
+        player_data_deserializer: impl Fn(&str) -> P + 'static,
+        activity_data_deserializer: impl Fn(&str) -> A + 'static,
+        activity_result_data_deserializer: impl Fn(&str) -> AR + 'static,
     ) -> Self {
         Self {
-            player_data_deserializer: Arc::new(player_data_deserializer),
-            activity_data_deserializer: Arc::new(activity_data_deserializer),
-            activity_result_data_deserializer: Arc::new(activity_result_data_deserializer),
+            player_data_deserializer: Rc::new(player_data_deserializer),
+            activity_data_deserializer: Rc::new(activity_data_deserializer),
+            activity_result_data_deserializer: Rc::new(activity_result_data_deserializer),
         }
     }
 }
@@ -35,7 +35,7 @@ where
 impl<P, A, AR> LobbyCommandHandler<P, A, AR> for LocalLobbyCommandHandler<P, A, AR>
 where
     P: PlayerTrait,
-    A: ActivityData,
+    A: ActivityTrait,
     AR: ActivityResultTrait + Serialize,
 {
     fn handle_command(
@@ -58,7 +58,7 @@ where
 
                 Ok(())
             }
-            LobbyCommand::ParticipantInfo {
+            LobbyCommand::PlayerInfo {
                 player_id,
                 role,
                 data,
@@ -88,14 +88,10 @@ where
                     .ok_or(CommandError::ActivityNotFound(activity_id))?;
                 Ok(())
             }
-            LobbyCommand::AddParticipant { .. } => {
-                // Implementation needed when you have the participant data
-                Ok(())
-            }
-            LobbyCommand::RemoveParticipant { participant_id } => {
+            LobbyCommand::RemovePlayer { participant_id } => {
                 lobby
                     .remove_participant(participant_id)
-                    .ok_or(CommandError::ParticipantNotFound(participant_id))?;
+                    .ok_or(CommandError::PlayerNotFound(participant_id))?;
                 Ok(())
             }
             LobbyCommand::StartActivity { activity_id } => {
