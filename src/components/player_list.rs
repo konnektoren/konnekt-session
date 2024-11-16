@@ -1,5 +1,5 @@
 use crate::components::PlayerComp;
-use crate::model::{Player, PlayerTrait};
+use crate::model::{Player, PlayerId, PlayerTrait};
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
@@ -8,6 +8,8 @@ where
     T: PlayerTrait + 'static,
 {
     pub players: Vec<Player<T>>,
+    #[prop_or_default]
+    pub on_select: Callback<PlayerId>,
 }
 
 #[function_component(PlayerListComp)]
@@ -18,8 +20,11 @@ where
     html! {
         <div class="konnekt-session-player-list">
             {for props.players.iter().map(|player| {
+                let player_id = player.id.clone();
                 html! {
-                    <PlayerComp<T> player={player.clone()} />
+                    <div onclick={props.on_select.reform(move |_| player_id)}>
+                        <PlayerComp<T> player={player.clone()} />
+                    </div>
                 }
             })}
         </div>
