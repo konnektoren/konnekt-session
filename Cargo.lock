@@ -183,6 +183,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "colorid"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cbd23a7f7b25383aa95c83d8848ec1e7ae858d9f872bd16044a3cb5a1e47b340"
+dependencies = [
+ "getrandom",
+]
+
+[[package]]
 name = "console_error_panic_hook"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -948,6 +957,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "colorid",
  "futures",
  "futures-util",
  "getrandom",

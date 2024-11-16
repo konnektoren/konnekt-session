@@ -18,7 +18,7 @@ where
     html! {
         <div class="konnekt-session-player">
             <h2 class="konnekt-session-player__name">
-            <AvatarComp player_id={props.player.id} />
+            <AvatarComp player_id={props.player.id} color={true} />
             {props.player.name()}</h2>
         </div>
     }

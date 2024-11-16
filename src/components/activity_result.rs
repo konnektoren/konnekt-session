@@ -1,3 +1,4 @@
+use super::AvatarComp;
 use crate::model::{ActivityResult, ActivityResultTrait, Named, Player, PlayerTrait};
 use serde::Serialize;
 use yew::prelude::*;
@@ -24,11 +25,10 @@ where
     let minutes = result.data.time_taken() / 60;
     let seconds = result.data.time_taken() % 60;
 
-    log::debug!("{:?}", player.id);
-
     html! {
         <div class="konnekt-session-activity-result">
             <div class="konnekt-session-activity-result__player">
+                <AvatarComp player_id={player.id.clone()} />
                 {player.name()}
             </div>
             <div class="konnekt-session-activity-result__score">

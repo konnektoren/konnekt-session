@@ -9,7 +9,6 @@ fa-horse
 fa-hippo
 fa-kiwi-bird
 fa-otter
-fa-paw
 fa-spider
 fa-cow
 fa-mosquito
