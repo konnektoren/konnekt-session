@@ -1,5 +1,5 @@
 use crate::components::ActivityResultComp;
-use crate::model::{ActivityResult, ActivityResultTrait, Player, PlayerTrait};
+use crate::model::{ActivityResult, ActivityResultTrait, Player, PlayerId, PlayerTrait};
 use serde::Serialize;
 use yew::prelude::*;
 
@@ -11,6 +11,8 @@ where
 {
     pub players: Vec<Player<P>>,
     pub results: Vec<ActivityResult<T>>,
+    #[prop_or_default]
+    pub on_select: Callback<(PlayerId, ActivityResult<T>)>,
 }
 
 #[function_component(ActivityResultListComp)]
@@ -20,6 +22,7 @@ where
     T: ActivityResultTrait + Serialize + 'static,
 {
     let players = props.players.clone();
+
     html! {
         <div class="konnekt-session-activity-result-list">
             {for props.results.iter().map(|result| {
@@ -27,13 +30,22 @@ where
                 match players.iter().find(|player| player.id == result.player_id) {
                     Some(player) => {
                         let player = player.clone();
+                        let on_select = {
+
+                            let player_id = player.id.clone();
+                            let activity_result = result.clone();
+                            let callback = props.on_select.clone();
+                            Callback::from(move |_| {
+                                callback.emit((player_id.clone(), activity_result.clone()))
+                            })
+                        };
                         html! {
-                            <ActivityResultComp<P, T> {player} {result} />
+                            <div onclick={on_select} >
+                                <ActivityResultComp<P, T> player={player} result={result} />
+                            </div>
                         }
                     }
                     None => {
-                        log::warn!("Player not found for result: {:?}", result.player_id);
-                        log::warn!("Players: {:?}", players.iter().map(|p| p.id).collect::<Vec<_>>());
                         html! {
                             <div class="konnekt-session-activity-result">
                                 <div class="konnekt-session-activity-result__player">

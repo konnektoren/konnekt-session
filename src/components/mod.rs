@@ -1,6 +1,7 @@
 mod activity;
 mod activity_catalog;
 mod activity_result;
+mod activity_result_detail;
 mod activity_result_list;
 mod avatar;
 mod lobby;
@@ -10,7 +11,8 @@ mod running_activity;
 
 pub use activity::{ActivityComp, ActivityProps};
 pub use activity_catalog::ActivityCatalogComp;
-pub use activity_result::ActivityResultComp;
+pub use activity_result::{ActivityResultComp, ActivityResultProps};
+pub use activity_result_detail::{ActivityResultDetailComp, ActivityResultDetailProps};
 pub use activity_result_list::ActivityResultListComp;
 pub use avatar::{AvatarComp, AvatarProps};
 pub use lobby::LobbyComp;

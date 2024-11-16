@@ -1,10 +1,12 @@
-use crate::components::{LobbyComp, RunningActivityComp};
+use crate::components::{ActivityResultDetailComp, LobbyComp, RunningActivityComp};
 use crate::config::Config;
-use crate::example::{Challenge, ChallengeComp, ChallengeResult, PlayerProfile};
+use crate::example::{
+    Challenge, ChallengeComp, ChallengeResult, ChallengeResultComp, PlayerProfile,
+};
 use crate::handler::{LocalLobbyCommandHandler, WebSocketLobbyCommandHandler};
 use crate::model::{
-    Activity, ActivityResultTrait, ActivityStatus, ActivityTrait, CommandError, Lobby,
-    LobbyCommand, LobbyCommandHandler, Player, PlayerTrait, Role,
+    Activity, ActivityResult, ActivityResultTrait, ActivityStatus, ActivityTrait, CommandError,
+    Lobby, LobbyCommand, LobbyCommandHandler, Player, PlayerId, PlayerTrait, Role,
 };
 use serde::Serialize;
 use std::cell::RefCell;
@@ -74,6 +76,9 @@ pub fn lobby_page(props: &LobbyProps) -> Html {
     let lobby =
         use_state(|| RefCell::new(init_lobby(props.player.clone(), props.password.clone())));
 
+    let selected_activity_result =
+        use_state(|| None::<(PlayerId, ActivityResult<ChallengeResult>)>);
+
     let last_event = use_state(|| 0);
 
     // Create WebSocket handler
@@ -131,15 +136,46 @@ pub fn lobby_page(props: &LobbyProps) -> Html {
             let value = target.value();
             let selected_role = match value.as_str() {
                 "Admin" => Role::Admin,
-                "Participant" => Role::Player,
+                "Player" => Role::Player,
                 _ => Role::Player,
             };
             role.set(selected_role);
         }
     };
 
-    // Get current lobby state
     let current_lobby = (*lobby.borrow()).clone();
+
+    let activity_result_detail = {
+        let lobby = lobby.borrow().clone();
+        match selected_activity_result.as_ref() {
+            Some((player_id, result)) => {
+                let player = lobby
+                    .participants
+                    .iter()
+                    .find(|p| p.id == *player_id)
+                    .unwrap()
+                    .clone();
+                html! {
+                    <ActivityResultDetailComp<_, _, ChallengeResultComp>
+                        {player}
+                        result={result.clone()}
+                    />
+                }
+            }
+            None => {
+                html! {}
+            }
+        }
+    };
+
+    let on_activity_result_select = {
+        let selected_activity_result = selected_activity_result.clone();
+
+        Callback::from(move |(player_id, result): (PlayerId, ActivityResult<ChallengeResult>)| {
+            log::info!("on_activity_result_select");
+            selected_activity_result.set(Some((player_id, result.clone())));
+        })
+    };
 
     html! {
         <div>
@@ -154,7 +190,9 @@ pub fn lobby_page(props: &LobbyProps) -> Html {
                 role={*role}
                 on_command={on_command.clone()}
                 {on_error}
+                {on_activity_result_select}
             />
+            {activity_result_detail}
             <RunningActivityComp<Challenge, ChallengeComp>
                 player_id={props.player.id}
                 activities={current_lobby.activities.clone()}

@@ -1,10 +1,12 @@
 use crate::components::{
-    ActivityCatalogComp, ActivityComp, ActivityResultListComp, PlayerListComp,
+    ActivityCatalogComp, ActivityComp, ActivityResultListComp
+    , PlayerListComp,
 };
 use crate::model::{
-    Activity, ActivityResultTrait, ActivityTrait, CommandError, Lobby, LobbyCommand, PlayerTrait,
-    Role,
+    Activity, ActivityResult, ActivityResultTrait, ActivityTrait, CommandError, Lobby,
+    LobbyCommand, PlayerTrait, Role,
 };
+use crate::prelude::PlayerId;
 use serde::Serialize;
 use yew::prelude::*;
 
@@ -20,6 +22,8 @@ where
     pub on_command: Callback<LobbyCommand>,
     #[prop_or_default]
     pub on_error: Callback<CommandError>,
+    #[prop_or_default]
+    pub on_activity_result_select: Callback<(PlayerId, ActivityResult<AR>)>,
 }
 
 #[function_component(LobbyComp)]
@@ -39,17 +43,6 @@ where
             });
         })
     };
-
-    log::debug!("Rendering lobby: {:?}", props.lobby.player_id);
-    log::debug!(
-        "{:?}",
-        props
-            .lobby
-            .participants
-            .iter()
-            .map(|p| p.id)
-            .collect::<Vec<_>>()
-    );
 
     html! {
         <div class="konnekt-session-lobby">
@@ -81,7 +74,9 @@ where
                     </div>
                 </div>
                 <div class="konnekt-session-lobby_results">
-                <ActivityResultListComp<P, AR> players={props.lobby.participants.clone()} results={props.lobby.results.clone()} />
+                <ActivityResultListComp<P, AR> players={props.lobby.participants.clone()} results={props.lobby.results.clone()}
+                    on_select={props.on_activity_result_select.clone()}
+                />
                 </div>
             </div>
         </div>

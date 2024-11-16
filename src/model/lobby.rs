@@ -141,6 +141,7 @@ where
     }
 
     pub fn start_activity(&mut self, activity_id: &str) -> Option<&Activity<A>> {
+        self.results.clear();
         if let Some(activity) = self.activities.iter_mut().find(|a| a.id == activity_id) {
             activity.status = ActivityStatus::InProgress;
             Some(activity)
@@ -168,6 +169,9 @@ where
         status: ActivityStatus,
     ) -> Option<&Activity<A>> {
         if let Some(activity) = self.activities.iter_mut().find(|a| a.id == activity_id) {
+            if status == ActivityStatus::NotStarted {
+                self.results.clear();
+            }
             activity.status = status;
             Some(activity)
         } else {
