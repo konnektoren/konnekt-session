@@ -1,3 +1,4 @@
+use super::AvatarComp;
 use crate::model::{Named, Player, PlayerTrait};
 use yew::prelude::*;
 
@@ -17,7 +18,7 @@ where
     html! {
         <div class="konnekt-session-player">
             <h2 class="konnekt-session-player__name">
-            <i class="fas fa-user konnekt-session-player__icon"></i>
+            <AvatarComp player_id={props.player.id} />
             {props.player.name()}</h2>
         </div>
     }
