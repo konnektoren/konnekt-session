@@ -6,6 +6,7 @@ use crate::model::{ActivityResultTrait, Identifiable, Scorable, Timable};
 pub struct ChallengeResult {
     pub id: String,
     pub performance: u8,
+    pub selection: String,
 }
 
 impl Identifiable for ChallengeResult {
@@ -22,7 +23,10 @@ impl Timable for ChallengeResult {
 
 impl Scorable for ChallengeResult {
     fn score(&self) -> u32 {
-        self.performance as u32
+        match self.selection.as_str() {
+            "Correct" => 1,
+            _ => 0,
+        }
     }
 }
 

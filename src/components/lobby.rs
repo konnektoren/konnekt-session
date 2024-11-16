@@ -1,6 +1,5 @@
 use crate::components::{
-    ActivityCatalogComp, ActivityComp, ActivityResultListComp
-    , PlayerListComp,
+    ActivityCatalogComp, ActivityComp, ActivityResultListComp, PlayerListComp,
 };
 use crate::model::{
     Activity, ActivityResult, ActivityResultTrait, ActivityTrait, CommandError, Lobby,

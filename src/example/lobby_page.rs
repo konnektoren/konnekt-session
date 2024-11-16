@@ -171,10 +171,12 @@ pub fn lobby_page(props: &LobbyProps) -> Html {
     let on_activity_result_select = {
         let selected_activity_result = selected_activity_result.clone();
 
-        Callback::from(move |(player_id, result): (PlayerId, ActivityResult<ChallengeResult>)| {
-            log::info!("on_activity_result_select");
-            selected_activity_result.set(Some((player_id, result.clone())));
-        })
+        Callback::from(
+            move |(player_id, result): (PlayerId, ActivityResult<ChallengeResult>)| {
+                log::info!("on_activity_result_select");
+                selected_activity_result.set(Some((player_id, result.clone())));
+            },
+        )
     };
 
     html! {

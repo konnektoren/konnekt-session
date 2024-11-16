@@ -17,6 +17,19 @@ impl Component for ChallengeResultComp {
     fn view(&self, ctx: &Context<Self>) -> Html {
         let props = ctx.props().clone();
 
+        let selection = props.result.data.selection.clone();
+
+        let answer_correct = match selection.as_str() {
+            "Correct" => true,
+            _ => false,
+        };
+
+        let icon_class = if answer_correct {
+            "fas fa-check konnekt-session-result__selection-icon--correct"
+        } else {
+            "fas fa-times konnekt-session-result__selection-icon--incorrect"
+        };
+
         html! {
             <div class="konnekt-session-activity-result">
                 <div class="konnekt-session-activity-result__player">
@@ -30,6 +43,10 @@ impl Component for ChallengeResultComp {
                 <div class="konnekt-session-activity-result__time">
                     <span><i class="fas fa-clock konnekt-session-result__time-icon"></i>{"Time"}</span>
                     <span>{format!("{}:{:02}", props.result.data.time_taken() / 60, props.result.data.time_taken() % 60)}</span>
+                </div>
+                <div class="konnekt-session-activity-result__selection">
+                    <span><i class={icon_class}></i>{"Selection"}</span>
+                    <span>{selection}</span>
                 </div>
             </div>
         }
