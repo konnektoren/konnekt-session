@@ -1,20 +1,30 @@
 = Konnekt Session
 
-Konnekt Session is a library for managing multiplayer game sessions, including player management, activity tracking, and WebSocket communication.
+Konnekt Session is a library for managing multiplayer game sessions. It provides a lobby for players to join, where admins can select activities for the lobby, and players can participate in these activities. Admins can start and stop activities, and the results of the activities are displayed to all players.
 
 == Introduction and Goals
 
-Konnekt Session aims to provide a flexible framework for managing multiplayer game sessions. It supports both client-side and server-side implementations, allowing for seamless integration with front-end and back-end.
+Konnekt Session aims to provide a flexible framework for managing multiplayer game sessions. It offers Yew components for the front-end and server-side routing for the players. Clients connect via WebSocket to the server, which handles communication between clients. Every action of the players is broadcasted to all other players in the same lobby, ensuring the state of the lobby is synchronized between all players. Joining clients will get their initial state from the admin.
 
 == Constraints
 
 - The library is implemented in Rust.
 - It supports WebSocket communication for real-time updates.
 - It is designed to be extensible and modular.
+- Model and components for specific games will be implemented in separate crates.
 
 == Context and Scope
 
-Konnekt Session is intended to be used in simple multiplayer game applications where people play their own games, but manage which to play at the same time. It provides the necessary components to manage players, activities, and communication between clients and servers.
+Konnekt Session is intended for use in simple multiplayer game applications where players manage and play their own games simultaneously. It provides the necessary components to manage players, activities, and communication between clients and the routing server.
+
+The solution is divided into several modules, each responsible for a specific aspect of session management. The main components include:
+
+- `model`: Defines the core data structures and traits.
+- `handler`: Provides command handling logic.
+- `components`: Contains Yew components for the front-end.
+- `server`: Implements the server-side logic using Axum and WebSocket.
+
+The library is designed to be modular and extensible, allowing developers to implement specific game logic and components in separate crates.
 
 == Solution Strategy
 
@@ -32,11 +42,35 @@ The solution is divided into several modules, each responsible for a specific as
 [plantuml, "overall-system", png]
 ----
 @startuml
-package "Konnekt Session" {
-    [Model] --> [Handler]
-    [Handler] --> [Components]
-    [Handler] --> [Server]
-}
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Konnekt Session - Overall System
+
+Person(user, "User", "A player or admin using the system")
+
+Container(client, "WebSocket Client", "Yew Components", "Handles user interface and local state")
+
+Container(server, "WebSocket Server", "Axum + WebSocket", "Manages connections and message routing")
+
+ComponentDb(storage, "Memory Storage", "In-Memory Database", "Stores connections and lobby data")
+
+Component(model, "Model", "Core Types", "Defines data structures and traits")
+Component(handler, "Handler", "Command Logic", "Processes game commands")
+Component(components, "Components", "Yew UI", "User interface components")
+
+Rel(user, client, "Uses", "HTTP/WebSocket")
+Rel(client, server, "Connects to", "WebSocket")
+Rel(server, storage, "Uses", "In-Memory")
+
+Rel(client, model, "Uses")
+Rel(client, handler, "Uses")
+Rel(client, components, "Uses")
+
+Rel(server, model, "Uses")
+Rel(server, handler, "Uses")
+
+SHOW_FLOATING_LEGEND()
+
 @enduml
 ----
 
@@ -47,40 +81,47 @@ The `model` module defines the core data structures and traits used throughout t
 [plantuml, "model-module", png]
 ----
 @startuml
-package "Model" {
-    class Activity {
-        +id: String
-        +data: T
-        +status: ActivityStatus
-    }
-    class ActivityStatus {
-        +NotStarted
-        +InProgress
-        +Done
-    }
-    class Player {
-        +id: Uuid
-        +role: Role
-        +data: T
-    }
-    class Role {
-        +Admin
-        +Participant
-        +Observer
-    }
-    class Lobby {
-        +id: Uuid
-        +player_id: Uuid
-        +participants: Vec<Player<P>>
-        +catalog: ActivityCatalog<A>
-        +activities: Vec<Activity<A>>
-        +password: Option<String>
-    }
-    Activity --> ActivityStatus
-    Player --> Role
-    Lobby --> Player
-    Lobby --> Activity
-}
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+
+title Model Module - Core Data Structures
+
+' Core Traits
+Component(identifiable, "Identifiable", "Trait", "Provides unique identification")
+Component(named, "Named", "Trait", "Provides naming functionality")
+Component(scorable, "Scorable", "Trait", "Provides scoring capability")
+Component(timable, "Timable", "Trait", "Provides timing functionality")
+
+' Core Types
+Component(activity, "Activity<T>", "Generic Type", "Represents a game activity\n+id: String\n+data: T\n+status: ActivityStatus")
+Component(activityStatus, "ActivityStatus", "Enum", "Activity state\n+NotStarted\n+InProgress\n+Done")
+Component(activityCatalog, "ActivityCatalog<T>", "Generic Type", "Collection of available activities")
+
+Component(player, "Player<T>", "Generic Type", "Represents a participant\n+id: UUID\n+role: Role\n+data: T")
+Component(role, "Role", "Enum", "Participant role\n+Admin\n+Player\n+Observer")
+
+Component(lobby, "Lobby<P,A,AR>", "Generic Type", "Game session container\n+id: UUID\n+player_id: UUID\n+participants: Vec<Player<P>>\n+catalog: ActivityCatalog<A>\n+activities: Vec<Activity<A>>\n+password: Option<String>")
+
+Component(activityResult, "ActivityResult<T>", "Generic Type", "Activity completion data\n+activity_id: String\n+player_id: UUID\n+data: T")
+
+' Relationships
+Rel(activity, activityStatus, "Uses")
+Rel(activity, identifiable, "Implements")
+Rel(activity, named, "Implements")
+
+Rel(player, role, "Uses")
+Rel(player, identifiable, "Implements")
+Rel(player, named, "Implements")
+
+Rel(activityResult, scorable, "Implements")
+Rel(activityResult, timable, "Implements")
+Rel(activityResult, identifiable, "Implements")
+
+Rel(lobby, player, "Contains")
+Rel(lobby, activity, "Contains")
+Rel(lobby, activityCatalog, "Contains")
+Rel(lobby, activityResult, "Contains")
+
 @enduml
 ----
 
@@ -91,18 +132,32 @@ The `handler` module provides the logic for handling commands and updating the s
 [plantuml, "handler-module", png]
 ----
 @startuml
-package "Handler" {
-    class LocalLobbyCommandHandler {
-        +handle_command(lobby: &mut Lobby<P, A>, command: LobbyCommand) -> Result<(), CommandError>
-        +send_command(command: LobbyCommand) -> Result<(), CommandError>
-    }
-    class WebSocketLobbyCommandHandler {
-        +handle_command(lobby: &mut Lobby<P, A>, command: LobbyCommand) -> Result<(), CommandError>
-        +send_command(command: LobbyCommand) -> Result<(), CommandError>
-    }
-    LocalLobbyCommandHandler --> Lobby
-    WebSocketLobbyCommandHandler --> Lobby
-}
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Handler Module - Command Processing
+
+' Core Interface
+Component(commandHandler, "LobbyCommandHandler", "Trait", "Command handling interface")
+
+' Handler Implementations
+Component(localHandler, "LocalLobbyCommandHandler", "Local Handler", "Processes commands locally")
+Component(wsHandler, "WebSocketLobbyCommandHandler", "WebSocket Handler", "Processes commands via WebSocket")
+
+' Related Components
+Component(lobby, "Lobby", "State Container", "Manages game session state")
+Component(command, "LobbyCommand", "Command Type", "Game session commands")
+Component(error, "CommandError", "Error Type", "Command processing errors")
+
+' Relationships
+Rel_Up(localHandler, commandHandler, "Implements")
+Rel_Up(wsHandler, commandHandler, "Implements")
+
+Rel(localHandler, lobby, "Modifies")
+Rel(wsHandler, lobby, "Modifies")
+
+Rel(commandHandler, command, "Processes")
+Rel(commandHandler, error, "Produces")
+
 @enduml
 ----
 
@@ -113,35 +168,48 @@ The `components` module contains Yew components for the front-end.
 [plantuml, "components-module", png]
 ----
 @startuml
-package "Components" {
-    class ActivityComp {
-        +activity: Activity<T>
-        +role: Role
-        +on_command: Callback<LobbyCommand>
-    }
-    class LobbyComp {
-        +lobby: Lobby<P, A>
-        +role: Role
-        +on_command: Callback<LobbyCommand>
-        +on_error: Callback<CommandError>
-    }
-    class PlayerComp {
-        +player: Player<T>
-    }
-    class PlayerListComp {
-        +players: Vec<Player<T>>
-    }
-    class RunningActivityComp {
-        +activities: Vec<Activity<T>>
-        +role: Role
-        +on_command: Callback<LobbyCommand>
-    }
-    ActivityComp --> Activity
-    LobbyComp --> Lobby
-    PlayerComp --> Player
-    PlayerListComp --> Player
-    RunningActivityComp --> Activity
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Components Module - User Interface
+
+Container(yewUi, "Yew UI Components", "Frontend", "User interface components")
+
+' Main Components
+Component(lobbyComp, "LobbyComp", "Container Component", "Main lobby interface")
+Component(activityComp, "ActivityComp", "UI Component", "Single activity view")
+Component(runningComp, "RunningActivityComp", "UI Component", "Active activity interface")
+Component(playerComp, "PlayerComp", "UI Component", "Single player view")
+Component(playerListComp, "PlayerListComp", "UI Component", "Players list view")
+
+' Core Models Used
+Container_Boundary(models, "Core Models") {
+    Component(lobby, "Lobby", "Model", "Game session state")
+    Component(activity, "Activity", "Model", "Game activity")
+    Component(player, "Player", "Model", "Session participant")
 }
+
+' Event System
+Component(callback, "Callbacks", "Event System", "Command and error handling")
+
+' Layout and Relationships
+Rel(lobbyComp, lobby, "Uses")
+Rel(lobbyComp, callback, "Triggers events")
+
+Rel(activityComp, activity, "Displays")
+Rel(activityComp, callback, "Triggers events")
+
+Rel(runningComp, activity, "Displays")
+Rel(runningComp, callback, "Triggers events")
+
+Rel(playerComp, player, "Displays")
+Rel(playerListComp, player, "Displays")
+
+' Component Hierarchy
+Rel_Up(activityComp, lobbyComp, "Child of")
+Rel_Up(runningComp, lobbyComp, "Child of")
+Rel_Up(playerListComp, lobbyComp, "Child of")
+Rel_Up(playerComp, playerListComp, "Child of")
+
 @enduml
 ----
 
@@ -149,36 +217,54 @@ package "Components" {
 
 The `server` module implements the server-side logic using Axum and WebSocket.
 
-[plantuml, "server-module", png]
+[plantuml, "server-component", png]
 ----
 @startuml
-package "Server" {
-    class WebSocketServer {
-        +add_connection(connection: Connection)
-        +handle_command(command: &LobbyCommandWrapper)
-        +broadcast_to_lobby(lobby_id: Uuid, command: &LobbyCommandWrapper)
-        +send_command(command: &LobbyCommandWrapper, connection: &Connection)
-        +remove_connection(lobby_id: Uuid, player_id: Uuid)
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+
+title Server Components - Component Diagram
+
+Container_Boundary(server, "Server") {
+    Component(wsServer, "WebSocketServer", "Core", "Manages connections and message routing")
+
+    Container_Boundary(repos, "Repositories") {
+        Component(connRepo, "ConnectionRepository", "Trait", "Connection management interface")
+        Component(lobbyRepo, "LobbyRepository", "Trait", "Lobby management interface")
+        ComponentDb(memStorage, "MemoryStorage", "Repository Implementation")
     }
-    class WebSocketListener {
-        +handle_websocket(ws: WebSocketUpgrade, lobby_id: Option<Uuid>, server: WebSocketServer)
-        +websocket_connection(socket: WebSocket, lobby_id: Option<Uuid>, server: WebSocketServer)
+
+    Component(wsListener, "WebSocketListener", "Handler", "Handles WebSocket connections")
+
+    Container_Boundary(types, "Types") {
+        Component(connection, "Connection", "Data Type", "Stores connection state")
+        Component(command, "LobbyCommandWrapper", "Data Type", "Encapsulates commands")
     }
-    class MemoryStorage {
-        +add_connection(connection: Connection)
-        +remove_connection(player_id: Uuid)
-        +get_connection(player_id: Uuid)
-        +get_all_connections()
-        +add_player_to_lobby(lobby_id: Uuid, player_id: Uuid)
-        +remove_player_from_lobby(lobby_id: Uuid, player_id: Uuid)
-        +get_players_in_lobby(lobby_id: Uuid)
-        +get_all_lobbies()
-    }
-    WebSocketServer --> Connection
-    WebSocketListener --> WebSocketServer
-    MemoryStorage --> Connection
-    MemoryStorage --> Lobby
 }
+
+System_Ext(client, "Client", "WebSocket Client")
+Container_Ext(axum, "Axum", "Web Framework")
+Container_Ext(tokio, "Tokio", "Async Runtime")
+
+' Repository Implementation
+Rel_Down(memStorage, connRepo, "Implements")
+Rel_Down(memStorage, lobbyRepo, "Implements")
+
+' Core Relationships
+Rel(wsListener, wsServer, "Uses")
+Rel(wsServer, connRepo, "Uses")
+Rel(wsServer, lobbyRepo, "Uses")
+Rel(wsServer, command, "Processes")
+Rel(wsServer, connection, "Manages")
+
+' External Dependencies
+Rel_Down(wsListener, axum, "Uses")
+Rel_Down(wsServer, tokio, "Uses")
+
+' Client Communication
+Rel_Left(client, wsListener, "Connects to")
+Rel_Left(wsServer, client, "Sends messages to")
+
 @enduml
 ----
 
@@ -189,15 +275,103 @@ The runtime view describes how the components interact at runtime.
 [plantuml, "runtime-view", png]
 ----
 @startuml
-actor User
-participant "WebSocketClient" as Client
-participant "WebSocketServer" as Server
-participant "Lobby" as Lobby
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Dynamic.puml
 
-User -> Client: Send Command
-Client -> Server: WebSocket Message
-Server -> Lobby: Handle Command
-Server -> Client: Broadcast Update
+title Runtime Interaction Flow
+
+Person(user, "User", "A player or admin")
+Container(client, "WebSocket Client", "Frontend", "Yew application")
+Container(server, "WebSocket Server", "Backend", "Axum WebSocket server")
+Container_Boundary(storage, "Storage") {
+    ComponentDb(connStorage, "Connection Storage", "In-memory", "Stores active connections")
+    ComponentDb(lobbyStorage, "Lobby Storage", "In-memory", "Stores lobby state")
+}
+
+Rel_D(user, client, "1. Interacts with UI")
+Rel_R(client, server, "2. Sends command\nvia WebSocket")
+Rel_D(server, connStorage, "3. Validates connection")
+Rel_D(server, lobbyStorage, "4. Updates lobby state")
+Rel_L(server, client, "5. Broadcasts update\nto all lobby members")
+
+@enduml
+----
+
+=== Admin Join Sequence
+
+=== Admin Join Sequence
+
+[plantuml, "admin-join-sequence", png]
+----
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Admin Join Sequence
+
+actor Admin as user
+participant "WebSocket Client" as client
+participant "WebSocket Server" as server
+participant "Connection Storage" as connStorage
+participant "Lobby Storage" as lobbyStorage
+
+user -> client : Connect to WebSocket
+activate client
+client -> server : Send Join Command (Admin)
+activate server
+server -> connStorage : Add Connection
+activate connStorage
+connStorage --> server : Connection Added
+deactivate connStorage
+server -> lobbyStorage : Create Lobby
+activate lobbyStorage
+lobbyStorage --> server : Lobby Created
+deactivate lobbyStorage
+server --> client : Send Acknowledgment
+deactivate server
+deactivate client
+
+@enduml
+----
+
+=== Participant Join Sequence
+
+[plantuml, "participant-join-sequence", png]
+----
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Participant Join Sequence
+
+actor Participant as participant
+actor Admin as admin
+participant "WebSocket Client (Participant)" as client_participant
+participant "WebSocket Client (Admin)" as client_admin
+participant "WebSocket Server" as server
+participant "Connection Storage" as connStorage
+participant "Lobby Storage" as lobbyStorage
+
+participant -> client_participant : Connect to WebSocket
+activate client_participant
+client_participant -> server : Send Join Command (Participant)
+activate server
+server -> connStorage : Add Connection
+activate connStorage
+connStorage --> server : Connection Added
+deactivate connStorage
+server -> lobbyStorage : Add Participant to Lobby
+activate lobbyStorage
+lobbyStorage --> server : Participant Added
+server -> lobbyStorage : Get Lobby State
+lobbyStorage --> server : Return Lobby State
+deactivate lobbyStorage
+server -> client_admin : Request Lobby State
+activate client_admin
+client_admin -> server : Send Lobby State
+deactivate client_admin
+server --> client_participant : Send Lobby State
+deactivate server
+client_participant --> participant : Display Lobby State
+deactivate client_participant
+
 @enduml
 ----
 
@@ -205,19 +379,46 @@ Server -> Client: Broadcast Update
 
 The deployment view describes the physical deployment of the system.
 
-[plantuml, "deployment-view", png]
+[plantuml, "deployment-view-detailed", png]
 ----
 @startuml
-node "Client" {
-    [WebSocketClient]
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Deployment.puml
+
+title Konnekt Session - Detailed Deployment
+
+Deployment_Node(client_computer, "Client Computer", "User Device") {
+    Deployment_Node(browser, "Web Browser", "Chrome, Firefox, Safari") {
+        Container(spa, "Single Page Application", "Yew/WASM", "Frontend application")
+        Container(ws_client, "WebSocket Client", "Browser WebSocket API", "Handles real-time communication")
+    }
 }
-node "Server" {
-    [WebSocketServer]
-    [Lobby]
+
+Deployment_Node(server_host, "Server Host", "Cloud VM") {
+    Deployment_Node(os, "Operating System", "Linux") {
+        Deployment_Node(runtime, "Rust Runtime", "Tokio") {
+            Container(ws_server, "WebSocket Server", "Axum", "Handles WebSocket connections")
+            Container(router, "HTTP Router", "Axum", "Routes WebSocket connections")
+            ContainerDb(conn_store, "Connection Storage", "In-Memory", "Active connections")
+            ContainerDb(lobby_store, "Lobby Storage", "In-Memory", "Lobby state")
+        }
+    }
 }
-Client --> Server: WebSocket Connection
+
+' Network Connections
+Rel(client_computer, server_host, "Connects to", "Internet/HTTPS")
+Rel(ws_client, ws_server, "WebSocket Protocol", "ws:// or wss://")
+
+' Internal Server Connections
+Rel_R(ws_server, conn_store, "Manages connections")
+Rel_R(ws_server, lobby_store, "Manages state")
+Rel_D(router, ws_server, "Routes to")
+
+' Internal Client Connections
+Rel_R(spa, ws_client, "Uses")
+
 @enduml
 ----
+
 
 == Crosscutting Concepts
 
@@ -227,9 +428,144 @@ Client --> Server: WebSocket Connection
 
 == Design Decisions
 
-- The library is implemented in Rust for performance and safety.
-- WebSocket is used for real-time communication.
-- The library is designed to be modular and extensible.
+=== Architectural Decisions
+
+[cols="1,2,2", options="header"]
+|===
+|Decision |Description |Rationale
+
+|Decentralized Architecture
+|State is primarily managed by clients, with server acting only as message router
+|* Reduces server load and costs
+* Improves scalability
+* Better fault tolerance
+* Allows for offline capability
+* Enables peer-to-peer transition
+
+|Rust Implementation
+|Core library written in Rust
+|* Memory safety
+* Thread safety
+* Performance
+* WebAssembly compatibility
+* Strong type system
+
+|WebSocket Communication
+|(Current) Real-time communication via WebSocket,
+planned migration to WebRTC
+|* Low latency communication
+* Bi-directional messaging
+* Future P2P capabilities via WebRTC
+* Reduced server dependency
+
+|Modular Design
+|Components are highly decoupled and trait-based
+|* Extensibility
+* Reusability
+* Testing flexibility
+* Custom implementations
+|===
+
+=== State Management
+
+[cols="1,2,2", options="header"]
+|===
+|Aspect |Implementation |Benefits
+
+|Client State
+|Each client maintains full game state
+|* Continued operation during connection loss
+* Reduced server load
+* Quick local updates
+
+|Server State
+|Minimal state for connection management only
+|* Improved scalability
+* Simpler server implementation
+* Easier deployment
+
+|State Synchronization
+|Broadcast-based with admin as source of truth
+|* Natural conflict resolution
+* Simple recovery mechanism
+* Clear authority chain
+|===
+
+=== Future Enhancements
+
+[cols="1,2,2", options="header"]
+|===
+|Feature |Description |Benefits
+
+|WebRTC Migration
+|Replace WebSocket with WebRTC for communication
+|* True peer-to-peer communication
+* Reduced server requirements
+* Direct client connections
+* Better scalability
+
+|Offline Support
+|Enhanced offline capabilities and state management
+|* Continued operation without connection
+* Local-first architecture
+* Better user experience
+
+|State Reconciliation
+|Improved mechanisms for state synchronization
+|* Better conflict resolution
+* Smoother reconnection
+* Enhanced consistency
+|===
+
+=== Technical Choices
+
+[cols="1,4", options="header"]
+|===
+|Technology |Justification
+
+|Yew
+|* Rust-based frontend framework
+* WebAssembly performance
+* Type-safe components
+
+|Axum
+|* Modern Rust web framework
+* Excellent async support
+* Built for WebSocket
+* Easy routing
+
+|Tokio
+|* Proven async runtime
+* Excellent performance
+|===
+
+=== Key Design Principles
+
+1. *Decentralization First*
+- Design for minimal server dependency
+- Enable future peer-to-peer transition
+- Support offline-capable operations
+
+2. *Safety and Performance*
+- Leverage Rust's safety guarantees
+- Optimize for real-time interactions
+- Ensure robust error handling
+
+3. *Extensibility*
+- Trait-based interfaces
+- Pluggable components
+- Custom implementation support
+
+4. *User Experience*
+- Low latency operations
+- Graceful degradation
+- Smooth recovery from disconnections
+
+These design decisions create a foundation for:
+- A robust, scalable system
+- Future peer-to-peer capabilities
+- Excellent user experience
+- Flexible implementation options
 
 == Risks and Technical Debt
 
@@ -238,9 +574,96 @@ Client --> Server: WebSocket Connection
 
 == Glossary
 
-- **Lobby**: A session where players can join and participate in activities.
-- **Activity**: A task or challenge that players can complete within a lobby.
-- **Player**: A participant in a lobby, identified by a unique ID and role.
+=== Core Concepts
+
+[cols="1,4", options="header"]
+|===
+|Term |Description
+
+|Lobby
+|A virtual session room where players gather and participate in activities. Contains information about participants, available activities, and session state. Identified by a unique UUID.
+
+|Activity
+|A specific task, game, or challenge within a lobby that participants can engage in. Has states (NotStarted, InProgress, Done) and can collect results from participants.
+
+|Player
+|A participant in a lobby with a specific role (Admin, Player, Observer). Identified by a unique UUID and can interact with activities based on their role.
+
+|===
+
+=== Roles
+
+[cols="1,4", options="header"]
+|===
+|Role |Description
+
+|Admin
+|Session administrator who can manage activities, start/stop them, and control the lobby. Has full control over the session.
+
+|Player
+|Regular participant who can join activities and submit results. Has limited control based on activity permissions.
+
+|Observer
+|Passive participant who can view activities and results but cannot participate actively. Has read-only access.
+
+|===
+
+=== Technical Terms
+
+[cols="1,4", options="header"]
+|===
+|Term |Description
+
+|WebSocket Connection
+|Persistent bidirectional communication channel between client and server, enabling real-time updates.
+
+|Command
+|Instruction sent between client and server to perform actions (e.g., JoinLobby, StartActivity).
+
+|Activity Result
+|Data structure containing a participant's completion data for an activity, including score and time taken.
+
+|Activity Catalog
+|Collection of available activities that can be selected for the lobby.
+
+|===
+
+=== States
+
+[cols="1,4", options="header"]
+|===
+|State |Description
+
+|NotStarted
+|Initial state of an activity before it begins.
+
+|InProgress
+|State when an activity is currently being performed by participants.
+
+|Done
+|Final state after an activity is completed and results are collected.
+
+|===
+
+=== Implementation Concepts
+
+[cols="1,4", options="header"]
+|===
+|Term |Description
+
+|Repository
+|Trait-based storage interface for managing connections and lobby state.
+
+|Handler
+|Component responsible for processing commands and managing state changes.
+
+|Connection
+|Represents an active WebSocket connection with associated player and lobby information.
+
+|Command Wrapper
+|Structure containing a command along with its target lobby ID and optional authentication.
+
+|===
 
 == References
 
