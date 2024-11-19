@@ -130,6 +130,7 @@ where
                 lobby.update_player_id(&player_id);
                 Ok(())
             }
+            LobbyCommand::RequestState { .. } => Ok(()),
         }
     }
 

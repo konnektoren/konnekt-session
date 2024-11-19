@@ -45,6 +45,7 @@ pub enum LobbyCommand {
     UpdatePlayerId {
         player_id: PlayerId,
     },
+    RequestState,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

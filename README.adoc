@@ -2,6 +2,16 @@
 
 Konnekt Session is a library for managing multiplayer game sessions. It provides a lobby for players to join, where admins can select activities for the lobby, and players can participate in these activities. Admins can start and stop activities, and the results of the activities are displayed to all players.
 
+== Usage
+
+=== Frontend
+
+trunk serve
+
+=== Backend
+
+cargo run --features=server --bin server
+
 == Introduction and Goals
 
 Konnekt Session aims to provide a flexible framework for managing multiplayer game sessions. It offers Yew components for the front-end and server-side routing for the players. Clients connect via WebSocket to the server, which handles communication between clients. Every action of the players is broadcasted to all other players in the same lobby, ensuring the state of the lobby is synchronized between all players. Joining clients will get their initial state from the admin.

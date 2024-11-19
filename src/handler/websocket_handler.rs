@@ -86,6 +86,9 @@ where
                     .expect("Failed to send lobby ID");
             }
         });
+
+        let command = LobbyCommand::RequestState;
+        self.send_command(command).unwrap();
     }
 
     fn connect(&self) {
@@ -140,6 +143,11 @@ where
                     log::error!("Error handling command: {:?}", e);
                 } else {
                     self.update_ui.emit((*lobby_borrow).clone());
+                }
+            }
+            LobbyCommand::RequestState => {
+                if self.lobby.borrow().is_admin() {
+                    self.send_lobby_state();
                 }
             }
             _ => {
