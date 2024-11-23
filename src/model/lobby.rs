@@ -1,11 +1,10 @@
+use super::PlayerId;
 use crate::model::{
     Activity, ActivityCatalog, ActivityId, ActivityResult, ActivityResultTrait, ActivityStatus,
     ActivityTrait, Player, PlayerTrait, Role,
 };
 use serde::Serialize;
 use uuid::Uuid;
-
-use super::PlayerId;
 
 pub type LobbyId = Uuid;
 
@@ -31,9 +30,9 @@ where
     A: ActivityTrait,
     AR: ActivityResultTrait + Serialize,
 {
-    pub fn new(admin: Player<P>, password: Option<String>) -> Self {
+    pub fn new_with_id(lobby_id: LobbyId, admin: Player<P>, password: Option<String>) -> Self {
         Lobby {
-            id: Uuid::new_v4(),
+            id: lobby_id,
             player_id: admin.id,
             participants: vec![admin],
             catalog: ActivityCatalog::new(),
@@ -41,6 +40,17 @@ where
             password,
             results: Vec::new(),
         }
+    }
+}
+
+impl<P, A, AR> Lobby<P, A, AR>
+where
+    P: PlayerTrait,
+    A: ActivityTrait,
+    AR: ActivityResultTrait + Serialize,
+{
+    pub fn new(admin: Player<P>, password: Option<String>) -> Self {
+        Self::new_with_id(LobbyId::new_v4(), admin, password)
     }
 
     pub fn join(&mut self, player: Player<P>, password: Option<String>) -> Result<(), String> {
@@ -59,35 +69,17 @@ where
             .iter_mut()
             .find(|p| p.id == self.player_id)
         {
-            log::debug!("Updating player ID from: {:?}", player.id);
             player.id = *player_id;
         }
 
-        log::debug!("Updating player ID to: {:?}", player_id);
         self.player_id = *player_id;
     }
 
     pub fn add_participant(&mut self, participant: Player<P>) {
-        log::debug!("Adding participant: {:?}", participant.id);
-        log::debug!(
-            "Current participants: {:?}",
-            self.participants
-                .iter()
-                .map(|p| p.id.to_string())
-                .collect::<Vec<String>>()
-        );
-
-        for p in &self.participants {
-            log::debug!("Existing participant ID: {:?}", p.id);
-        }
-        log::debug!("New participant ID: {:?}", participant.id);
-
         if self.participants.iter().any(|p| p.id == participant.id) {
-            log::debug!("Participant already in lobby");
             return;
         }
 
-        log::debug!("Participant not found, adding");
         self.participants.push(participant);
     }
 
@@ -157,6 +149,14 @@ where
         } else {
             None
         }
+    }
+
+    pub fn update_activity_info(
+        &mut self,
+        activity_id: &ActivityId,
+        _data: A,
+    ) -> Option<&Activity<A>> {
+        self.select_activity(activity_id)
     }
 
     pub fn add_activity_result(&mut self, result: ActivityResult<AR>) {

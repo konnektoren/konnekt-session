@@ -19,10 +19,7 @@ impl Component for ChallengeResultComp {
 
         let selection = props.result.data.selection.clone();
 
-        let answer_correct = match selection.as_str() {
-            "Correct" => true,
-            _ => false,
-        };
+        let answer_correct = matches!(selection.as_str(), "Correct");
 
         let icon_class = if answer_correct {
             "fas fa-check konnekt-session-result__selection-icon--correct"
@@ -33,7 +30,7 @@ impl Component for ChallengeResultComp {
         html! {
             <div class="konnekt-session-activity-result">
                 <div class="konnekt-session-activity-result__player">
-                    <AvatarComp player_id={props.player.id.clone()} />
+                    <AvatarComp player_id={props.player.id} />
                     {props.player.name()}
                 </div>
                 <div class="konnekt-session-activity-result__score">

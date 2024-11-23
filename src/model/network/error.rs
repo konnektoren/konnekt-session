@@ -12,4 +12,10 @@ pub enum NetworkError {
     InvalidData,
     #[error("Unknown network error")]
     UnknownError(String),
+    #[error("Failed to send message")]
+    SendError,
+    #[error("Internal error: {0}")]
+    InternalError(String),
+    #[error("Connection error")]
+    ConnectionError,
 }

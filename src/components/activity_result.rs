@@ -28,7 +28,7 @@ where
     html! {
         <div class="konnekt-session-activity-result">
             <div class="konnekt-session-activity-result__player">
-                <AvatarComp player_id={player.id.clone()} />
+                <AvatarComp player_id={player.id} />
                 {player.name()}
             </div>
             <div class="konnekt-session-activity-result__score">

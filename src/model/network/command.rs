@@ -2,6 +2,7 @@ use crate::model::LobbyId;
 
 use super::ClientId;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum NetworkCommand<T> {
@@ -14,9 +15,11 @@ pub enum NetworkCommand<T> {
         lobby_id: LobbyId,
     },
     Ping {
+        id: Uuid,
         client_id: ClientId,
     },
     Pong {
+        id: Uuid,
         client_id: ClientId,
     },
     Message {

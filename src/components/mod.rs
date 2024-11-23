@@ -5,9 +5,11 @@ mod activity_result_detail;
 mod activity_result_list;
 mod avatar;
 mod lobby;
+mod lobby_provider;
 mod player;
 mod player_list;
 mod running_activity;
+pub mod websocket_connection;
 
 pub use activity::{ActivityComp, ActivityProps};
 pub use activity_catalog::ActivityCatalogComp;
@@ -16,6 +18,7 @@ pub use activity_result_detail::{ActivityResultDetailComp, ActivityResultDetailP
 pub use activity_result_list::ActivityResultListComp;
 pub use avatar::{AvatarComp, AvatarProps};
 pub use lobby::LobbyComp;
+pub use lobby_provider::{use_lobby, use_lobby_handler, LobbyProvider, LobbyProviderConfig};
 pub use player::PlayerComp;
 pub use player_list::PlayerListComp;
 pub use running_activity::RunningActivityComp;

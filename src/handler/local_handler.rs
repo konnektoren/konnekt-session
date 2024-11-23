@@ -1,8 +1,8 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::rc::Rc;
 
 use crate::model::{
-    Activity, ActivityResult, ActivityResultTrait, ActivityTrait, CommandError, Lobby,
+    ActivityResult, ActivityResultTrait, ActivityTrait, CommandError, Lobby,
     LobbyCommand, LobbyCommandHandler, Player, PlayerTrait,
 };
 
@@ -13,11 +13,20 @@ pub struct LocalLobbyCommandHandler<P: PlayerTrait, A: ActivityTrait, AR: Activi
     activity_result_data_deserializer: Rc<dyn Fn(&str) -> AR>,
 }
 
+impl<P: PlayerTrait, A: ActivityTrait, AR: ActivityResultTrait> PartialEq
+    for LocalLobbyCommandHandler<P, A, AR>
+{
+    fn eq(&self, _other: &Self) -> bool {
+        // Consider all handlers equal since we can't compare function pointers
+        true
+    }
+}
+
 impl<P, A, AR> LocalLobbyCommandHandler<P, A, AR>
 where
-    P: PlayerTrait,
-    A: ActivityTrait,
-    AR: ActivityResultTrait,
+    P: PlayerTrait + Serialize + for<'de> Deserialize<'de> + 'static,
+    A: ActivityTrait + Serialize + for<'de> Deserialize<'de> + 'static,
+    AR: ActivityResultTrait + Serialize + for<'de> Deserialize<'de> + 'static,
 {
     pub fn new(
         player_data_deserializer: impl Fn(&str) -> P + 'static,
@@ -71,15 +80,13 @@ where
             }
             LobbyCommand::ActivityInfo {
                 activity_id,
-                status,
                 data,
+                ..
             } => {
                 let data = (self.activity_data_deserializer)(&data);
-                lobby.add_activity(Activity {
-                    id: activity_id,
-                    status,
-                    data,
-                });
+                lobby
+                    .update_activity_info(&activity_id, data)
+                    .ok_or(CommandError::ActivityNotFound(activity_id))?;
                 Ok(())
             }
             LobbyCommand::SelectActivity { activity_id } => {
@@ -130,7 +137,7 @@ where
                 lobby.update_player_id(&player_id);
                 Ok(())
             }
-            LobbyCommand::RequestState { .. } => Ok(()),
+            LobbyCommand::RequestState => Ok(()),
         }
     }
 

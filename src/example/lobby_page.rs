@@ -1,23 +1,23 @@
-use crate::components::{ActivityResultDetailComp, LobbyComp, RunningActivityComp};
+use crate::components::{
+    use_lobby, ActivityResultDetailComp, LobbyComp, LobbyProvider, LobbyProviderConfig,
+    RunningActivityComp,
+};
 use crate::config::Config;
 use crate::example::{
     Challenge, ChallengeComp, ChallengeResult, ChallengeResultComp, PlayerProfile,
 };
-use crate::handler::{LocalLobbyCommandHandler, WebSocketLobbyCommandHandler};
+use crate::handler::NetworkHandler;
 use crate::model::{
-    Activity, ActivityResult, ActivityResultTrait, ActivityStatus, ActivityTrait, CommandError,
-    Lobby, LobbyCommand, LobbyCommandHandler, Player, PlayerId, PlayerTrait, Role,
+    Activity, ActivityResult, ActivityStatus, CommandError, Lobby, LobbyCommand,
+    LobbyCommandHandler, LobbyId, Player, PlayerId, Role,
 };
-use serde::Serialize;
-use std::cell::RefCell;
-use std::hash::Hash;
-use std::hash::Hasher;
-use uuid::Uuid;
+use crate::prelude::use_lobby_handler;
 use web_sys::Event;
 use web_sys::HtmlSelectElement;
 use yew::prelude::*;
 
 fn init_lobby(
+    lobby_id: LobbyId,
     player: Player<PlayerProfile>,
     password: Option<String>,
 ) -> Lobby<PlayerProfile, Challenge, ChallengeResult> {
@@ -39,95 +39,27 @@ fn init_lobby(
         },
     };
 
-    let mut lobby = Lobby::<PlayerProfile, Challenge, ChallengeResult>::new(player, password);
+    let mut lobby =
+        Lobby::<PlayerProfile, Challenge, ChallengeResult>::new_with_id(lobby_id, player, password);
     lobby.add_activity(activity1);
     lobby.add_activity(activity2);
 
     lobby
 }
 
-fn hash_lobby<
-    P: PlayerTrait + Hash,
-    A: ActivityTrait + Hash,
-    AR: ActivityResultTrait + Hash + Serialize,
->(
-    lobby: &Lobby<P, A, AR>,
-) -> u64 {
-    let mut hasher = std::hash::DefaultHasher::new();
-    lobby.hash(&mut hasher);
-    hasher.finish()
-}
-
 #[derive(Properties, PartialEq)]
-pub struct LobbyProps {
+pub struct LobbyPageProps {
     pub role: Role,
     pub player: Player<PlayerProfile>,
-    pub lobby_id: Uuid,
+    pub lobby_id: LobbyId,
     pub password: Option<String>,
 }
 
 #[function_component(LobbyPage)]
-pub fn lobby_page(props: &LobbyProps) -> Html {
+pub fn lobby_page(props: &LobbyPageProps) -> Html {
     let config = use_state(Config::default);
     let role = use_state(|| props.player.role);
     let lobby_id = use_state(|| props.lobby_id);
-
-    let player = use_state(|| RefCell::new(props.player.clone()));
-    let lobby =
-        use_state(|| RefCell::new(init_lobby(props.player.clone(), props.password.clone())));
-
-    let selected_activity_result =
-        use_state(|| None::<(PlayerId, ActivityResult<ChallengeResult>)>);
-
-    let last_event = use_state(|| 0);
-
-    // Create WebSocket handler
-    let websocket_handler = use_state(|| {
-        let local_handler =
-            LocalLobbyCommandHandler::<PlayerProfile, Challenge, ChallengeResult>::new(
-                |data: &str| serde_json::from_str(data).expect("Failed to deserialize player data"),
-                |data: &str| {
-                    serde_json::from_str(data).expect("Failed to deserialize challenge data")
-                },
-                |data: &str| {
-                    serde_json::from_str(data).expect("Failed to deserialize challenge result data")
-                },
-            );
-
-        let update_ui = Callback::from(
-            move |lobby: Lobby<PlayerProfile, Challenge, ChallengeResult>| {
-                last_event.set(hash_lobby(&lobby));
-            },
-        );
-
-        let player = player.clone();
-        let password = props.password.clone();
-
-        WebSocketLobbyCommandHandler::new(
-            &config.websocket_url,
-            *lobby_id,
-            player.clone(),
-            password,
-            local_handler.clone(),
-            lobby.clone(),
-            update_ui,
-        )
-    });
-
-    let on_command = {
-        let handler = websocket_handler.clone();
-        Callback::from(move |command: LobbyCommand| {
-            if let Err(err) = handler.send_command(command) {
-                log::info!("Command error: {:?}", err);
-            }
-        })
-    };
-
-    let on_error = {
-        Callback::from(move |err: CommandError| {
-            log::error!("Command error: {:?}", err);
-        })
-    };
 
     let on_change = {
         let role = role.clone();
@@ -143,10 +75,67 @@ pub fn lobby_page(props: &LobbyProps) -> Html {
         }
     };
 
-    let current_lobby = (*lobby.borrow()).clone();
+    let lobby_provider_config = LobbyProviderConfig {
+        websocket_url: config.websocket_url.clone(),
+        player: props.player.clone(),
+        lobby: init_lobby(props.lobby_id, props.player.clone(), props.password.clone()),
+        role: *role,
+        debug: true,
+    };
+
+    html! {
+        <div>
+            <LobbyProvider<PlayerProfile, Challenge, ChallengeResult>
+                config={lobby_provider_config}
+            >
+            <div>{"Connected to lobby: "}{lobby_id.to_string()}</div>
+            <select onchange={on_change} value={role.to_string()}>
+                <option value="Admin">{"Admin"}</option>
+                <option value="Participant">{"Participant"}</option>
+                <option value="Observer">{"Observer"}</option>
+            </select>
+
+            <LobbyInnerComp player={props.player.clone()} role={*role} />
+
+            </LobbyProvider<PlayerProfile, Challenge, ChallengeResult>>
+        </div>
+    }
+}
+
+#[derive(Properties, PartialEq)]
+pub struct LobbyInnerProps {
+    pub role: Role,
+    pub player: Player<PlayerProfile>,
+}
+
+#[function_component(LobbyInnerComp)]
+pub fn lobby_inner_comp(props: &LobbyInnerProps) -> Html {
+    let lobby = use_lobby();
+    let lobby_handler = use_lobby_handler::<PlayerProfile, Challenge, ChallengeResult>();
+
+    let current_lobby = (*lobby).clone();
+
+    let selected_activity_result =
+        use_state(|| None::<(PlayerId, ActivityResult<ChallengeResult>)>);
+
+    let on_command = {
+        let handler = lobby_handler.clone();
+        Callback::from(move |command: LobbyCommand| {
+            let handler: NetworkHandler<_, _, _> = (&*handler).clone();
+            if let Err(err) = handler.send_command(command) {
+                log::info!("Command error: {:?}", err);
+            }
+        })
+    };
+
+    let on_error = {
+        Callback::from(move |err: CommandError| {
+            log::error!("Command error: {:?}", err);
+        })
+    };
 
     let activity_result_detail = {
-        let lobby = lobby.borrow().clone();
+        let lobby = lobby.clone();
         match selected_activity_result.as_ref() {
             Some((player_id, result)) => {
                 let player = lobby
@@ -181,15 +170,9 @@ pub fn lobby_page(props: &LobbyProps) -> Html {
 
     html! {
         <div>
-            <div>{"Connected to lobby: "}{lobby_id.to_string()}</div>
-            <select onchange={on_change} value={role.to_string()}>
-                <option value="Admin">{"Admin"}</option>
-                <option value="Participant">{"Participant"}</option>
-                <option value="Observer">{"Observer"}</option>
-            </select>
-            <LobbyComp<PlayerProfile, Challenge, ChallengeResult>
+        <LobbyComp<PlayerProfile, Challenge, ChallengeResult>
                 lobby={current_lobby.clone()}
-                role={*role}
+                role={props.role}
                 on_command={on_command.clone()}
                 {on_error}
                 {on_activity_result_select}
@@ -198,7 +181,7 @@ pub fn lobby_page(props: &LobbyProps) -> Html {
             <RunningActivityComp<Challenge, ChallengeComp>
                 player_id={props.player.id}
                 activities={current_lobby.activities.clone()}
-                role={*role}
+                role={props.role}
                 on_command={on_command}
             />
         </div>

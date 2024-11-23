@@ -32,11 +32,11 @@ where
                         let player = player.clone();
                         let on_select = {
 
-                            let player_id = player.id.clone();
+                            let player_id = player.id;
                             let activity_result = result.clone();
                             let callback = props.on_select.clone();
                             Callback::from(move |_| {
-                                callback.emit((player_id.clone(), activity_result.clone()))
+                                callback.emit((player_id, activity_result.clone()))
                             })
                         };
                         html! {

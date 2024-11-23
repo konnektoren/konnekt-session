@@ -15,8 +15,6 @@ pub mod prelude {
     pub use crate::components::*;
     pub use crate::config::Config;
     pub use crate::handler::LocalLobbyCommandHandler;
-    #[cfg(feature = "yew")]
-    pub use crate::handler::WebSocketLobbyCommandHandler;
     pub use crate::model::Activity;
     pub use crate::model::ActivityCatalog;
     pub use crate::model::ActivityResult;

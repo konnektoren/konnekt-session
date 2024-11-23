@@ -20,7 +20,7 @@ where
     html! {
         <div class="konnekt-session-player-list">
             {for props.players.iter().map(|player| {
-                let player_id = player.id.clone();
+                let player_id = player.id;
                 html! {
                     <div onclick={props.on_select.reform(move |_| player_id)}>
                         <PlayerComp<T> player={player.clone()} />
