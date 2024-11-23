@@ -47,38 +47,38 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::model::Role;
 
-    #[derive(PartialEq, Clone)]
-    struct PlayerProfile {
-        id: String,
-        name: String,
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct TestPlayer {
+        pub id: String,
+        pub name: String,
     }
 
-    impl Identifiable for PlayerProfile {
-        fn identifier(&self) -> &str {
-            &self.id
-        }
-    }
-
-    impl Named for PlayerProfile {
+    impl Named for TestPlayer {
         fn name(&self) -> &str {
             &self.name
         }
     }
 
-    impl PlayerTrait for PlayerProfile {}
+    impl Identifiable for TestPlayer {
+        fn identifier(&self) -> &str {
+            &self.id
+        }
+    }
+
+    impl PlayerTrait for TestPlayer {}
 
     #[test]
     fn create_player() {
-        let player_profile = PlayerProfile {
+        let player_profile = TestPlayer {
             id: "123".to_string(),
             name: "Test Player".to_string(),
         };
 
-        let player: Player<PlayerProfile> = Player::new(Role::Player, player_profile);
+        let player: Player<TestPlayer> = Player::new(Role::Player, player_profile);
 
         assert_eq!(player.identifier(), "123");
         assert_eq!(player.name(), "Test Player");
