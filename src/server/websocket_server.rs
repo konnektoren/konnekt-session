@@ -95,7 +95,11 @@ impl WebSocketServer {
             }
         };
 
-        if let Err(e) = connection.sender.send(Message::Text(serialized_message)) {
+        if let Err(e) = connection
+            .sender
+            .send(Message::Text(serialized_message))
+            .await
+        {
             log::error!(
                 "Failed to send message to player {}: {:?}",
                 connection.player_id,

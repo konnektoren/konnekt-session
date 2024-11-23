@@ -27,7 +27,7 @@ impl WebSocketListener {
         server: WebSocketServer,
     ) {
         let (mut ws_sender, mut ws_receiver) = socket.split();
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = mpsc::channel(10);
 
         // Generate unique player ID
         let player_id = Uuid::new_v4();
