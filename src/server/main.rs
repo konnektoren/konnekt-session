@@ -1,7 +1,7 @@
 #![cfg(feature = "server")]
 
 use axum::Router;
-use konnekt_session::server::{create_session_route, MemoryStorage, WebSocketServer};
+use konnekt_session::server::v1::{create_session_route, MemoryStorage, WebSocketServer};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;

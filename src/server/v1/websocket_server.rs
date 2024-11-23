@@ -1,5 +1,5 @@
 use crate::model::{LobbyCommand, LobbyCommandWrapper};
-use crate::server::{Connection, ConnectionRepository, LobbyRepository};
+use crate::server::v1::{Connection, ConnectionRepository, LobbyRepository};
 use axum::extract::ws::Message;
 use std::sync::Arc;
 use uuid::Uuid;

@@ -1,4 +1,4 @@
-use crate::server::{error::RepositoryError, Connection, ConnectionRepository, LobbyRepository};
+use super::{error::RepositoryError, Connection, ConnectionRepository, LobbyRepository};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;

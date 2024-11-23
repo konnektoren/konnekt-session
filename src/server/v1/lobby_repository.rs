@@ -1,4 +1,4 @@
-use crate::server::error::RepositoryError;
+use super::error::RepositoryError;
 use async_trait::async_trait;
 use uuid::Uuid;
 

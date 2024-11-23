@@ -1,5 +1,5 @@
 use crate::model::{LobbyCommandWrapper, Role};
-use crate::server::{websocket_server::WebSocketServer, Connection};
+use crate::server::v1::{websocket_server::WebSocketServer, Connection};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     response::IntoResponse,

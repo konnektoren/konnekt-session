@@ -1,4 +1,4 @@
-use crate::server::{WebSocketListener, WebSocketServer};
+use super::{WebSocketListener, WebSocketServer};
 use axum::extract::WebSocketUpgrade;
 use axum::{routing::get, Router};
 use uuid::Uuid;
