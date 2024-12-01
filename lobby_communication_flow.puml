@@ -1,0 +1,98 @@
+@startuml C4_Lobby_Communication
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+' Custom styling
+skinparam ParticipantPadding 20
+skinparam BoxPadding 10
+skinparam SequenceGroupBodyBackgroundColor transparent
+
+box "Client Applications" #LightBlue
+    actor "Admin\nFrontend" as admin <<Browser>>
+    actor "Player 1\nFrontend" as player1 <<Browser>>
+    actor "Player 2\nFrontend" as player2 <<Browser>>
+end box
+
+box "Server Components" #LightGreen
+    participant "WebSocket\nListener" as server <<Container>>
+    participant "Connection\nHandler" as handler <<Container>>
+    database "Memory\nStorage" as storage <<Container>>
+end box
+
+== Initialize Session ==
+group Admin Connection
+    admin -> server: NetworkCommand::Connect\n{client_id, lobby_id}
+    server -> handler: Initialize Connection Handler
+    handler -> storage: Add Connection\n(client_id, lobby_id)
+    handler -> storage: Create Lobby Entry
+    storage --> handler: Success
+    handler --> server: Connection Established
+    server --> admin: Connection Confirmed
+end
+
+== Player Connections ==
+group Player 1 Joins
+    player1 -> server: NetworkCommand::Connect\n{client_id, lobby_id}
+    server -> handler: Process New Connection
+    handler -> storage: Add Connection\n(client_id, lobby_id)
+    handler -> storage: Add to Lobby Members
+    storage --> handler: Success
+    handler -> server: Broadcast Join Event
+    server -> admin: NetworkCommand::Message\n{PlayerJoined: player1}
+    server --> player1: Connection Confirmed
+end
+
+group Player 2 Joins
+    player2 -> server: NetworkCommand::Connect\n{client_id, lobby_id}
+    server -> handler: Process New Connection
+    handler -> storage: Add Connection\n(client_id, lobby_id)
+    handler -> storage: Add to Lobby Members
+    storage --> handler: Success
+    handler -> server: Broadcast Join Event
+    server -> admin: NetworkCommand::Message\n{PlayerJoined: player2}
+    server -> player1: NetworkCommand::Message\n{PlayerJoined: player2}
+    server --> player2: Connection Confirmed
+end
+
+== Active Session Communication ==
+group Activity Broadcasting
+    admin -> server: NetworkCommand::Message\n{command: StartActivity}
+    server -> handler: Process Command
+    handler -> storage: Verify Lobby Members
+    storage --> handler: [admin, player1, player2]
+    handler -> server: Broadcast to All Members
+    server -> admin: NetworkCommand::Message\n{ActivityStarted}
+    server -> player1: NetworkCommand::Message\n{ActivityStarted}
+    server -> player2: NetworkCommand::Message\n{ActivityStarted}
+end
+
+group Player Interaction
+    player1 -> server: NetworkCommand::Message\n{command: UpdateActivity}
+    server -> handler: Process Update
+    handler -> storage: Verify Lobby Members
+    storage --> handler: [admin, player1, player2]
+    handler -> server: Broadcast Update
+    server -> admin: NetworkCommand::Message\n{ActivityUpdated}
+    server -> player1: NetworkCommand::Message\n{ActivityUpdated}
+    server -> player2: NetworkCommand::Message\n{ActivityUpdated}
+end
+
+== Session Cleanup ==
+group Player Disconnection
+    player2 -> server: NetworkCommand::Disconnect\n{client_id, lobby_id}
+    server -> handler: Handle Disconnection
+    handler -> storage: Remove Connection
+    handler -> storage: Update Lobby Members
+    storage --> handler: Success
+    handler -> server: Broadcast Leave Event
+    server -> admin: NetworkCommand::Message\n{PlayerLeft: player2}
+    server -> player1: NetworkCommand::Message\n{PlayerLeft: player2}
+end
+
+legend right
+|= Component |= Description |
+| WebSocket Listener | Handles WebSocket protocol and message routing |
+| Connection Handler | Manages client connections and message processing |
+| Memory Storage | Maintains session state and lobby information |
+endlegend
+
+@enduml
