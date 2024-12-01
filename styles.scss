@@ -69,6 +69,60 @@ body {
         flex: 2;
         margin-left: 2rem;
     }
+
+    &__role {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #2d3748;
+    }
+}
+
+.konnekt-session-lobby-debug {
+
+    &__client_id {
+        background-color: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        padding: 0.5rem;
+        margin-bottom: 0.2rem;
+        font-size: 0.5rem;
+    }
+
+    &__lobby_id {
+        background-color: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        padding: 0.5rem;
+        margin-bottom: 0.2rem;
+        font-size: 0.5rem;
+    }
+
+    &__websocket_url {
+        background-color: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        padding: 0.5rem;
+        margin-bottom: 0.2rem;
+        font-size: 0.5rem;
+    }
+
+    &__connected {
+        background-color: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        padding: 0.5rem;
+        margin-bottom: 0.2rem;
+        font-size: 0.5rem;
+    }
+
+    &__message {
+        background-color: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        padding: 1rem;
+        margin-bottom: 0.2rem;
+        font-size: 0.5rem;
+    }
 }
 
 /* Player Styles */

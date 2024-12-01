@@ -140,7 +140,6 @@ where
                         last_message.set(Some(message));
                     });
                 }
-                //last_message.set(Some("Connected".to_string()));
             } else {
                 return html! {
                     <div>{"Failed to connect to websocket"}</div>
@@ -156,10 +155,13 @@ where
 
     let debug_comp = if props.config.debug {
         html! {
-                <div class="konnekt-session-lobby-websocket">
-                    <div>{"Websocket URL: "}{&props.config.websocket_url}</div>
-                    <div>{"Connected: "}{"true"}</div>
-                    <div>{"Last message: "}{last_message.as_ref().unwrap_or(&"None".to_string())}</div>
+                <div class="konnekt-session-lobby-debug">
+                    <div class="konnekt-session-lobby-debug__client_id">{"Client ID: "}{client_id.to_string()}</div>
+                    <div class="konnekt-session-lobby-debug__lobby_id">{"Lobby ID: "}{props.config.lobby.id}</div>
+                    <div class="konnekt-session-lobby-debug__websocket_url">{"Websocket URL: "}{&props.config.websocket_url}</div>
+                    <div class="konnekt-session-lobby-debug__connected">{"Connected: "}{"true"}</div>
+                    <div class="konnekt-session-lobby-debug__message">{"Last message: "}{last_message.as_ref().unwrap_or(&"None".to_string())}</div>
+
                 </div>
         }
     } else {
