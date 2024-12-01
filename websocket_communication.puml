@@ -1,0 +1,30 @@
+@startuml C4_Websocket_Communication
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+Person(client, "Client", "Web browser user")
+
+System_Boundary(browser, "Browser") {
+    Container(frontend, "Frontend Application", "Rust/WASM", "Provides the user interface")
+    Container(websocket_connection, "WebSocket Connection", "Rust/WASM", "Manages websocket connection state")
+    Container(lobby_provider, "Lobby Provider", "Rust/WASM", "Manages lobby state and communication")
+    Container(network_handler, "Network Handler", "Rust/WASM", "Handles network commands and state")
+}
+
+System_Boundary(server, "Server") {
+    Container(websocket_listener, "WebSocket Listener", "Rust/Axum", "Handles incoming websocket connections")
+    Container(connection_handler, "Connection Handler", "Rust", "Manages client connections and message routing")
+    Container(memory_storage, "Memory Storage", "Rust", "Stores connection and lobby state")
+}
+
+Rel(client, frontend, "Uses", "HTTP/HTTPS")
+Rel(frontend, lobby_provider, "Uses", "Component")
+Rel(lobby_provider, websocket_connection, "Uses", "WebSocket")
+Rel(lobby_provider, network_handler, "Uses", "Commands")
+Rel(websocket_connection, websocket_listener, "Connects to", "WebSocket")
+Rel(websocket_listener, connection_handler, "Routes messages to", "Internal")
+Rel(connection_handler, memory_storage, "Stores state in", "Internal")
+
+Lay_D(client, browser)
+Lay_R(websocket_connection, websocket_listener)
+
+@enduml
