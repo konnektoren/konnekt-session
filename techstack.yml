@@ -1,0 +1,124 @@
+repo_name: konnektoren/konnekt-session
+report_id: konnekt-session-2024-12-01
+repo_type: Public
+timestamp: "2024-12-01T09:09:51+01:00"
+requested_by: assistant
+provider: github
+branch: main
+detected_tools_count: 15
+tools:
+  - name: Yew
+    description: A modern Rust framework for creating multi-threaded front-end web apps with WebAssembly
+    website_url: https://yew.rs/
+    version: 0.21
+    license: MIT/Apache-2.0
+    open_source: true
+    hosted_saas: false
+    category: Libraries
+    sub_category: Rust UI Libraries
+    image_url: https://yew.rs/img/logo.svg
+    detection_source: Cargo.toml
+    last_updated_by: system
+    last_updated_on: 2024-12-01 09:09:51.000000000 Z
+
+  - name: Axum
+    description: Ergonomic and modular web framework built with Tokio, Tower, and Hyper
+    website_url: https://github.com/tokio-rs/axum
+    version: 0.7
+    license: MIT
+    open_source: true
+    hosted_saas: false
+    category: Application and Data
+    sub_category: Web Frameworks
+    image_url: https://tokio.rs/img/icons/tokio.svg
+    detection_source: Cargo.toml
+    last_updated_by: system
+    last_updated_on: 2024-12-01 09:09:51.000000000 Z
+
+  - name: WebAssembly
+    description: Binary instruction format for stack-based virtual machines
+    website_url: https://webassembly.org/
+    open_source: true
+    hosted_saas: false
+    category: Languages & Frameworks
+    sub_category: Binary Instruction Format
+    image_url: https://webassembly.org/css/webassembly.svg
+    detection_source: Cargo.toml
+    last_updated_by: system
+    last_updated_on: 2024-12-01 09:09:51.000000000 Z
+
+  - name: Tokio
+    description: A runtime for writing reliable asynchronous applications with Rust
+    website_url: https://tokio.rs/
+    version: 1.0
+    license: MIT
+    open_source: true
+    hosted_saas: false
+    category: Application and Data
+    sub_category: Async Runtime
+    image_url: https://tokio.rs/img/icons/tokio.svg
+    detection_source: Cargo.toml
+    last_updated_by: system
+    last_updated_on: 2024-12-01 09:09:51.000000000 Z
+
+  - name: SCSS
+    description: CSS preprocessor with additional features
+    website_url: https://sass-lang.com/
+    open_source: true
+    hosted_saas: false
+    category: Languages & Frameworks
+    sub_category: CSS Preprocessors
+    image_url: https://sass-lang.com/assets/img/logos/logo.svg
+    detection_source: styles.scss
+    last_updated_by: system
+    last_updated_on: 2024-12-01 09:09:51.000000000 Z
+
+  - name: WebSocket
+    description: Protocol providing full-duplex communication channels over TCP
+    website_url: https://developer.mozilla.org/en-US/docs/Web/API/WebSocket
+    open_source: true
+    hosted_saas: false
+    category: Application and Data
+    sub_category: Real-time Communication
+    detection_source: Cargo.toml
+    last_updated_by: system
+    last_updated_on: 2024-12-01 09:09:51.000000000 Z
+
+  - name: Serde
+    description: A framework for serializing and deserializing Rust data structures
+    website_url: https://serde.rs/
+    version: 1.0
+    license: MIT/Apache-2.0
+    open_source: true
+    hosted_saas: false
+    category: Libraries
+    sub_category: Rust Serialization
+    detection_source: Cargo.toml
+    last_updated_by: system
+    last_updated_on: 2024-12-01 09:09:51.000000000 Z
+
+  - name: Trunk
+    description: WASM web application bundler for Rust
+    website_url: https://trunkrs.dev/
+    open_source: true
+    hosted_saas: false
+    category: Build, Test, Deploy
+    sub_category: Build Tools
+    image_url: https://trunkrs.dev/rustacean-flat-happy.svg
+    detection_source: index.html
+    last_updated_by: system
+    last_updated_on: 2024-12-01 09:09:51.000000000 Z
+
+  - name: Font Awesome
+    description: Icon set and toolkit
+    website_url: https://fontawesome.com/
+    version: 6.5.2
+    license: Free/Commercial
+    open_source: false
+    hosted_saas: true
+    category: Libraries
+    sub_category: Icon Sets
+    image_url: https://fontawesome.com/images/favicon/icon.svg
+    detection_source: styles.scss
+    last_updated_by: system
+    last_updated_on: 2024-12-01 09:09:51.000000000 Z
