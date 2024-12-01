@@ -28,6 +28,18 @@ pub enum NetworkCommand<T> {
     },
 }
 
+impl<T> NetworkCommand<T> {
+    pub fn get_type(&self) -> &str {
+        match self {
+            NetworkCommand::Connect { .. } => "Connect",
+            NetworkCommand::Disconnect { .. } => "Disconnect",
+            NetworkCommand::Message { .. } => "Message",
+            NetworkCommand::Ping { .. } => "Ping",
+            NetworkCommand::Pong { .. } => "Pong",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -59,7 +59,6 @@ pub struct LobbyPageProps {
 pub fn lobby_page(props: &LobbyPageProps) -> Html {
     let config = use_state(Config::default);
     let role = use_state(|| props.player.role);
-    let lobby_id = use_state(|| props.lobby_id);
 
     let on_change = {
         let role = role.clone();

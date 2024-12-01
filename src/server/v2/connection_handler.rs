@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use axum::extract::ws::Message;
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc::Sender;
+use tracing::{debug, info, instrument};
 
 #[derive(Clone)]
 pub struct ConnectionHandler {
@@ -53,6 +54,7 @@ impl ConnectionHandler {
         }
     }
 
+    #[instrument(skip(self))]
     pub async fn disconnect(&self) -> Result<(), NetworkError> {
         let connection = self.get_connection().await?;
 
@@ -68,6 +70,7 @@ impl ConnectionHandler {
         }
     }
 
+    #[instrument(skip(self))]
     pub async fn broadcast_command(
         &self,
         command: NetworkCommand<String>,
@@ -105,6 +108,7 @@ impl ConnectionHandler {
 
 #[async_trait]
 impl NetworkCommandHandler<String> for ConnectionHandler {
+    #[instrument(skip(self, command))]
     async fn handle_command(&self, command: NetworkCommand<String>) -> Result<(), NetworkError> {
         if let Some(sender) = &self.sender {
             match command {
@@ -112,15 +116,19 @@ impl NetworkCommandHandler<String> for ConnectionHandler {
                     client_id,
                     lobby_id,
                 } => {
-                    log::info!("New connection: L({:?}) / C({:?})", lobby_id, client_id);
+                    info!(?client_id, ?lobby_id, "Processing connection request");
                     let connection = Connection::new(client_id, lobby_id, sender.clone());
-
                     self.client_id.write().unwrap().replace(client_id);
 
+                    debug!("Adding connection to repository");
                     self.connection_repo.add_connection(connection).await?;
+
+                    debug!("Adding client to lobby");
                     self.lobby_repo
                         .add_client_to_lobby(client_id, lobby_id)
                         .await?;
+
+                    info!("Connection request processed successfully");
                 }
                 NetworkCommand::Disconnect {
                     client_id,
@@ -151,6 +159,7 @@ impl NetworkCommandHandler<String> for ConnectionHandler {
         Ok(())
     }
 
+    #[instrument(skip(self, command), fields(command_type = ?command.get_type()))]
     async fn send_command(&self, command: NetworkCommand<String>) -> Result<(), NetworkError> {
         match command {
             NetworkCommand::Message { client_id, data } => {

@@ -3,6 +3,7 @@ use crate::model::{ClientId, LobbyId, NetworkError};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use tracing::{debug, error, instrument};
 
 pub struct MemoryStorage {
     connections: Arc<RwLock<HashMap<ClientId, Connection>>>,
@@ -22,72 +23,118 @@ impl MemoryStorage {
 
 #[async_trait]
 impl ConnectionRepository for MemoryStorage {
+    #[instrument(skip(self, connection))]
     async fn add_connection(&self, connection: Connection) -> Result<(), NetworkError> {
+        debug!(?connection.client_id, ?connection.lobby_id, "Adding connection");
         match self.connections.write() {
             Ok(mut connections) => {
                 connections.insert(connection.client_id.clone(), connection);
+                debug!("Connection added successfully");
                 Ok(())
             }
-            Err(e) => Err(NetworkError::InternalError(e.to_string())),
+            Err(e) => {
+                error!(?e, "Failed to add connection");
+                Err(NetworkError::InternalError(e.to_string()))
+            }
         }
     }
 
+    #[instrument(skip(self))]
     async fn remove_connection(&self, id: ClientId) -> Result<(), NetworkError> {
+        debug!(?id, "Removing connection");
         match self.connections.write() {
             Ok(mut connections) => {
                 connections.remove(&id);
+                debug!("Connection removed successfully");
                 Ok(())
             }
-            Err(e) => Err(NetworkError::InternalError(e.to_string())),
+            Err(e) => {
+                error!(?e, "Failed to remove connection");
+                Err(NetworkError::InternalError(e.to_string()))
+            }
         }
     }
 
+    #[instrument(skip(self))]
     async fn get_connection(&self, id: ClientId) -> Result<Option<Connection>, NetworkError> {
+        debug!(?id, "Getting connection");
         match self.connections.read() {
-            Ok(connections) => Ok(connections.get(&id).cloned()),
-            Err(e) => Err(NetworkError::InternalError(e.to_string())),
+            Ok(connections) => {
+                let connection = connections.get(&id).cloned();
+                debug!(?connection, "Connection retrieval completed");
+                Ok(connection)
+            }
+            Err(e) => {
+                error!(?e, "Failed to get connection");
+                Err(NetworkError::InternalError(e.to_string()))
+            }
         }
     }
 
+    #[instrument(skip(self))]
     async fn get_all_connections(&self) -> Result<Vec<Connection>, NetworkError> {
+        debug!("Getting all connections");
         match self.connections.read() {
-            Ok(connections) => Ok(connections.values().cloned().collect()),
-            Err(e) => Err(NetworkError::InternalError(e.to_string())),
+            Ok(connections) => {
+                let connections: Vec<_> = connections.values().cloned().collect();
+                debug!(
+                    connection_count = connections.len(),
+                    "Retrieved all connections"
+                );
+                Ok(connections)
+            }
+            Err(e) => {
+                error!(?e, "Failed to get all connections");
+                Err(NetworkError::InternalError(e.to_string()))
+            }
         }
     }
 }
 
 #[async_trait]
 impl LobbyRepository for MemoryStorage {
+    #[instrument(skip(self))]
     async fn add_client_to_lobby(
         &self,
         lobby_id: LobbyId,
         client_id: ClientId,
     ) -> Result<(), NetworkError> {
+        debug!(?lobby_id, ?client_id, "Adding client to lobby");
         match self.lobbies_to_clients.write() {
             Ok(mut lobbies) => {
                 lobbies
                     .entry(lobby_id)
                     .or_insert_with(Vec::new)
                     .push(client_id);
+                debug!("Client added to lobby successfully");
                 Ok(())
             }
-            Err(e) => Err(NetworkError::InternalError(e.to_string())),
+            Err(e) => {
+                error!(?e, "Failed to add client to lobby");
+                Err(NetworkError::InternalError(e.to_string()))
+            }
         }?;
+
         match self.clients_to_lobbies.write() {
             Ok(mut clients) => {
                 clients.insert(client_id, lobby_id);
+                debug!("Client-lobby mapping updated");
                 Ok(())
             }
-            Err(e) => Err(NetworkError::InternalError(e.to_string())),
+            Err(e) => {
+                error!(?e, "Failed to update client-lobby mapping");
+                Err(NetworkError::InternalError(e.to_string()))
+            }
         }
     }
 
+    #[instrument(skip(self))]
     async fn remove_client_from_lobby(
         &self,
         lobby_id: LobbyId,
         client_id: ClientId,
     ) -> Result<(), NetworkError> {
+        debug!(?lobby_id, ?client_id, "Removing client from lobby");
         match self.lobbies_to_clients.write() {
             Ok(mut lobbies) => {
                 if let Some(clients) = lobbies.get_mut(&lobby_id) {
@@ -106,17 +153,21 @@ impl LobbyRepository for MemoryStorage {
         }
     }
 
+    #[instrument(skip(self))]
     async fn get_clients_in_lobby(&self, lobby_id: LobbyId) -> Result<Vec<ClientId>, NetworkError> {
+        debug!(?lobby_id, "Getting clients in lobby");
         match self.lobbies_to_clients.read() {
             Ok(lobbies) => Ok(lobbies.get(&lobby_id).cloned().unwrap_or_default()),
             Err(e) => Err(NetworkError::InternalError(e.to_string())),
         }
     }
 
+    #[instrument(skip(self))]
     async fn get_lobby_with_client(
         &self,
         client_id: ClientId,
     ) -> Result<Option<LobbyId>, NetworkError> {
+        debug!(?client_id, "Getting lobby for client");
         match self.clients_to_lobbies.read() {
             Ok(clients) => Ok(clients.get(&client_id).cloned()),
             Err(e) => Err(NetworkError::InternalError(e.to_string())),

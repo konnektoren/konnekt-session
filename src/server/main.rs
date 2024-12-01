@@ -1,41 +1,35 @@
 #![cfg(feature = "server")]
 
 use axum::Router;
+use konnekt_session::server::telemetry::{init_telemetry, shutdown_telemetry};
 use konnekt_session::server::v2::{create_session_route, ConnectionHandler, MemoryStorage};
+use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tracing_subscriber::fmt;
-use tracing_subscriber::EnvFilter;
+use tracing::{info, instrument};
 
 #[tokio::main]
-pub async fn main() {
-    // Initialize tracing
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("konnekt_session=debug"));
-
-    fmt::fmt()
-        .with_env_filter(env_filter)
-        .with_target(true)
-        .with_thread_ids(true)
-        .with_line_number(true)
-        .with_file(true)
-        .with_ansi(true)
-        .init();
+#[instrument]
+pub async fn main() -> Result<(), Box<dyn Error>> {
+    // Initialize telemetry
+    init_telemetry().await?;
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    let listener = TcpListener::bind(&addr)
-        .await
-        .expect("Failed to bind to address");
+    let listener = TcpListener::bind(&addr).await?;
 
     let memory_storage = Arc::new(MemoryStorage::new());
     let connection_handler = ConnectionHandler::new(memory_storage.clone(), memory_storage.clone());
 
     let app = Router::new().nest("/", create_session_route(connection_handler));
 
-    log::info!("Server running at http://{}", addr);
+    info!("Server running at http://{}", addr);
 
     axum::serve(listener, app.into_make_service())
         .await
         .expect("Failed to start server.");
+
+    // Shutdown telemetry on server shutdown
+    shutdown_telemetry();
+    Ok(())
 }

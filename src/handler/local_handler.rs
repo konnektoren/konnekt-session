@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::rc::Rc;
 
 use crate::model::{
-    ActivityResult, ActivityResultTrait, ActivityTrait, CommandError, Lobby,
-    LobbyCommand, LobbyCommandHandler, Player, PlayerTrait,
+    ActivityResult, ActivityResultTrait, ActivityTrait, CommandError, Lobby, LobbyCommand,
+    LobbyCommandHandler, Player, PlayerTrait,
 };
 
 #[derive(Clone)]
@@ -79,9 +79,7 @@ where
                 Ok(())
             }
             LobbyCommand::ActivityInfo {
-                activity_id,
-                data,
-                ..
+                activity_id, data, ..
             } => {
                 let data = (self.activity_data_deserializer)(&data);
                 lobby
