@@ -1,16 +1,18 @@
-use futures::channel::mpsc;
-use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
+use futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use gloo_net::websocket::futures::WebSocket;
 use gloo_net::websocket::Message;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use wasm_bindgen_futures::spawn_local;
 
 #[derive(Clone)]
 pub struct WebSocketConnection {
     websocket_url: String,
+    /// Channel sender for outgoing messages
     sender: UnboundedSender<String>,
-    receiver: Arc<Mutex<UnboundedReceiver<String>>>,
+    /// Channel receiver for incoming messages
+    receiver: Arc<RwLock<UnboundedReceiver<String>>>,
     connected: Arc<RwLock<bool>>,
     ws: Arc<RwLock<Option<WebSocket>>>,
 }
@@ -21,7 +23,7 @@ impl WebSocketConnection {
         Self {
             websocket_url,
             sender,
-            receiver: Arc::new(Mutex::new(receiver)),
+            receiver: Arc::new(RwLock::new(receiver)),
             connected: Arc::new(RwLock::new(false)),
             ws: Arc::new(RwLock::new(None)),
         }
@@ -40,10 +42,6 @@ impl WebSocketConnection {
         *self.ws.write().unwrap() = None;
     }
 
-    pub fn ws(&self) -> &Arc<RwLock<Option<WebSocket>>> {
-        &self.ws
-    }
-
     pub fn is_connected(&self) -> bool {
         *self.connected.read().unwrap()
     }
@@ -52,7 +50,7 @@ impl WebSocketConnection {
         self.sender.clone()
     }
 
-    pub fn receiver(&self) -> Arc<Mutex<UnboundedReceiver<String>>> {
+    pub fn receiver(&self) -> Arc<RwLock<UnboundedReceiver<String>>> {
         self.receiver.clone()
     }
 
@@ -60,47 +58,58 @@ impl WebSocketConnection {
     where
         F: Fn(String) + 'static,
     {
-        let ws = self.ws.clone();
-        let receiver = self.receiver();
-        let callback = Arc::new(callback);
-
-        let ws_instance = {
-            if let Ok(mut guard) = ws.write() {
-                guard.take()
-            } else {
-                None
-            }
-        };
+        let ws_instance = self.take_websocket();
 
         if let Some(ws) = ws_instance {
-            let (mut write, mut read) = ws.split();
+            let (write, read) = ws.split();
+            let callback = Arc::new(callback);
 
-            // Spawn read task
-            let read_callback = callback.clone();
-            spawn_local(async move {
-                while let Some(Ok(Message::Text(message))) = read.next().await {
-                    read_callback(message);
-                }
-            });
-
-            // Spawn write task
-            spawn_local(async move {
-                loop {
-                    let message = {
-                        let mut receiver = receiver.lock().unwrap();
-                        receiver.next().await
-                    };
-
-                    match message {
-                        Some(message) => {
-                            if write.send(Message::Text(message)).await.is_err() {
-                                break;
-                            }
-                        }
-                        None => break,
-                    }
-                }
-            });
+            self.spawn_read_task(read, callback.clone());
+            self.spawn_write_task(write, self.receiver());
         }
+    }
+
+    fn take_websocket(&self) -> Option<WebSocket> {
+        self.ws.write().ok().and_then(|mut guard| guard.take())
+    }
+
+    fn spawn_read_task(
+        &self,
+        mut read: SplitStream<WebSocket>,
+        callback: Arc<impl Fn(String) + 'static>,
+    ) {
+        spawn_local(async move {
+            while let Some(message) = read.next().await {
+                if let Ok(Message::Text(text)) = message {
+                    callback(text);
+                }
+            }
+        });
+    }
+
+    fn spawn_write_task(
+        &self,
+        mut write: SplitSink<WebSocket, Message>,
+        receiver: Arc<RwLock<UnboundedReceiver<String>>>,
+    ) {
+        spawn_local(async move {
+            loop {
+                let message = Self::get_next_message(&receiver).await;
+
+                match message {
+                    Some(text) => {
+                        if let Err(_) = write.send(Message::Text(text)).await {
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
+        });
+    }
+
+    async fn get_next_message(receiver: &Arc<RwLock<UnboundedReceiver<String>>>) -> Option<String> {
+        let mut receiver_guard = receiver.write().ok()?;
+        receiver_guard.next().await
     }
 }

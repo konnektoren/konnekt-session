@@ -70,7 +70,7 @@ where
         use_state(|| WebSocketConnection::new(props.config.websocket_url.clone()));
 
     let network_handler = use_state(|| {
-        let lobby_id = (&*lobby).id.clone();
+        let lobby_id = lobby.id.clone();
         NetworkHandler::new(
             websocket_connection.sender(),
             (*lobby_handler).clone(),
@@ -87,7 +87,7 @@ where
 
         use_effect_with(is_connected, move |_| {
             if is_connected {
-                let conn = (&*websocket_connection).clone();
+                let conn = (*websocket_connection).clone();
                 conn.handle_messages(move |message| {
                     last_message.set(Some(message));
                 });
@@ -120,7 +120,7 @@ where
         let lobby = lobby.clone();
         let player = props.config.player.clone();
         use_effect_with((), move |_| {
-            let lobby = (&*lobby).clone();
+            let lobby = (*lobby).clone();
             spawn_local(async move {
                 let _ = network_handler.connect(&player, &lobby, role);
             });
@@ -131,8 +131,8 @@ where
         let websocket_connection = websocket_connection.clone();
         let last_message = last_message.clone();
         if !websocket_connection.is_connected() {
-            let mut conn = (&*websocket_connection).clone();
-            if let Ok(_) = conn.connect() {
+            let mut conn = (*websocket_connection).clone();
+            if conn.connect().is_ok() {
                 let last_message = last_message.clone();
                 {
                     let last_message = last_message.clone();

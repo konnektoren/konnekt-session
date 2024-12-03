@@ -119,9 +119,9 @@ pub fn lobby_inner_comp(props: &LobbyInnerProps) -> Html {
     let on_command = {
         let handler = lobby_handler.clone();
         Callback::from(move |command: LobbyCommand| {
-            let handler: NetworkHandler<_, _, _> = (&*handler).clone();
+            let handler: NetworkHandler<_, _, _> = (*handler).clone();
             if let Err(err) = handler.send_command(command) {
-                log::info!("Command error: {:?}", err);
+                log::error!("Command error: {:?}", err);
             }
         })
     };
@@ -160,7 +160,6 @@ pub fn lobby_inner_comp(props: &LobbyInnerProps) -> Html {
 
         Callback::from(
             move |(player_id, result): (PlayerId, ActivityResult<ChallengeResult>)| {
-                log::info!("on_activity_result_select");
                 selected_activity_result.set(Some((player_id, result.clone())));
             },
         )
@@ -168,7 +167,7 @@ pub fn lobby_inner_comp(props: &LobbyInnerProps) -> Html {
 
     html! {
         <div>
-        <LobbyComp<PlayerProfile, Challenge, ChallengeResult>
+            <LobbyComp<PlayerProfile, Challenge, ChallengeResult>
                 lobby={current_lobby.clone()}
                 role={props.role}
                 on_command={on_command.clone()}

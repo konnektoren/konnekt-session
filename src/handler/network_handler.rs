@@ -65,8 +65,8 @@ where
         role: Role,
     ) -> Result<(), NetworkError> {
         let connect_command = NetworkCommand::<String>::Connect {
-            client_id: self.client_id.clone(),
-            lobby_id: self.lobby_id.clone(),
+            client_id: self.client_id,
+            lobby_id: self.lobby_id,
         };
         self.send_network_command(connect_command)?;
         self.join_lobby(player, lobby, role)?;
