@@ -9,7 +9,6 @@ mod lobby_provider;
 mod player;
 mod player_list;
 mod running_activity;
-pub mod websocket_connection;
 
 pub use activity::{ActivityComp, ActivityProps};
 pub use activity_catalog::ActivityCatalogComp;

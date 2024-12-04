@@ -1,3 +1,5 @@
+use std::sync::RwLock;
+
 use crate::handler::LocalLobbyCommandHandler;
 use crate::model::{
     ActivityResultTrait, ActivityTrait, ClientId, CommandError, Lobby, LobbyCommand,
@@ -5,7 +7,17 @@ use crate::model::{
     PlayerTrait, Role,
 };
 use futures::channel::mpsc::UnboundedSender;
+use instant::SystemTime;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use uuid::Uuid;
+
+fn now() -> u128 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+}
 
 #[derive(Clone)]
 pub struct NetworkHandler<P, A, AR>
@@ -19,6 +31,7 @@ where
     client_id: ClientId,
     lobby_id: LobbyId,
     role: Role,
+    ping: Arc<RwLock<(Uuid, u128)>>,
 }
 
 impl<P, A, AR> PartialEq for NetworkHandler<P, A, AR>
@@ -51,6 +64,7 @@ where
             client_id,
             lobby_id,
             role,
+            ping: Arc::new(RwLock::new((Uuid::new_v4(), now()))),
         }
     }
 
@@ -117,19 +131,32 @@ where
         }
     }
 
+    pub fn send_ping(&self) {
+        let id = Uuid::new_v4();
+        self.ping.write().unwrap().0 = id;
+        self.ping.write().unwrap().1 = now();
+        let command = NetworkCommand::Ping {
+            id,
+            client_id: self.client_id,
+        };
+        self.send_network_command(command).unwrap();
+    }
+
     pub fn handle_message(
         &self,
         lobby: &mut Lobby<P, A, AR>,
+        ping: &mut Option<u32>,
         message: String,
     ) -> Result<(), NetworkError> {
         let command = serde_json::from_str::<NetworkCommand<String>>(&message)
             .map_err(|_| NetworkError::InvalidData)?;
-        self.handle_network_command(lobby, command)
+        self.handle_network_command(lobby, ping, command)
     }
 
     pub fn handle_network_command(
         &self,
         lobby: &mut Lobby<P, A, AR>,
+        ping: &mut Option<u32>,
         command: NetworkCommand<String>,
     ) -> Result<(), NetworkError> {
         match command {
@@ -156,8 +183,10 @@ where
                 self.send_network_command(command)?;
             }
             NetworkCommand::Pong { id, client_id } => {
-                let command = NetworkCommand::Ping { id, client_id };
-                self.send_network_command(command)?;
+                if client_id == self.client_id && self.ping.read().unwrap().0 == id {
+                    let ping_time = now() - self.ping.read().unwrap().1;
+                    *ping = Some(ping_time as u32);
+                }
             }
             _ => {
                 log::error!("Unsupported command: {:?}", command);

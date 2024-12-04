@@ -28,6 +28,7 @@ yew = [
     "gloo-net",
     "getrandom/js",
     "wasm-logger",
+    "instant/wasm-bindgen",
 ]
 server = [
     "axum",
@@ -43,7 +44,7 @@ server = [
 [dependencies]
 async-trait = "0.1.51"
 colorid = "0.0.6"
-thiserror = "2.0.2"
+instant = "0.1"
 log = { version = "0.4" }
 uuid = { version = "1.0.0", features = [
     "v4",
@@ -80,6 +81,7 @@ opentelemetry-jaeger = { version = "0.19", features = [
     "collector_client",
     "isahc_collector_client",
 ], optional = true }
+thiserror = "2.0.2"
 tokio = { version = "1", features = ["full"], optional = true }
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3.18", features = [

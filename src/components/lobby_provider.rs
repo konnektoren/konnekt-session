@@ -1,8 +1,9 @@
-use crate::components::websocket_connection::WebSocketConnection;
+use crate::handler::websocket_connection::WebSocketConnection;
 use crate::handler::{LocalLobbyCommandHandler, NetworkHandler};
 use crate::model::{
     ActivityResultTrait, ActivityTrait, ClientId, Lobby, Player, PlayerTrait, Role,
 };
+use gloo::timers::callback::Interval;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
@@ -63,6 +64,7 @@ where
     });
 
     let client_id = use_state(ClientId::new_v4);
+    let ping = use_state(|| None::<u32>);
 
     let last_message = use_state(|| None::<String>);
 
@@ -100,13 +102,19 @@ where
         let last_message = last_message.clone();
         let network_handler = network_handler.clone();
         let lobby = lobby.clone();
+        let ping = ping.clone();
         use_effect_with(last_message.clone(), move |_| {
             spawn_local(async move {
                 let last_message = (*last_message).clone();
+
                 if let Some(last_message) = last_message {
                     let mut new_lobby = (*lobby).clone();
-                    if let Ok(()) = network_handler.handle_message(&mut new_lobby, last_message) {
+                    let mut new_ping = (*ping).clone();
+                    if let Ok(()) =
+                        network_handler.handle_message(&mut new_lobby, &mut new_ping, last_message)
+                    {
                         lobby.set(new_lobby);
+                        ping.set(new_ping);
                     }
                 }
             });
@@ -124,6 +132,20 @@ where
             spawn_local(async move {
                 let _ = network_handler.connect(&player, &lobby, role);
             });
+        });
+    }
+
+    {
+        let network_handler = network_handler.clone();
+        use_effect_with((), move |_| {
+            let interval = Interval::new(10000, move || {
+                network_handler.send_ping();
+            });
+
+            // Cleanup function
+            || {
+                drop(interval);
+            }
         });
     }
 
@@ -153,6 +175,11 @@ where
         lobby_handler: network_handler,
     };
 
+    let ping = match *ping {
+        Some(ping) => ping.to_string(),
+        None => "None".to_string(),
+    };
+
     let debug_comp = if props.config.debug {
         html! {
                 <div class="konnekt-session-lobby-debug">
@@ -160,8 +187,8 @@ where
                     <div class="konnekt-session-lobby-debug__lobby_id">{"Lobby ID: "}{props.config.lobby.id}</div>
                     <div class="konnekt-session-lobby-debug__websocket_url">{"Websocket URL: "}{&props.config.websocket_url}</div>
                     <div class="konnekt-session-lobby-debug__connected">{"Connected: "}{"true"}</div>
+                    <div class="konnekt-session-lobby-debug__ping">{"Ping: "}{ping}</div>
                     <div class="konnekt-session-lobby-debug__message">{"Last message: "}{last_message.as_ref().unwrap_or(&"None".to_string())}</div>
-
                 </div>
         }
     } else {
