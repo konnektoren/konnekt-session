@@ -4,6 +4,7 @@ mod connection_repository;
 mod lobby_repository;
 mod memory_storage;
 pub mod route;
+pub mod signaling;
 pub mod websocket_listener;
 
 pub use connection::Connection;

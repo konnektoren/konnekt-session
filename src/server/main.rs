@@ -2,7 +2,9 @@
 
 use axum::Router;
 use konnekt_session::server::telemetry::{init_telemetry, shutdown_telemetry};
-use konnekt_session::server::v2::{create_session_route, ConnectionHandler, MemoryStorage};
+use konnekt_session::server::v2::{
+    create_session_route, signaling::create_signaling_route, ConnectionHandler, MemoryStorage,
+};
 use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -21,7 +23,9 @@ pub async fn main() -> Result<(), Box<dyn Error>> {
     let memory_storage = Arc::new(MemoryStorage::new());
     let connection_handler = ConnectionHandler::new(memory_storage.clone(), memory_storage.clone());
 
-    let app = Router::new().nest("/", create_session_route(connection_handler));
+    let app = Router::new()
+        .nest("/", create_session_route(connection_handler))
+        .merge(create_signaling_route());
 
     info!("Server running at http://{}", addr);
 
