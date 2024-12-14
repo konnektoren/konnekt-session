@@ -18,7 +18,9 @@ name = "konnekt_session"
 path = "src/lib.rs"
 
 [features]
-default = ["yew"]
+default = ["yew", "websocket"]
+websocket = ["gloo-net/websocket"]
+webrtc = ["web-sys/RtcPeerConnection", "web-sys/RtcDataChannel"]
 yew = [
     "dep:yew",
     "dep:yew-hooks",

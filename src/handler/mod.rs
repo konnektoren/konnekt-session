@@ -3,9 +3,6 @@ mod local_handler;
 #[cfg(feature = "yew")]
 mod network_handler;
 
-#[cfg(feature = "yew")]
-pub mod websocket_connection;
-
 pub use local_handler::LocalLobbyCommandHandler;
 
 #[cfg(feature = "yew")]

@@ -1,3 +1,4 @@
+use super::{NetworkError, Transport};
 use futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
@@ -9,12 +10,16 @@ use wasm_bindgen_futures::spawn_local;
 #[derive(Clone)]
 pub struct WebSocketConnection {
     websocket_url: String,
-    /// Channel sender for outgoing messages
     sender: UnboundedSender<String>,
-    /// Channel receiver for incoming messages
     receiver: Arc<RwLock<UnboundedReceiver<String>>>,
     connected: Arc<RwLock<bool>>,
     ws: Arc<RwLock<Option<WebSocket>>>,
+}
+
+impl PartialEq for WebSocketConnection {
+    fn eq(&self, other: &Self) -> bool {
+        self.websocket_url == other.websocket_url
+    }
 }
 
 impl WebSocketConnection {
@@ -29,48 +34,12 @@ impl WebSocketConnection {
         }
     }
 
-    pub fn connect(&mut self) -> Result<(), crate::model::NetworkError> {
-        let ws = WebSocket::open(&self.websocket_url)
-            .map_err(|_| crate::model::NetworkError::ConnectionError)?;
-        *self.ws.write().unwrap() = Some(ws);
-        *self.connected.write().unwrap() = true;
-        Ok(())
-    }
-
-    pub fn disconnect(&mut self) {
-        *self.connected.write().unwrap() = false;
-        *self.ws.write().unwrap() = None;
-    }
-
-    pub fn is_connected(&self) -> bool {
-        *self.connected.read().unwrap()
-    }
-
-    pub fn sender(&self) -> UnboundedSender<String> {
-        self.sender.clone()
+    fn take_websocket(&self) -> Option<WebSocket> {
+        self.ws.write().ok().and_then(|mut guard| guard.take())
     }
 
     pub fn receiver(&self) -> Arc<RwLock<UnboundedReceiver<String>>> {
         self.receiver.clone()
-    }
-
-    pub fn handle_messages<F>(&self, callback: F)
-    where
-        F: Fn(String) + 'static,
-    {
-        let ws_instance = self.take_websocket();
-
-        if let Some(ws) = ws_instance {
-            let (write, read) = ws.split();
-            let callback = Arc::new(callback);
-
-            self.spawn_read_task(read, callback.clone());
-            self.spawn_write_task(write, self.receiver());
-        }
-    }
-
-    fn take_websocket(&self) -> Option<WebSocket> {
-        self.ws.write().ok().and_then(|mut guard| guard.take())
     }
 
     fn spawn_read_task(
@@ -98,7 +67,7 @@ impl WebSocketConnection {
 
                 match message {
                     Some(text) => {
-                        if let Err(_) = write.send(Message::Text(text)).await {
+                        if write.send(Message::Text(text)).await.is_err() {
                             break;
                         }
                     }
@@ -111,5 +80,42 @@ impl WebSocketConnection {
     async fn get_next_message(receiver: &Arc<RwLock<UnboundedReceiver<String>>>) -> Option<String> {
         let mut receiver_guard = receiver.write().ok()?;
         receiver_guard.next().await
+    }
+}
+
+impl Transport for WebSocketConnection {
+    fn connect(&mut self) -> Result<(), NetworkError> {
+        let ws = WebSocket::open(&self.websocket_url).map_err(|_| NetworkError::ConnectionError)?;
+        *self.ws.write().unwrap() = Some(ws);
+        *self.connected.write().unwrap() = true;
+        Ok(())
+    }
+
+    fn disconnect(&mut self) {
+        *self.connected.write().unwrap() = false;
+        *self.ws.write().unwrap() = None;
+    }
+
+    fn is_connected(&self) -> bool {
+        *self.connected.read().unwrap()
+    }
+
+    fn sender(&self) -> UnboundedSender<String> {
+        self.sender.clone()
+    }
+
+    fn handle_messages<F>(&self, callback: F)
+    where
+        F: Fn(String) + 'static,
+    {
+        let ws_instance = self.take_websocket();
+
+        if let Some(ws) = ws_instance {
+            let (write, read) = ws.split();
+            let callback = Arc::new(callback);
+
+            self.spawn_read_task(read, callback.clone());
+            self.spawn_write_task(write, self.receiver());
+        }
     }
 }

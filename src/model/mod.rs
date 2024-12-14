@@ -6,7 +6,7 @@ mod handler;
 mod identifiable;
 mod lobby;
 mod named;
-mod network;
+pub mod network;
 mod player;
 mod role;
 mod scorable;

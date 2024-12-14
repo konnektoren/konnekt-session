@@ -16,6 +16,9 @@ use web_sys::Event;
 use web_sys::HtmlSelectElement;
 use yew::prelude::*;
 
+#[cfg(feature = "websocket")]
+use crate::model::network::WebSocketConnection;
+
 fn init_lobby(
     lobby_id: LobbyId,
     player: Player<PlayerProfile>,
@@ -108,8 +111,9 @@ pub struct LobbyInnerProps {
 
 #[function_component(LobbyInnerComp)]
 pub fn lobby_inner_comp(props: &LobbyInnerProps) -> Html {
-    let lobby = use_lobby();
-    let lobby_handler = use_lobby_handler::<PlayerProfile, Challenge, ChallengeResult>();
+    let lobby = use_lobby::<_, _, _, WebSocketConnection>();
+    let lobby_handler =
+        use_lobby_handler::<PlayerProfile, Challenge, ChallengeResult, WebSocketConnection>();
 
     let current_lobby = (*lobby).clone();
 
@@ -119,7 +123,7 @@ pub fn lobby_inner_comp(props: &LobbyInnerProps) -> Html {
     let on_command = {
         let handler = lobby_handler.clone();
         Callback::from(move |command: LobbyCommand| {
-            let handler: NetworkHandler<_, _, _> = (*handler).clone();
+            let handler: NetworkHandler<_, _, _, WebSocketConnection> = (*handler).clone();
             if let Err(err) = handler.send_command(command) {
                 log::error!("Command error: {:?}", err);
             }

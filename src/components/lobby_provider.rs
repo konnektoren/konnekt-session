@@ -1,5 +1,5 @@
-use crate::handler::websocket_connection::WebSocketConnection;
 use crate::handler::{LocalLobbyCommandHandler, NetworkHandler};
+use crate::model::network::{Transport, WebSocketConnection};
 use crate::model::{
     ActivityResultTrait, ActivityTrait, ClientId, Lobby, Player, PlayerTrait, Role,
 };
@@ -9,14 +9,15 @@ use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 
 #[derive(Clone, PartialEq)]
-pub struct LobbyProviderContext<P, A, AR>
+pub struct LobbyProviderContext<P, A, AR, T>
 where
     P: PlayerTrait + Serialize + for<'de> Deserialize<'de> + PartialEq + 'static,
     A: ActivityTrait + Serialize + for<'de> Deserialize<'de> + PartialEq + 'static,
     AR: ActivityResultTrait + Serialize + for<'de> Deserialize<'de> + PartialEq + 'static,
+    T: Transport + Clone + 'static,
 {
     pub lobby: UseStateHandle<Lobby<P, A, AR>>,
-    pub lobby_handler: UseStateHandle<NetworkHandler<P, A, AR>>,
+    pub lobby_handler: UseStateHandle<NetworkHandler<P, A, AR, T>>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -68,13 +69,12 @@ where
 
     let last_message = use_state(|| None::<String>);
 
-    let websocket_connection =
-        use_state(|| WebSocketConnection::new(props.config.websocket_url.clone()));
+    let transport = use_state(|| WebSocketConnection::new(props.config.websocket_url.clone()));
 
     let network_handler = use_state(|| {
         let lobby_id = lobby.id.clone();
         NetworkHandler::new(
-            websocket_connection.sender(),
+            (*transport).clone(),
             (*lobby_handler).clone(),
             *client_id,
             lobby_id,
@@ -83,16 +83,16 @@ where
     });
 
     {
-        let is_connected = websocket_connection.is_connected();
+        let transport = transport.clone();
         let last_message = last_message.clone();
-        let websocket_connection = websocket_connection.clone();
-
-        use_effect_with(is_connected, move |_| {
-            if is_connected {
-                let conn = (*websocket_connection).clone();
-                conn.handle_messages(move |message| {
-                    last_message.set(Some(message));
-                });
+        use_effect_with((), move |_| {
+            let mut transport = (*transport).clone();
+            if !transport.is_connected() {
+                if let Ok(()) = transport.connect() {
+                    transport.handle_messages(move |message| {
+                        last_message.set(Some(message));
+                    });
+                }
             }
             || ()
         });
@@ -138,41 +138,35 @@ where
     {
         let network_handler = network_handler.clone();
         use_effect_with((), move |_| {
+            let handler = (*network_handler).clone();
             let interval = Interval::new(10000, move || {
-                network_handler.send_ping();
+                handler.send_ping();
             });
-
-            // Cleanup function
-            || {
-                drop(interval);
-            }
+            move || drop(interval)
         });
     }
 
     {
-        let websocket_connection = websocket_connection.clone();
+        let transport = transport.clone();
         let last_message = last_message.clone();
-        if !websocket_connection.is_connected() {
-            let mut conn = (*websocket_connection).clone();
-            if conn.connect().is_ok() {
-                let last_message = last_message.clone();
-                {
-                    let last_message = last_message.clone();
-                    conn.handle_messages(move |message| {
-                        last_message.set(Some(message));
+        let mut transport_instance = (*transport).clone();
+
+        use_effect_with((), move |_| {
+            if !transport_instance.is_connected() {
+                if let Ok(()) = transport_instance.connect() {
+                    let message_callback = last_message.clone();
+                    transport_instance.handle_messages(move |msg| {
+                        message_callback.set(Some(msg));
                     });
                 }
-            } else {
-                return html! {
-                    <div>{"Failed to connect to websocket"}</div>
-                };
             }
-        }
+            || ()
+        });
     }
 
-    let context = LobbyProviderContext {
-        lobby,
-        lobby_handler: network_handler,
+    let context: LobbyProviderContext<P, A, AR, WebSocketConnection> = LobbyProviderContext {
+        lobby: lobby.clone(),
+        lobby_handler: network_handler.clone(),
     };
 
     let ping = match *ping {
@@ -196,33 +190,35 @@ where
     };
 
     html! {
-        <ContextProvider<LobbyProviderContext<P, A, AR>> context={context.clone()}>
+        <ContextProvider<LobbyProviderContext<P, A, AR, WebSocketConnection>> context={context}>
             {debug_comp}
             {props.children.clone()}
-        </ContextProvider<LobbyProviderContext<P, A, AR>>>
+        </ContextProvider<LobbyProviderContext<P, A, AR, WebSocketConnection>>>
     }
 }
 
 #[hook]
-pub fn use_lobby<P, A, AR>() -> UseStateHandle<Lobby<P, A, AR>>
+pub fn use_lobby<P, A, AR, T>() -> UseStateHandle<Lobby<P, A, AR>>
 where
     P: PlayerTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     A: ActivityTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     AR: ActivityResultTrait + Serialize + for<'de> Deserialize<'de> + 'static,
+    T: Transport + Clone + 'static,
 {
-    use_context::<LobbyProviderContext<P, A, AR>>()
+    use_context::<LobbyProviderContext<P, A, AR, T>>()
         .expect("use_lobby must be used within a LobbyProvider")
         .lobby
 }
 
 #[hook]
-pub fn use_lobby_handler<P, A, AR>() -> UseStateHandle<NetworkHandler<P, A, AR>>
+pub fn use_lobby_handler<P, A, AR, T>() -> UseStateHandle<NetworkHandler<P, A, AR, T>>
 where
     P: PlayerTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     A: ActivityTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     AR: ActivityResultTrait + Serialize + for<'de> Deserialize<'de> + 'static,
+    T: Transport + Clone + 'static,
 {
-    use_context::<LobbyProviderContext<P, A, AR>>()
+    use_context::<LobbyProviderContext<P, A, AR, T>>()
         .expect("use_lobby_handler must be used within a LobbyProvider")
         .lobby_handler
 }

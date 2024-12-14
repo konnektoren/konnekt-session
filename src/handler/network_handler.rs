@@ -1,15 +1,13 @@
-use std::sync::RwLock;
-
 use crate::handler::LocalLobbyCommandHandler;
 use crate::model::{
     ActivityResultTrait, ActivityTrait, ClientId, CommandError, Lobby, LobbyCommand,
     LobbyCommandHandler, LobbyCommandWrapper, LobbyId, NetworkCommand, NetworkError, Player,
-    PlayerTrait, Role,
+    PlayerTrait, Role, Transport,
 };
-use futures::channel::mpsc::UnboundedSender;
 use instant::SystemTime;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::sync::RwLock;
 use uuid::Uuid;
 
 fn now() -> u128 {
@@ -20,13 +18,14 @@ fn now() -> u128 {
 }
 
 #[derive(Clone)]
-pub struct NetworkHandler<P, A, AR>
+pub struct NetworkHandler<P, A, AR, T>
 where
     P: PlayerTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     A: ActivityTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     AR: ActivityResultTrait + Serialize + for<'de> Deserialize<'de> + 'static,
+    T: Transport + Clone + 'static,
 {
-    sender: UnboundedSender<String>,
+    transport: T,
     local_handler: LocalLobbyCommandHandler<P, A, AR>,
     client_id: ClientId,
     lobby_id: LobbyId,
@@ -34,32 +33,34 @@ where
     ping: Arc<RwLock<(Uuid, u128)>>,
 }
 
-impl<P, A, AR> PartialEq for NetworkHandler<P, A, AR>
+impl<P, A, AR, T> PartialEq for NetworkHandler<P, A, AR, T>
 where
     P: PlayerTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     A: ActivityTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     AR: ActivityResultTrait + Serialize + for<'de> Deserialize<'de> + 'static,
+    T: Transport + Clone + 'static,
 {
     fn eq(&self, other: &Self) -> bool {
         self.client_id == other.client_id && self.lobby_id == other.lobby_id
     }
 }
 
-impl<P, A, AR> NetworkHandler<P, A, AR>
+impl<P, A, AR, T> NetworkHandler<P, A, AR, T>
 where
     P: PlayerTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     A: ActivityTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     AR: ActivityResultTrait + Serialize + for<'de> Deserialize<'de> + 'static,
+    T: Transport + Clone + 'static,
 {
     pub fn new(
-        sender: UnboundedSender<String>,
+        transport: T,
         local_handler: LocalLobbyCommandHandler<P, A, AR>,
         client_id: ClientId,
         lobby_id: LobbyId,
         role: Role,
     ) -> Self {
         Self {
-            sender,
+            transport,
             local_handler,
             client_id,
             lobby_id,
@@ -85,6 +86,14 @@ where
         self.send_network_command(connect_command)?;
         self.join_lobby(player, lobby, role)?;
         Ok(())
+    }
+
+    pub fn disconnect(&mut self) {
+        self.transport.disconnect();
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.transport.is_connected()
     }
 
     fn join_lobby(
@@ -200,18 +209,20 @@ where
         command: NetworkCommand<String>,
     ) -> Result<(), NetworkError> {
         let message = serde_json::to_string(&command).map_err(|_| NetworkError::InvalidData)?;
-        self.sender
+        self.transport
+            .sender()
             .unbounded_send(message)
             .map_err(|_| NetworkError::SendError)?;
         Ok(())
     }
 }
 
-impl<P, A, AR> LobbyCommandHandler<P, A, AR> for NetworkHandler<P, A, AR>
+impl<P, A, AR, T> LobbyCommandHandler<P, A, AR> for NetworkHandler<P, A, AR, T>
 where
     P: PlayerTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     A: ActivityTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     AR: ActivityResultTrait + Serialize + for<'de> Deserialize<'de> + 'static,
+    T: Transport + Clone + 'static,
 {
     fn handle_command(
         &self,
