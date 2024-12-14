@@ -6,11 +6,12 @@ Konnekt Session is a library for managing multiplayer game sessions. It provides
 
 === Frontend
 
-trunk serve
+WEBSOCKET_URL=ws://localhost:3000 trunk serve
+WEBSOCKET_URL=wss://api.konnektoren.help/session trunk serve
 
 === Backend
 
-cargo run --features=server --bin server
+RUST_LOG=debug cargo run --features=server --bin server
 
 == Introduction and Goals
 
@@ -20,6 +21,7 @@ Konnekt Session aims to provide a flexible framework for managing multiplayer ga
 
 - The library is implemented in Rust.
 - It supports WebSocket communication for real-time updates.
+- WebRTC support is in development for future peer-to-peer communication.
 - It is designed to be extensible and modular.
 - Model and components for specific games will be implemented in separate crates.
 

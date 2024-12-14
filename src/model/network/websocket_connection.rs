@@ -1,4 +1,4 @@
-use super::{NetworkError, Transport};
+use super::{MessageCallback, NetworkError, Transport, TransportType};
 use futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
@@ -42,11 +42,7 @@ impl WebSocketConnection {
         self.receiver.clone()
     }
 
-    fn spawn_read_task(
-        &self,
-        mut read: SplitStream<WebSocket>,
-        callback: Arc<impl Fn(String) + 'static>,
-    ) {
+    fn spawn_read_task(&self, mut read: SplitStream<WebSocket>, callback: Arc<MessageCallback>) {
         spawn_local(async move {
             while let Some(message) = read.next().await {
                 if let Ok(Message::Text(text)) = message {
@@ -85,7 +81,8 @@ impl WebSocketConnection {
 
 impl Transport for WebSocketConnection {
     fn connect(&mut self) -> Result<(), NetworkError> {
-        let ws = WebSocket::open(&self.websocket_url).map_err(|_| NetworkError::ConnectionError)?;
+        let ws = WebSocket::open(&self.websocket_url)
+            .map_err(|e| NetworkError::ConnectionError(e.message))?;
         *self.ws.write().unwrap() = Some(ws);
         *self.connected.write().unwrap() = true;
         Ok(())
@@ -104,10 +101,7 @@ impl Transport for WebSocketConnection {
         self.sender.clone()
     }
 
-    fn handle_messages<F>(&self, callback: F)
-    where
-        F: Fn(String) + 'static,
-    {
+    fn handle_messages(&self, callback: MessageCallback) {
         let ws_instance = self.take_websocket();
 
         if let Some(ws) = ws_instance {
@@ -117,5 +111,13 @@ impl Transport for WebSocketConnection {
             self.spawn_read_task(read, callback.clone());
             self.spawn_write_task(write, self.receiver());
         }
+    }
+
+    fn transport_type(&self) -> TransportType {
+        TransportType::WebSocket(self.websocket_url.clone())
+    }
+
+    fn box_clone(&self) -> Box<dyn Transport> {
+        Box::new(self.clone())
     }
 }

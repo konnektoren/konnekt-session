@@ -18,14 +18,13 @@ fn now() -> u128 {
 }
 
 #[derive(Clone)]
-pub struct NetworkHandler<P, A, AR, T>
+pub struct NetworkHandler<P, A, AR>
 where
     P: PlayerTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     A: ActivityTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     AR: ActivityResultTrait + Serialize + for<'de> Deserialize<'de> + 'static,
-    T: Transport + Clone + 'static,
 {
-    transport: T,
+    transport: Arc<RwLock<Box<dyn Transport>>>,
     local_handler: LocalLobbyCommandHandler<P, A, AR>,
     client_id: ClientId,
     lobby_id: LobbyId,
@@ -33,34 +32,32 @@ where
     ping: Arc<RwLock<(Uuid, u128)>>,
 }
 
-impl<P, A, AR, T> PartialEq for NetworkHandler<P, A, AR, T>
+impl<P, A, AR> PartialEq for NetworkHandler<P, A, AR>
 where
     P: PlayerTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     A: ActivityTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     AR: ActivityResultTrait + Serialize + for<'de> Deserialize<'de> + 'static,
-    T: Transport + Clone + 'static,
 {
     fn eq(&self, other: &Self) -> bool {
         self.client_id == other.client_id && self.lobby_id == other.lobby_id
     }
 }
 
-impl<P, A, AR, T> NetworkHandler<P, A, AR, T>
+impl<P, A, AR> NetworkHandler<P, A, AR>
 where
     P: PlayerTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     A: ActivityTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     AR: ActivityResultTrait + Serialize + for<'de> Deserialize<'de> + 'static,
-    T: Transport + Clone + 'static,
 {
     pub fn new(
-        transport: T,
+        transport: Box<dyn Transport>,
         local_handler: LocalLobbyCommandHandler<P, A, AR>,
         client_id: ClientId,
         lobby_id: LobbyId,
         role: Role,
     ) -> Self {
         Self {
-            transport,
+            transport: Arc::new(RwLock::new(transport)),
             local_handler,
             client_id,
             lobby_id,
@@ -79,21 +76,48 @@ where
         lobby: &Lobby<P, A, AR>,
         role: Role,
     ) -> Result<(), NetworkError> {
+        log::info!("Connecting to lobby {} as {:?}", self.lobby_id, role);
+
+        // First establish transport connection
+        if !self.transport.read().unwrap().is_connected() {
+            log::info!("Establishing transport connection");
+            self.transport.write().unwrap().connect()?;
+        }
+
+        // Send connect command
         let connect_command = NetworkCommand::<String>::Connect {
             client_id: self.client_id,
             lobby_id: self.lobby_id,
         };
         self.send_network_command(connect_command)?;
+
+        // Join lobby
         self.join_lobby(player, lobby, role)?;
+
+        log::info!("Successfully connected to lobby");
         Ok(())
     }
 
-    pub fn disconnect(&mut self) {
-        self.transport.disconnect();
+    pub fn disconnect(&self) {
+        log::info!("Disconnecting from lobby {}", self.lobby_id);
+
+        // Send disconnect command before closing transport
+        let disconnect_command = NetworkCommand::<String>::Disconnect {
+            client_id: self.client_id,
+            lobby_id: self.lobby_id,
+        };
+
+        if let Err(e) = self.send_network_command(disconnect_command) {
+            log::error!("Failed to send disconnect command: {:?}", e);
+        }
+
+        // Close transport connection
+        self.transport.write().unwrap().disconnect();
+        log::info!("Disconnected from lobby");
     }
 
     pub fn is_connected(&self) -> bool {
-        self.transport.is_connected()
+        self.transport.read().unwrap().is_connected()
     }
 
     fn join_lobby(
@@ -169,39 +193,87 @@ where
         command: NetworkCommand<String>,
     ) -> Result<(), NetworkError> {
         match command {
-            NetworkCommand::Message { data, .. } => {
+            NetworkCommand::Connect {
+                client_id,
+                lobby_id,
+            } => {
+                log::info!(
+                    "Received Connect command from client {} for lobby {}",
+                    client_id,
+                    lobby_id
+                );
+                if self.role == Role::Admin {
+                    log::info!("Admin received connect request from {}", client_id);
+                    // Send current lobby state to the new client
+                    self.send_lobby_state(lobby);
+                }
+                Ok(())
+            }
+            NetworkCommand::Message { data, client_id } => {
+                log::info!("Received Message from client {}", client_id);
                 let lobby_command = serde_json::from_str::<LobbyCommandWrapper>(&data)
                     .map_err(|_| NetworkError::InvalidData)?;
 
-                if let LobbyCommand::RequestState = lobby_command.command {
-                    if self.role == Role::Admin {
-                        self.send_lobby_state(lobby);
-                    }
-                }
-
+                // Handle the command locally first
                 let result = self
                     .local_handler
-                    .handle_command(lobby, lobby_command.command);
+                    .handle_command(lobby, lobby_command.command.clone());
 
                 if let Err(error) = result {
                     log::error!("Failed to handle command: {:?}", error);
+                    return Ok(());
                 }
+
+                // If admin and not self, broadcast state changes to all clients
+                if self.role == Role::Admin && client_id != self.client_id {
+                    match lobby_command.command {
+                        LobbyCommand::RequestState => {
+                            log::info!("Admin sending lobby state to {}", client_id);
+                            self.send_lobby_state(lobby);
+                        }
+                        LobbyCommand::SelectActivity { .. } | LobbyCommand::Join { .. } => {
+                            // For state-changing commands, broadcast the new state
+                            log::info!("Admin broadcasting updated state after command");
+                            self.send_lobby_state(lobby);
+                        }
+                        _ => {
+                            // Forward the message to all clients
+                            let forward_command = NetworkCommand::Message {
+                                client_id,
+                                data: data.clone(),
+                            };
+                            self.send_network_command(forward_command)?;
+                        }
+                    }
+                }
+                Ok(())
             }
             NetworkCommand::Ping { id, client_id } => {
+                log::debug!("Received Ping from client {}", client_id);
                 let command = NetworkCommand::Pong { id, client_id };
-                self.send_network_command(command)?;
+                self.send_network_command(command)
             }
             NetworkCommand::Pong { id, client_id } => {
+                log::debug!("Received Pong from client {}", client_id);
                 if client_id == self.client_id && self.ping.read().unwrap().0 == id {
                     let ping_time = now() - self.ping.read().unwrap().1;
                     *ping = Some(ping_time as u32);
                 }
+                Ok(())
             }
-            _ => {
-                log::error!("Unsupported command: {:?}", command);
+            NetworkCommand::Disconnect {
+                client_id,
+                lobby_id,
+            } => {
+                log::info!("Client {} disconnected from lobby {}", client_id, lobby_id);
+                // Handle disconnect - might want to clean up state if admin
+                if self.role == Role::Admin {
+                    // Add any cleanup needed
+                    log::info!("Admin handling disconnect");
+                }
+                Ok(())
             }
         }
-        Ok(())
     }
 
     pub fn send_network_command(
@@ -209,20 +281,24 @@ where
         command: NetworkCommand<String>,
     ) -> Result<(), NetworkError> {
         let message = serde_json::to_string(&command).map_err(|_| NetworkError::InvalidData)?;
+
+        // Send through transport
         self.transport
+            .read()
+            .unwrap()
             .sender()
-            .unbounded_send(message)
+            .unbounded_send(message.clone())
             .map_err(|_| NetworkError::SendError)?;
+
         Ok(())
     }
 }
 
-impl<P, A, AR, T> LobbyCommandHandler<P, A, AR> for NetworkHandler<P, A, AR, T>
+impl<P, A, AR> LobbyCommandHandler<P, A, AR> for NetworkHandler<P, A, AR>
 where
     P: PlayerTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     A: ActivityTrait + Serialize + for<'de> Deserialize<'de> + 'static,
     AR: ActivityResultTrait + Serialize + for<'de> Deserialize<'de> + 'static,
-    T: Transport + Clone + 'static,
 {
     fn handle_command(
         &self,

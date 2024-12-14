@@ -16,6 +16,6 @@ pub enum NetworkError {
     SendError,
     #[error("Internal error: {0}")]
     InternalError(String),
-    #[error("Connection error")]
-    ConnectionError,
+    #[error("Connection error: {0}")]
+    ConnectionError(String),
 }
