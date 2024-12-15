@@ -8,8 +8,8 @@ use crate::example::{
 };
 use crate::handler::NetworkHandler;
 use crate::model::{
-    Activity, ActivityResult, ActivityStatus, CommandError, Lobby, LobbyCommand,
-    LobbyCommandHandler, LobbyId, Player, PlayerId, Role,
+    network::TransportType, Activity, ActivityResult, ActivityStatus, CommandError, Lobby,
+    LobbyCommand, LobbyCommandHandler, LobbyId, Player, PlayerId, Role,
 };
 use crate::prelude::use_lobby_handler;
 use web_sys::Event;
@@ -74,8 +74,19 @@ pub fn lobby_page(props: &LobbyPageProps) -> Html {
         }
     };
 
+    let transport = TransportType::WebSocket(config.websocket_url.clone());
+
+    /*
+    let transport = TransportType::WebRTC(
+        config.websocket_url.clone(),
+        props.lobby_id.clone(),
+        props.player.id.clone(),
+        *role,
+    );
+    */
+
     let lobby_provider_config = LobbyProviderConfig {
-        websocket_url: config.websocket_url.clone(),
+        transport,
         player: props.player.clone(),
         lobby: init_lobby(props.lobby_id, props.player.clone(), props.password.clone()),
         role: *role,
@@ -108,7 +119,7 @@ pub struct LobbyInnerProps {
 
 #[function_component(LobbyInnerComp)]
 pub fn lobby_inner_comp(props: &LobbyInnerProps) -> Html {
-    let lobby = use_lobby();
+    let lobby = use_lobby::<_, _, _>();
     let lobby_handler = use_lobby_handler::<PlayerProfile, Challenge, ChallengeResult>();
 
     let current_lobby = (*lobby).clone();
