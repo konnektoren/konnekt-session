@@ -18,7 +18,7 @@ name = "konnekt_session"
 path = "src/lib.rs"
 
 [features]
-default = ["yew", "websocket", "webrtc"]
+default = ["yew", "websocket", "webrtc", "matchbox"]
 websocket = ["gloo-net/websocket"]
 webrtc = [
     "web-sys/RtcPeerConnection",
@@ -41,6 +41,7 @@ webrtc = [
     "web-sys/MessageEvent",
     "gloo-net/http",
 ]
+matchbox = []
 yew = [
     "dep:yew",
     "dep:yew-hooks",
@@ -61,6 +62,10 @@ server = [
     "tracing",
     "tracing-subscriber",
     "tracing-opentelemetry",
+    "tokio-tungstenite",
+    "crossbeam-channel",
+    "matchbox_protocol",
+    "matchbox_signaling",
 ]
 
 [dependencies]
@@ -113,3 +118,7 @@ tracing-subscriber = { version = "0.3.18", features = [
 ], optional = true }
 tracing-opentelemetry = { version = "0.21", optional = true }
 js-sys = "0.3.45"
+matchbox_protocol = { version = "0.10.0", optional = true }
+matchbox_signaling = { version = "0.10.0", optional = true }
+tokio-tungstenite = { version = "0.25.0", optional = true }
+crossbeam-channel = { version = "0.5.14", optional = true }
