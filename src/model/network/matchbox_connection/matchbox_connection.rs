@@ -1,5 +1,6 @@
 use super::super::{MessageCallback, NetworkError, Transport, TransportType};
-use super::MatchboxPeerManager;
+use super::MatchboxConnectionManager;
+use crate::model::network::connection::ConnectionManager;
 use crate::model::{ClientId, LobbyId, Role};
 use futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use futures::{select, FutureExt, StreamExt};
@@ -20,7 +21,7 @@ pub struct MatchboxConnection {
     sender: UnboundedSender<String>,
     receiver: Arc<RwLock<UnboundedReceiver<String>>>,
     connected: Arc<RwLock<bool>>,
-    peer_manager: Arc<MatchboxPeerManager>,
+    peer_manager: Arc<MatchboxConnectionManager>,
 }
 
 impl MatchboxConnection {
@@ -34,7 +35,7 @@ impl MatchboxConnection {
             sender,
             receiver: Arc::new(RwLock::new(receiver)),
             connected: Arc::new(RwLock::new(false)),
-            peer_manager: Arc::new(MatchboxPeerManager::new()),
+            peer_manager: Arc::new(MatchboxConnectionManager::new()),
         }
     }
 
@@ -43,7 +44,7 @@ impl MatchboxConnection {
         setup_future: impl std::future::Future<Output = Result<(), matchbox_socket::Error>>,
         sender: UnboundedSender<String>,
         receiver: Arc<RwLock<UnboundedReceiver<String>>>,
-        peer_manager: Arc<MatchboxPeerManager>,
+        peer_manager: Arc<MatchboxConnectionManager>,
     ) {
         let setup_fut = setup_future.fuse();
         futures::pin_mut!(setup_fut);

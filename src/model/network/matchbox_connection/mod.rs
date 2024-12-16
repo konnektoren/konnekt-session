@@ -1,5 +1,5 @@
+mod connection_manager;
 mod matchbox_connection;
-mod peer_manager;
 
+pub use connection_manager::MatchboxConnectionManager;
 pub use matchbox_connection::MatchboxConnection;
-pub use peer_manager::MatchboxPeerManager;
