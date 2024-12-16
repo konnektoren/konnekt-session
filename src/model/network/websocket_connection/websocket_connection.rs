@@ -1,4 +1,8 @@
+use crate::model::network::connection::ConnectionManager;
+
 use super::super::{MessageCallback, NetworkError, Transport, TransportType};
+use super::connection_manager::WsPeerId;
+use super::WebSocketConnectionManager;
 use futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
@@ -12,7 +16,7 @@ pub struct WebSocketConnection {
     websocket_url: String,
     sender: UnboundedSender<String>,
     receiver: Arc<RwLock<UnboundedReceiver<String>>>,
-    connected: Arc<RwLock<bool>>,
+    connection_manager: Arc<RwLock<WebSocketConnectionManager>>,
     ws: Arc<RwLock<Option<WebSocket>>>,
 }
 
@@ -29,7 +33,7 @@ impl WebSocketConnection {
             websocket_url,
             sender,
             receiver: Arc::new(RwLock::new(receiver)),
-            connected: Arc::new(RwLock::new(false)),
+            connection_manager: Arc::new(RwLock::new(WebSocketConnectionManager::new())),
             ws: Arc::new(RwLock::new(None)),
         }
     }
@@ -84,17 +88,26 @@ impl Transport for WebSocketConnection {
         let ws = WebSocket::open(&self.websocket_url)
             .map_err(|e| NetworkError::ConnectionError(e.message))?;
         *self.ws.write().unwrap() = Some(ws);
-        *self.connected.write().unwrap() = true;
+        self.connection_manager
+            .write()
+            .unwrap()
+            .add_peer(WsPeerId(self.websocket_url.to_string()));
         Ok(())
     }
 
     fn disconnect(&mut self) {
-        *self.connected.write().unwrap() = false;
         *self.ws.write().unwrap() = None;
+        self.connection_manager
+            .write()
+            .unwrap()
+            .remove_peer(&WsPeerId(self.websocket_url.to_string()));
     }
 
     fn is_connected(&self) -> bool {
-        *self.connected.read().unwrap()
+        self.connection_manager
+            .read()
+            .unwrap()
+            .is_peer_connected(&WsPeerId(self.websocket_url.to_string()))
     }
 
     fn sender(&self) -> UnboundedSender<String> {

@@ -1,6 +1,7 @@
 mod client;
 mod command;
 mod command_handler;
+mod connection;
 mod error;
 mod signaling;
 mod transport;
