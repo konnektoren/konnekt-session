@@ -1,4 +1,4 @@
-use super::{MessageCallback, NetworkError, Transport, TransportType};
+use super::super::{MessageCallback, NetworkError, Transport, TransportType};
 use futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
