@@ -80,7 +80,6 @@ where
 
         // First establish transport connection
         if !self.transport.read().unwrap().is_connected() {
-            log::info!("Establishing transport connection");
             self.transport.write().unwrap().connect()?;
         }
 
@@ -145,7 +144,6 @@ where
     }
 
     fn send_lobby_state(&self, lobby: &Lobby<P, A, AR>) {
-        log::info!("Sending lobby state");
         for participant in lobby.participants.iter() {
             let command = LobbyCommand::PlayerInfo {
                 player_id: participant.id,
@@ -203,14 +201,11 @@ where
                     lobby_id
                 );
                 if self.role == Role::Admin {
-                    log::info!("Admin received connect request from {}", client_id);
-                    // Send current lobby state to the new client
                     self.send_lobby_state(lobby);
                 }
                 Ok(())
             }
             NetworkCommand::Message { data, client_id } => {
-                log::info!("Received Message from client {}", client_id);
                 let lobby_command = serde_json::from_str::<LobbyCommandWrapper>(&data)
                     .map_err(|_| NetworkError::InvalidData)?;
 
@@ -232,8 +227,6 @@ where
                             self.send_lobby_state(lobby);
                         }
                         LobbyCommand::SelectActivity { .. } | LobbyCommand::Join { .. } => {
-                            // For state-changing commands, broadcast the new state
-                            log::info!("Admin broadcasting updated state after command");
                             self.send_lobby_state(lobby);
                         }
                         _ => {
@@ -249,12 +242,10 @@ where
                 Ok(())
             }
             NetworkCommand::Ping { id, client_id } => {
-                log::debug!("Received Ping from client {}", client_id);
                 let command = NetworkCommand::Pong { id, client_id };
                 self.send_network_command(command)
             }
             NetworkCommand::Pong { id, client_id } => {
-                log::debug!("Received Pong from client {}", client_id);
                 if client_id == self.client_id && self.ping.read().unwrap().0 == id {
                     let ping_time = now() - self.ping.read().unwrap().1;
                     *ping = Some(ping_time as u32);
@@ -266,9 +257,7 @@ where
                 lobby_id,
             } => {
                 log::info!("Client {} disconnected from lobby {}", client_id, lobby_id);
-                // Handle disconnect - might want to clean up state if admin
                 if self.role == Role::Admin {
-                    // Add any cleanup needed
                     log::info!("Admin handling disconnect");
                 }
                 Ok(())

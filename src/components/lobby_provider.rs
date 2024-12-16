@@ -89,9 +89,7 @@ where
             let mut transport = (*transport).clone();
             if !transport.is_connected() {
                 if let Ok(()) = transport.connect() {
-                    log::debug!("Transport connected, setting up message handler");
                     transport.handle_messages(Box::new(move |message| {
-                        log::debug!("Received message through transport: {}", message);
                         last_message.set(Some(message));
                     }));
 
@@ -114,7 +112,6 @@ where
             if *connection_established {
                 let lobby = (*lobby).clone();
                 spawn_local(async move {
-                    log::info!("Connecting to server with role: {:?}", role);
                     if let Err(e) = network_handler.connect(&player, &lobby, role) {
                         log::error!("Failed to connect to server: {:?}", e);
                     }
@@ -133,7 +130,6 @@ where
 
         use_effect_with(last_message.clone(), move |_| {
             if let Some(message) = (*last_message).clone() {
-                log::debug!("Processing message: {}", message);
                 spawn_local(async move {
                     let mut new_lobby = (*lobby).clone();
                     let mut new_ping = (*ping).clone();
@@ -156,13 +152,11 @@ where
 
         use_effect_with((*connection_established, ()), move |_| {
             let cleanup = if *connection_established {
-                log::debug!("Starting ping interval");
                 let handler = (*network_handler).clone();
                 let interval = Interval::new(10000, move || {
                     handler.send_ping();
                 });
                 Box::new(move || {
-                    log::debug!("Cleaning up ping interval");
                     drop(interval);
                 }) as Box<dyn FnOnce()>
             } else {
