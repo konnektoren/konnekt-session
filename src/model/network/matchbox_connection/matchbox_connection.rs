@@ -1,8 +1,9 @@
 use super::super::{MessageCallback, NetworkError, Transport, TransportType};
 use super::MatchboxConnectionManager;
-use crate::model::network::connection::ConnectionManager;
+use crate::model::network::connection::{ConnectionHandler, ConnectionManager};
 use crate::model::{ClientId, LobbyId, Role};
 use futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use futures::stream::{SplitSink, SplitStream};
 use futures::{select, FutureExt, StreamExt};
 use futures_timer::Delay;
 use matchbox_socket::{ChannelConfig, PeerState, WebRtcSocket, WebRtcSocketBuilder};
@@ -22,6 +23,7 @@ pub struct MatchboxConnection {
     receiver: Arc<RwLock<UnboundedReceiver<String>>>,
     connected: Arc<RwLock<bool>>,
     peer_manager: Arc<MatchboxConnectionManager>,
+    socket: Arc<RwLock<Option<WebRtcSocket>>>,
 }
 
 impl MatchboxConnection {
@@ -36,14 +38,13 @@ impl MatchboxConnection {
             receiver: Arc::new(RwLock::new(receiver)),
             connected: Arc::new(RwLock::new(false)),
             peer_manager: Arc::new(MatchboxConnectionManager::new()),
+            socket: Arc::new(RwLock::new(None)),
         }
     }
 
     async fn run_socket_loop(
-        mut socket: WebRtcSocket,
+        socket: Arc<RwLock<Option<WebRtcSocket>>>,
         setup_future: impl std::future::Future<Output = Result<(), matchbox_socket::Error>>,
-        sender: UnboundedSender<String>,
-        receiver: Arc<RwLock<UnboundedReceiver<String>>>,
         peer_manager: Arc<MatchboxConnectionManager>,
     ) {
         let setup_fut = setup_future.fuse();
@@ -52,57 +53,20 @@ impl MatchboxConnection {
         let timeout = Delay::new(Duration::from_millis(100));
         futures::pin_mut!(timeout);
 
-        // Spawn write task
-        let (write_tx, mut write_rx) =
-            mpsc::unbounded::<(MessagePacket, Vec<matchbox_socket::PeerId>)>();
-
-        // Spawn write task
-        let peer_manager_write = peer_manager.clone();
-        spawn_local(async move {
-            loop {
-                let message = Self::get_next_message(&receiver).await;
-
-                match message {
-                    Some(text) => {
-                        log::info!("next message {}", text);
-                        let packet = text.as_bytes().to_vec().into_boxed_slice();
-                        let peers = peer_manager_write.get_connected_peers();
-                        if !peers.is_empty() {
-                            if write_tx.unbounded_send((packet, peers)).is_err() {
-                                log::error!("Failed to send message to main loop");
-                                break;
+        loop {
+            if let Ok(mut socket_guard) = socket.write() {
+                if let Some(socket) = &mut *socket_guard {
+                    for (peer, state) in socket.update_peers() {
+                        match state {
+                            PeerState::Connected => {
+                                log::info!("Peer joined: {peer}");
+                                peer_manager.add_peer(peer.clone());
+                            }
+                            PeerState::Disconnected => {
+                                log::info!("Peer left: {peer}");
+                                peer_manager.remove_peer(&peer);
                             }
                         }
-                    }
-                    None => break,
-                }
-            }
-        });
-
-        loop {
-            // Handle peer updates
-            for (peer, state) in socket.update_peers() {
-                match state {
-                    PeerState::Connected => {
-                        log::info!("Peer joined: {peer}");
-                        peer_manager.add_peer(peer);
-                        let packet = "hello friend!".as_bytes().to_vec().into_boxed_slice();
-                        socket.send(packet, peer);
-                    }
-                    PeerState::Disconnected => {
-                        log::info!("Peer left: {peer}");
-                        peer_manager.remove_peer(&peer);
-                    }
-                }
-            }
-
-            // Handle incoming messages
-            for (peer, packet) in socket.receive() {
-                if let Ok(text) = String::from_utf8(packet.to_vec()) {
-                    log::debug!("Received message from peer {}", peer);
-                    if sender.unbounded_send(text).is_err() {
-                        log::warn!("Failed to forward message - channel closed");
-                        return;
                     }
                 }
             }
@@ -118,9 +82,100 @@ impl MatchboxConnection {
         }
     }
 
-    async fn get_next_message(receiver: &Arc<RwLock<UnboundedReceiver<String>>>) -> Option<String> {
-        let mut receiver_guard = receiver.write().ok()?;
-        receiver_guard.next().await
+    pub fn spawn_socket_send_task(&self) {
+        let peer_manager = self.peer_manager.clone();
+        let socket = self.socket.clone();
+        let receiver = self.receiver();
+
+        spawn_local(async move {
+            while let Some(message) = Self::next_message(receiver.clone()).await {
+                let packet = message.as_bytes().to_vec().into_boxed_slice();
+                let peers = peer_manager.get_connected_peers();
+
+                for peer in peers {
+                    if let Ok(mut socket_guard) = socket.write() {
+                        if let Some(socket) = &mut *socket_guard {
+                            log::debug!("Sending message to peer {} ({})", peer, packet.len());
+                            socket.send(packet.clone(), peer);
+                        }
+                    }
+                }
+                Delay::new(Duration::from_millis(10)).await;
+            }
+
+            log::warn!("Send task ended");
+        });
+    }
+
+    pub fn spawn_socket_receive_task(&self, callback: MessageCallback) {
+        let socket = self.socket.clone();
+        spawn_local(async move {
+            loop {
+                if let Ok(mut socket_guard) = socket.write() {
+                    if let Some(socket) = &mut *socket_guard {
+                        for (peer, packet) in socket.receive() {
+                            log::debug!("Received message from peer {} ({})", peer, packet.len());
+                            if let Ok(text) = String::from_utf8(packet.to_vec()) {
+                                callback(text);
+                            }
+                        }
+                    }
+                }
+                Delay::new(Duration::from_millis(10)).await;
+            }
+        });
+    }
+}
+
+impl ConnectionHandler for MatchboxConnection {
+    type SocketType = Arc<RwLock<WebRtcSocket>>;
+    type InternMessageType = String;
+    type ExternMessageType = MessagePacket;
+    type CallbackType = MessageCallback;
+
+    fn take_socket(&self) -> Option<Self::SocketType> {
+        if let Ok(mut socket_guard) = self.socket.write() {
+            if let Some(socket) = socket_guard.take() {
+                return Some(Arc::new(RwLock::new(socket)));
+            }
+        }
+        None
+    }
+
+    fn receiver(&self) -> Arc<RwLock<UnboundedReceiver<Self::InternMessageType>>> {
+        self.receiver.clone()
+    }
+
+    async fn next_message(
+        receiver: Arc<RwLock<UnboundedReceiver<Self::InternMessageType>>>,
+    ) -> Option<Self::InternMessageType> {
+        if let Ok(mut receiver_guard) = receiver.write() {
+            receiver_guard.next().await
+        } else {
+            None
+        }
+    }
+
+    fn spawn_send_task(
+        &self,
+        _sender: SplitSink<Self::SocketType, Self::ExternMessageType>,
+        _receiver: Arc<RwLock<UnboundedReceiver<Self::InternMessageType>>>,
+    ) {
+        unimplemented!("unable to provide splitsink")
+    }
+
+    fn spawn_receive_task(
+        &self,
+        _receiver: SplitStream<Self::SocketType>,
+        _callback: Arc<Self::CallbackType>,
+    ) {
+        unimplemented!("unable to provide splitstream")
+    }
+}
+
+impl Drop for MatchboxConnection {
+    fn drop(&mut self) {
+        self.disconnect();
     }
 }
 
@@ -137,12 +192,12 @@ impl Transport for MatchboxConnection {
 
         log::info!("Connecting to signaling server: {}", room_url);
 
-        let sender = self.sender.clone();
-        let receiver = self.receiver.clone();
         let peer_manager = self.peer_manager.clone();
+        self.socket = Arc::new(RwLock::new(Some(socket)));
+        let socket = self.socket.clone();
 
         spawn_local(async move {
-            Self::run_socket_loop(socket, setup_future, sender, receiver, peer_manager).await;
+            Self::run_socket_loop(socket.clone(), setup_future, peer_manager).await;
         });
 
         Ok(())
@@ -161,15 +216,8 @@ impl Transport for MatchboxConnection {
     }
 
     fn handle_messages(&self, callback: MessageCallback) {
-        let receiver = self.receiver.clone();
-        let callback = Arc::new(callback);
-
-        spawn_local(async move {
-            let mut receiver_guard = receiver.write().unwrap();
-            while let Some(message) = receiver_guard.next().await {
-                callback(message);
-            }
-        });
+        self.spawn_socket_receive_task(callback);
+        self.spawn_socket_send_task();
     }
 
     fn transport_type(&self) -> TransportType {

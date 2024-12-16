@@ -1,20 +1,9 @@
-use super::MessageCallback;
-use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
+use futures::channel::mpsc::UnboundedReceiver;
 use futures::stream::{SplitSink, SplitStream};
 use std::fmt::Debug;
 use std::sync::{Arc, RwLock};
 
-pub trait PeerId: Clone + Debug + Eq + std::hash::Hash {}
-
-pub trait ConnectionReader {
-    type Peer: PeerId;
-    fn spawn_read_task(&self, message_sender: UnboundedSender<(Self::Peer, String)>);
-}
-
-pub trait ConnectionWriter {
-    type Peer: PeerId;
-    fn spawn_write_task(&self, peer: Self::Peer);
-}
+pub trait PeerId: Clone + Debug {}
 
 pub trait ConnectionManager {
     type Peer: PeerId;
