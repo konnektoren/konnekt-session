@@ -1,4 +1,4 @@
-use crate::model::network::connection::ConnectionManager;
+use crate::model::network::connection::{ConnectionHandler, ConnectionManager};
 
 use super::super::{MessageCallback, NetworkError, Transport, TransportType};
 use super::connection_manager::WsPeerId;
@@ -37,37 +37,42 @@ impl WebSocketConnection {
             ws: Arc::new(RwLock::new(None)),
         }
     }
+}
 
-    fn take_websocket(&self) -> Option<WebSocket> {
+impl ConnectionHandler for WebSocketConnection {
+    type InternMessageType = String;
+    type ExternMessageType = Message;
+    type SocketType = WebSocket;
+    type CallbackType = MessageCallback;
+
+    fn take_socket(&self) -> Option<Self::SocketType> {
         self.ws.write().ok().and_then(|mut guard| guard.take())
     }
 
-    pub fn receiver(&self) -> Arc<RwLock<UnboundedReceiver<String>>> {
+    fn receiver(&self) -> Arc<RwLock<UnboundedReceiver<Self::InternMessageType>>> {
         self.receiver.clone()
     }
 
-    fn spawn_read_task(&self, mut read: SplitStream<WebSocket>, callback: Arc<MessageCallback>) {
-        spawn_local(async move {
-            while let Some(message) = read.next().await {
-                if let Ok(Message::Text(text)) = message {
-                    callback(text);
-                }
-            }
-        });
+    async fn next_message(
+        receiver: Arc<RwLock<UnboundedReceiver<Self::InternMessageType>>>,
+    ) -> Option<Self::InternMessageType> {
+        let mut receiver_guard = receiver.write().ok()?;
+        receiver_guard.next().await
     }
 
-    fn spawn_write_task(
+    fn spawn_send_task(
         &self,
-        mut write: SplitSink<WebSocket, Message>,
-        receiver: Arc<RwLock<UnboundedReceiver<String>>>,
+        sender: SplitSink<Self::SocketType, Self::ExternMessageType>,
+        receiver: Arc<RwLock<UnboundedReceiver<Self::InternMessageType>>>,
     ) {
+        let mut sender = sender;
         spawn_local(async move {
             loop {
-                let message = Self::get_next_message(&receiver).await;
+                let message = Self::next_message(receiver.clone()).await;
 
                 match message {
                     Some(text) => {
-                        if write.send(Message::Text(text)).await.is_err() {
+                        if sender.send(Message::Text(text)).await.is_err() {
                             break;
                         }
                     }
@@ -77,9 +82,19 @@ impl WebSocketConnection {
         });
     }
 
-    async fn get_next_message(receiver: &Arc<RwLock<UnboundedReceiver<String>>>) -> Option<String> {
-        let mut receiver_guard = receiver.write().ok()?;
-        receiver_guard.next().await
+    fn spawn_receive_task(
+        &self,
+        receiver: SplitStream<Self::SocketType>,
+        callback: Arc<Self::CallbackType>,
+    ) {
+        let mut receiver = receiver;
+        spawn_local(async move {
+            while let Some(message) = receiver.next().await {
+                if let Ok(Message::Text(text)) = message {
+                    callback(text);
+                }
+            }
+        });
     }
 }
 
@@ -115,14 +130,14 @@ impl Transport for WebSocketConnection {
     }
 
     fn handle_messages(&self, callback: MessageCallback) {
-        let ws_instance = self.take_websocket();
+        let ws_instance = self.take_socket();
 
         if let Some(ws) = ws_instance {
             let (write, read) = ws.split();
             let callback = Arc::new(callback);
 
-            self.spawn_read_task(read, callback.clone());
-            self.spawn_write_task(write, self.receiver());
+            self.spawn_receive_task(read, callback.clone());
+            self.spawn_send_task(write, self.receiver());
         }
     }
 
