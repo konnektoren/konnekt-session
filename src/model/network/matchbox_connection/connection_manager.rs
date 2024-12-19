@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 impl PeerId for MatchboxPeerId {}
 
 pub struct MatchboxConnectionManager {
-    peers: Arc<RwLock<HashMap<MatchboxPeerId, bool>>>,
+    pub peers: Arc<RwLock<HashMap<MatchboxPeerId, bool>>>,
 }
 
 impl MatchboxConnectionManager {

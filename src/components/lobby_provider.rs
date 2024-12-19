@@ -79,11 +79,41 @@ where
         )
     });
 
+    // Add connection check interval
+    {
+        let transport = transport.clone();
+        let connection_established = connection_established.clone();
+
+        use_effect_with((), move |_| {
+            let mut interval_handle = None;
+
+            if !*connection_established {
+                let transport_clone = transport.clone();
+                let connection_established_clone = connection_established.clone();
+
+                let interval = Interval::new(200, move || {
+                    let transport = (*transport_clone).clone();
+                    if transport.is_connected() {
+                        log::info!("Connection established!");
+                        connection_established_clone.set(true);
+                    }
+                });
+
+                interval_handle = Some(interval);
+            }
+
+            move || {
+                if let Some(handle) = interval_handle {
+                    drop(handle);
+                }
+            }
+        });
+    }
+
     // Initialize transport
     {
         let transport = transport.clone();
         let last_message = last_message.clone();
-        let connection_established = connection_established.clone();
 
         use_effect_with((), move |_| {
             let mut transport = (*transport).clone();
@@ -92,8 +122,6 @@ where
                     transport.handle_messages(Box::new(move |message| {
                         last_message.set(Some(message));
                     }));
-
-                    connection_established.set(true);
                 }
             }
             || ()
