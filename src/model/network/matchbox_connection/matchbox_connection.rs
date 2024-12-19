@@ -149,23 +149,10 @@ impl ConnectionHandler for MatchboxConnection {
 
     fn spawn_send_task(
         &self,
-        sender: Self::ExternSenderType,
-        receiver: Arc<RwLock<UnboundedReceiver<Self::InternMessageType>>>,
+        _sender: Self::ExternSenderType,
+        _receiver: Arc<RwLock<UnboundedReceiver<Self::InternMessageType>>>,
     ) {
-        spawn_local(async move {
-            loop {
-                let message = Self::next_message(receiver.clone()).await;
-
-                match message {
-                    Some(text) => {
-                        if sender.unbounded_send(text).is_err() {
-                            break;
-                        }
-                    }
-                    None => break,
-                }
-            }
-        });
+        unimplemented!("implemented in run_socket_loop");
     }
 
     fn spawn_receive_task(
@@ -234,7 +221,6 @@ impl Transport for MatchboxConnection {
         let callback = Arc::new(callback);
         let bridge_receiver = self.bridge_receiver.clone();
 
-        self.spawn_send_task(self.bridge_sender.clone(), self.receiver());
         self.spawn_receive_task(bridge_receiver, callback);
     }
 
