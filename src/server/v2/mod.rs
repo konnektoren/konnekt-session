@@ -2,7 +2,6 @@ mod connection;
 mod connection_handler;
 mod connection_repository;
 mod lobby_repository;
-pub mod matchbox;
 mod memory_storage;
 pub mod route;
 pub mod signaling;
