@@ -11,18 +11,26 @@ jobs:
   build_and_deploy_main:
     name: Rust project for main branch
     runs-on: ubuntu-22.04
+    environment: github-pages
     if: github.ref == 'refs/heads/main'
+
     steps:
       - uses: actions/checkout@v2
+
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+          target: wasm32-unknown-unknown
+          override: true
+
       - uses: jetli/trunk-action@v0.5.0
         with:
           version: "latest"
 
-      - run: rustup target add wasm32-unknown-unknown
-      - run: trunk build --features=yew --release --public-url /konnekt-session/
+      - name: Build with Trunk
+        env:
+          WEBSOCKET_URL: ${{ secrets.WEBSOCKET_URL || 'wss://echo.websocket.events' }}
+        run: trunk build --features=yew --release --public-url /konnekt-session/
 
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3

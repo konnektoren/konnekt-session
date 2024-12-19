@@ -74,7 +74,7 @@ pub fn lobby_page(props: &LobbyPageProps) -> Html {
         }
     };
 
-    let transport = TransportType::WebSocket(config.websocket_url.clone());
+    // let transport = TransportType::WebSocket(config.websocket_url.clone());
 
     /*
     let transport = TransportType::WebRTC(
@@ -85,14 +85,12 @@ pub fn lobby_page(props: &LobbyPageProps) -> Html {
     );
     */
 
-    /*
     let transport = TransportType::Matchbox(
         config.websocket_url.clone(),
         props.lobby_id.clone(),
         props.player.id.clone(),
         *role,
     );
-    */
 
     let lobby_provider_config = LobbyProviderConfig {
         transport,
