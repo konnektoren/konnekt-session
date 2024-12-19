@@ -75,7 +75,6 @@ impl MatchboxConnection {
                         let packet = message.as_bytes().to_vec().into_boxed_slice();
                         let peers: Vec<_> = socket.connected_peers().collect();
                         for peer in peers {
-                            log::info!("Sending message to peer {}", peer);
                             socket.channel_mut(CHANNEL_ID).send(packet.clone(), peer);
                         }
                     }
@@ -105,8 +104,6 @@ impl MatchboxConnection {
 
             // Handle incoming messages from WebRTC and forward to bridge
             for (peer, packet) in socket.channel_mut(CHANNEL_ID).receive() {
-                log::info!("Received message from peer {} ({})", peer, packet.len());
-
                 if let Ok(text) = String::from_utf8(packet.to_vec()) {
                     if let Err(e) = bridge_sender.unbounded_send(text) {
                         log::error!("Failed to forward message to bridge: {}", e);
