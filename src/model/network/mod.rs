@@ -1,6 +1,7 @@
 mod client;
 mod command;
 mod command_handler;
+mod connection;
 mod error;
 mod signaling;
 mod transport;
@@ -11,6 +12,9 @@ mod websocket_connection;
 
 #[cfg(feature = "webrtc")]
 mod webrtc_connection;
+
+#[cfg(feature = "matchbox")]
+mod matchbox_connection;
 
 pub use client::{Client, ClientId};
 pub use command::NetworkCommand;

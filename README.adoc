@@ -7,7 +7,10 @@ Konnekt Session is a library for managing multiplayer game sessions. It provides
 === Frontend
 
 WEBSOCKET_URL=ws://localhost:3000 trunk serve
+
 WEBSOCKET_URL=wss://api.konnektoren.help/session trunk serve
+
+WEBSOCKET_URL=wss://match-0-7.helsing.studio trunk serve
 
 === Backend
 

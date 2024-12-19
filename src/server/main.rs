@@ -3,7 +3,8 @@
 use axum::Router;
 use konnekt_session::server::telemetry::{init_telemetry, shutdown_telemetry};
 use konnekt_session::server::v2::{
-    create_session_route, signaling::create_signaling_route, ConnectionHandler, MemoryStorage,
+    create_session_route, matchbox::create_matchbox_route, signaling::create_signaling_route,
+    ConnectionHandler, MemoryStorage,
 };
 use std::error::Error;
 use std::net::SocketAddr;
@@ -25,7 +26,8 @@ pub async fn main() -> Result<(), Box<dyn Error>> {
 
     let app = Router::new()
         .nest("/", create_session_route(connection_handler))
-        .merge(create_signaling_route());
+        .merge(create_signaling_route())
+        .nest("/matchbox", create_matchbox_route());
 
     info!("Server running at http://{}", addr);
 

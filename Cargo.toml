@@ -18,7 +18,7 @@ name = "konnekt_session"
 path = "src/lib.rs"
 
 [features]
-default = ["yew", "websocket", "webrtc"]
+default = ["yew", "websocket", "webrtc", "matchbox"]
 websocket = ["gloo-net/websocket"]
 webrtc = [
     "web-sys/RtcPeerConnection",
@@ -41,6 +41,7 @@ webrtc = [
     "web-sys/MessageEvent",
     "gloo-net/http",
 ]
+matchbox = ["matchbox_socket"]
 yew = [
     "dep:yew",
     "dep:yew-hooks",
@@ -51,6 +52,7 @@ yew = [
     "getrandom/js",
     "wasm-logger",
     "instant/wasm-bindgen",
+    "futures-timer",
 ]
 server = [
     "axum",
@@ -61,7 +63,12 @@ server = [
     "tracing",
     "tracing-subscriber",
     "tracing-opentelemetry",
+    "tokio-tungstenite",
+    "crossbeam-channel",
+    "matchbox_protocol",
+    "matchbox_signaling",
 ]
+futures-timer = ["dep:futures-timer"]
 
 [dependencies]
 async-trait = "0.1.51"
@@ -113,3 +120,15 @@ tracing-subscriber = { version = "0.3.18", features = [
 ], optional = true }
 tracing-opentelemetry = { version = "0.21", optional = true }
 js-sys = "0.3.45"
+matchbox_socket = { git = "https://github.com/johanhelsing/matchbox", version = "0.10.0", optional = true }
+matchbox_protocol = { git = "https://github.com/johanhelsing/matchbox", version = "0.10.0", optional = true }
+matchbox_signaling = { git = "https://github.com/johanhelsing/matchbox", version = "0.10.0", optional = true }
+tokio-tungstenite = { version = "0.25.0", optional = true }
+crossbeam-channel = { version = "0.5.14", optional = true }
+futures-timer = { version = "3.0.3", features = [
+    "gloo-timers",
+], optional = true }
+
+[dev-dependencies]
+wasm-bindgen-test = { version = "0.3" }
+console_error_panic_hook = "0.1"

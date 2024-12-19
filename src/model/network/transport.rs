@@ -12,6 +12,8 @@ pub enum TransportType {
     WebSocket(String),
     #[cfg(feature = "webrtc")]
     WebRTC(String, LobbyId, ClientId, Role),
+    #[cfg(feature = "matchbox")]
+    Matchbox(String, LobbyId, ClientId, Role),
     #[cfg(not(any(feature = "websocket", feature = "webrtc")))]
     None,
 }
