@@ -42,15 +42,16 @@ impl WebSocketConnection {
 impl ConnectionHandler for WebSocketConnection {
     type InternMessageType = String;
     type ExternMessageType = Message;
-    type SocketType = WebSocket;
     type CallbackType = MessageCallback;
-
-    fn take_socket(&self) -> Option<Self::SocketType> {
-        self.ws.write().ok().and_then(|mut guard| guard.take())
-    }
+    type ExternSenderType = SplitSink<WebSocket, Message>;
+    type ExternReceiverType = SplitStream<WebSocket>;
 
     fn receiver(&self) -> Arc<RwLock<UnboundedReceiver<Self::InternMessageType>>> {
         self.receiver.clone()
+    }
+
+    fn sender(&self) -> UnboundedSender<Self::InternMessageType> {
+        self.sender.clone()
     }
 
     async fn next_message(
@@ -62,10 +63,9 @@ impl ConnectionHandler for WebSocketConnection {
 
     fn spawn_send_task(
         &self,
-        sender: SplitSink<Self::SocketType, Self::ExternMessageType>,
+        mut sender: Self::ExternSenderType,
         receiver: Arc<RwLock<UnboundedReceiver<Self::InternMessageType>>>,
     ) {
-        let mut sender = sender;
         spawn_local(async move {
             loop {
                 let message = Self::next_message(receiver.clone()).await;
@@ -84,10 +84,9 @@ impl ConnectionHandler for WebSocketConnection {
 
     fn spawn_receive_task(
         &self,
-        receiver: SplitStream<Self::SocketType>,
+        mut receiver: Self::ExternReceiverType,
         callback: Arc<Self::CallbackType>,
     ) {
-        let mut receiver = receiver;
         spawn_local(async move {
             while let Some(message) = receiver.next().await {
                 if let Ok(Message::Text(text)) = message {
@@ -130,7 +129,7 @@ impl Transport for WebSocketConnection {
     }
 
     fn handle_messages(&self, callback: MessageCallback) {
-        let ws_instance = self.take_socket();
+        let ws_instance = self.ws.write().ok().and_then(|mut guard| guard.take());
 
         if let Some(ws) = ws_instance {
             let (write, read) = ws.split();

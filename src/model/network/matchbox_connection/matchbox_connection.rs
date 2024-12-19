@@ -1,6 +1,6 @@
 use super::super::{MessageCallback, NetworkError, Transport, TransportType};
 use super::MatchboxConnectionManager;
-use crate::model::network::connection::ConnectionManager;
+use crate::model::network::connection::{ConnectionHandler, ConnectionManager};
 use crate::model::{ClientId, LobbyId, Role};
 use futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use futures::stream::AbortHandle;
@@ -106,7 +106,7 @@ impl MatchboxConnection {
             for (peer, packet) in socket.channel_mut(CHANNEL_ID).receive() {
                 if let Ok(text) = String::from_utf8(packet.to_vec()) {
                     if let Err(e) = bridge_sender.unbounded_send(text) {
-                        log::error!("Failed to forward message to bridge: {}", e);
+                        log::error!("Failed to forward message from {} to bridge: {}", peer, e);
                     }
                 }
             }
@@ -117,24 +117,69 @@ impl MatchboxConnection {
             }
         }
     }
-
-    // Add a method to spawn the bridge receive task
-    fn spawn_bridge_receive_task(&self, callback: MessageCallback) {
-        let bridge_receiver = self.bridge_receiver.clone();
-
-        spawn_local(async move {
-            if let Ok(mut receiver) = bridge_receiver.write() {
-                while let Some(text) = receiver.next().await {
-                    callback(text);
-                }
-            }
-        });
-    }
 }
 
 impl Drop for MatchboxConnection {
     fn drop(&mut self) {
         self.disconnect();
+    }
+}
+
+impl ConnectionHandler for MatchboxConnection {
+    type InternMessageType = String;
+    type ExternMessageType = MessagePacket;
+    type CallbackType = MessageCallback;
+    type ExternSenderType = UnboundedSender<String>;
+    type ExternReceiverType = Arc<RwLock<UnboundedReceiver<String>>>;
+
+    fn receiver(&self) -> Arc<RwLock<UnboundedReceiver<Self::InternMessageType>>> {
+        self.receiver.clone()
+    }
+
+    fn sender(&self) -> UnboundedSender<Self::InternMessageType> {
+        self.sender.clone()
+    }
+
+    async fn next_message(
+        receiver: Arc<RwLock<UnboundedReceiver<Self::InternMessageType>>>,
+    ) -> Option<Self::InternMessageType> {
+        let mut receiver_guard = receiver.write().ok()?;
+        receiver_guard.next().await
+    }
+
+    fn spawn_send_task(
+        &self,
+        sender: Self::ExternSenderType,
+        receiver: Arc<RwLock<UnboundedReceiver<Self::InternMessageType>>>,
+    ) {
+        spawn_local(async move {
+            loop {
+                let message = Self::next_message(receiver.clone()).await;
+
+                match message {
+                    Some(text) => {
+                        if sender.unbounded_send(text).is_err() {
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
+        });
+    }
+
+    fn spawn_receive_task(
+        &self,
+        receiver: Self::ExternReceiverType,
+        callback: Arc<Self::CallbackType>,
+    ) {
+        spawn_local(async move {
+            if let Ok(mut receiver_guard) = receiver.write() {
+                while let Some(text) = receiver_guard.next().await {
+                    callback(text);
+                }
+            }
+        });
     }
 }
 
@@ -186,7 +231,11 @@ impl Transport for MatchboxConnection {
     }
 
     fn handle_messages(&self, callback: MessageCallback) {
-        self.spawn_bridge_receive_task(callback);
+        let callback = Arc::new(callback);
+        let bridge_receiver = self.bridge_receiver.clone();
+
+        self.spawn_send_task(self.bridge_sender.clone(), self.receiver());
+        self.spawn_receive_task(bridge_receiver, callback);
     }
 
     fn transport_type(&self) -> TransportType {
