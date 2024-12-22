@@ -68,7 +68,7 @@ impl MatchboxConnection {
             let delay = Delay::new(Duration::from_millis(DELAY_MS)).fuse();
             futures::pin_mut!(delay);
 
-            // Handle outgoing messages from the application
+            // Handle outgoing messages
             if let Ok(mut receiver_guard) = receiver.write() {
                 if let Some(message) = receiver_guard.next().now_or_never() {
                     if let Some(message) = message {
@@ -102,7 +102,7 @@ impl MatchboxConnection {
                 }
             }
 
-            // Handle incoming messages from WebRTC and forward to bridge
+            // Handle incoming messages and forward to bridge
             for (peer, packet) in socket.channel_mut(CHANNEL_ID).receive() {
                 if let Ok(text) = String::from_utf8(packet.to_vec()) {
                     if let Err(e) = bridge_sender.unbounded_send(text) {
