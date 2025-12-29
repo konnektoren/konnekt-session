@@ -1,0 +1,315 @@
+<svg viewBox="0 0 1200 700" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<style>
+.actor { fill: #FFB6C1; stroke: #000; stroke-width: 2; }
+.command { fill: #87CEEB; stroke: #000; stroke-width: 2; rx: 10; }
+.event { fill: #FFD700; stroke: #000; stroke-width: 2; rx: 10; }
+.policy { fill: #DA70D6; stroke: #000; stroke-width: 2; rx: 5; }
+.aggregate { fill: #FFA500; stroke: #000; stroke-width: 3; rx: 5; }
+.state { fill: #E8E8E8; stroke: #000; stroke-width: 2; rx: 8; }
+
+.arrow { stroke: #000; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+.state-arrow { stroke: #666; stroke-width: 3; fill: none; marker-end: url(#arrowhead-thick); }
+
+text { font-family: Arial, sans-serif; font-size: 12px; text-anchor: middle; }
+.title { font-size: 20px; font-weight: bold; }
+.subtitle { font-size: 14px; font-weight: bold; fill: #444; }
+.note { font-size: 10px; fill: #666; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-30px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes slideRight {
+  from { transform: translateX(-30px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes glow {
+  0%, 100% { filter: drop-shadow(0 0 0px rgba(255,215,0,0)); }
+  50% { filter: drop-shadow(0 0 8px rgba(255,215,0,0.8)); }
+}
+
+@keyframes stateTransition {
+  0% { opacity: 0.3; transform: scale(0.95); }
+  50% { opacity: 1; transform: scale(1.05); }
+  100% { opacity: 1; transform: scale(1); }
+}
+</style>
+
+<marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+<polygon points="0 0, 10 3, 0 6" fill="#000" />
+</marker>
+
+<marker id="arrowhead-thick" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto">
+<polygon points="0 0, 12 4, 0 8" fill="#666" />
+</marker>
+</defs>
+
+<!-- Title -->
+<text x="600" y="35" class="title">Activity Lifecycle: From Planning to Completion</text>
+
+<!-- State Machine Diagram -->
+<text x="600" y="70" class="subtitle">Activity States</text>
+
+<!-- State: Planned -->
+<g style="animation: fadeIn 0.6s ease-in 0.5s both;">
+  <rect x="100" y="90" width="150" height="60" class="state">
+    <animate attributeName="fill" values="#E8E8E8;#F0F0F0;#E8E8E8" dur="3s" repeatCount="indefinite"/>
+  </rect>
+  <text x="175" y="115" style="font-weight: bold;">Planned</text>
+  <text x="175" y="132" class="note">Queued for later</text>
+</g>
+
+<!-- State: InProgress -->
+<g style="animation: fadeIn 0.6s ease-in 1.5s both;">
+  <rect x="350" y="90" width="150" height="60" class="state" style="animation: stateTransition 1.5s ease-in-out 2s;">
+    <animate attributeName="fill" values="#FFE5B4;#FFD700;#FFE5B4" dur="3s" begin="2s" repeatCount="indefinite"/>
+  </rect>
+  <text x="425" y="115" style="font-weight: bold;">InProgress</text>
+  <text x="425" y="132" class="note">Accepting results</text>
+</g>
+
+<!-- State: Completed -->
+<g style="animation: fadeIn 0.6s ease-in 2.5s both;">
+  <rect x="600" y="90" width="150" height="60" class="state">
+    <animate attributeName="fill" values="#C8E6C9;#90EE90;#C8E6C9" dur="3s" begin="3s" repeatCount="indefinite"/>
+  </rect>
+  <text x="675" y="115" style="font-weight: bold;">Completed</text>
+  <text x="675" y="132" class="note">Results finalized</text>
+</g>
+
+<!-- State transitions -->
+<path d="M 250 120 L 350 120" class="state-arrow" style="animation: fadeIn 0.4s ease-in 1.8s both;">
+  <animate attributeName="stroke-dasharray" values="0,150;150,0" dur="1.2s" begin="1.8s"/>
+</path>
+<text x="300" y="110" class="note" style="animation: fadeIn 0.4s ease-in 2s both;">Start</text>
+
+<path d="M 500 120 L 600 120" class="state-arrow" style="animation: fadeIn 0.4s ease-in 2.8s both;">
+  <animate attributeName="stroke-dasharray" values="0,150;150,0" dur="1.2s" begin="2.8s"/>
+</path>
+<text x="550" y="110" class="note" style="animation: fadeIn 0.4s ease-in 3s both;">All results in</text>
+
+<!-- Detailed Flow -->
+<text x="100" y="200" class="subtitle" style="text-anchor: start; animation: fadeIn 0.6s ease-in 3.5s both;">Detailed Event Flow</text>
+
+<!-- Host plans activity -->
+<g style="animation: fadeIn 0.6s ease-in 4s both;">
+  <circle cx="80" cy="250" r="25" class="actor">
+    <animate attributeName="opacity" values="0.7;1;0.7" dur="3s" begin="4s" repeatCount="indefinite"/>
+  </circle>
+  <text x="80" y="255">Host</text>
+</g>
+
+<g style="animation: slideRight 0.5s ease-out 4.3s both;">
+  <rect x="140" y="225" width="140" height="50" class="command">
+    <animate attributeName="fill" values="#87CEEB;#9DD6F0;#87CEEB" dur="4s" begin="4.3s" repeatCount="indefinite"/>
+  </rect>
+  <text x="210" y="245">PlanActivity</text>
+  <text x="210" y="260" class="note">(quiz, puzzle, etc.)</text>
+</g>
+
+<path d="M 105 250 L 140 250" class="arrow" style="animation: fadeIn 0.3s ease-in 4.6s both;">
+  <animate attributeName="stroke-dasharray" values="0,50;50,0" dur="0.8s" begin="4.6s"/>
+</path>
+
+<!-- Activity Aggregate -->
+<g style="animation: fadeIn 0.6s ease-in 5s both;">
+  <rect x="320" y="200" width="180" height="100" class="aggregate">
+    <animate attributeName="stroke-width" values="3;4;3" dur="3s" begin="5s" repeatCount="indefinite"/>
+  </rect>
+  <text x="410" y="225" style="font-weight: bold;">Activity</text>
+  <text x="410" y="243" class="note">State: Planned</text>
+  <text x="410" y="258" class="note">Participants: []</text>
+  <text x="410" y="273" class="note">Results: {}</text>
+  <text x="410" y="288" class="note">Deadline: None</text>
+</g>
+
+<path d="M 280 250 L 320 250" class="arrow" style="animation: fadeIn 0.3s ease-in 5.3s both;">
+  <animate attributeName="stroke-dasharray" values="0,60;60,0" dur="0.7s" begin="5.3s"/>
+</path>
+
+<!-- ActivityPlanned Event -->
+<g style="animation: slideRight 0.5s ease-out 5.6s both;">
+  <rect x="540" y="225" width="140" height="50" class="event" style="animation: glow 2s ease-in-out 6s infinite;">
+    <animate attributeName="fill" values="#FFD700;#FFE55C;#FFD700" dur="3s" begin="6s" repeatCount="indefinite"/>
+  </rect>
+  <text x="610" y="245">ActivityPlanned</text>
+  <text x="610" y="260" class="note">(id, type, state)</text>
+</g>
+
+<path d="M 500 250 L 540 250" class="arrow" style="animation: fadeIn 0.3s ease-in 6s both;">
+  <animate attributeName="stroke-dasharray" values="0,60;60,0" dur="0.6s" begin="6s"/>
+</path>
+
+<!-- Host starts activity -->
+<g style="animation: slideRight 0.5s ease-out 6.8s both;">
+  <rect x="140" y="340" width="140" height="50" class="command">
+    <animate attributeName="fill" values="#87CEEB;#9DD6F0;#87CEEB" dur="4s" begin="6.8s" repeatCount="indefinite"/>
+  </rect>
+  <text x="210" y="360">StartActivity</text>
+  <text x="210" y="375" class="note">(activity_id)</text>
+</g>
+
+<path d="M 610 275 L 610 310 L 210 310 L 210 340" class="arrow" style="animation: fadeIn 0.5s ease-in 6.5s both;">
+  <animate attributeName="stroke-dasharray" values="0,200;200,0" dur="1.5s" begin="6.5s"/>
+</path>
+
+<!-- Policy check -->
+<g style="animation: fadeIn 0.6s ease-in 7.2s both;">
+  <rect x="320" y="335" width="180" height="60" class="policy">
+    <animate attributeName="opacity" values="0.8;1;0.8" dur="2s" begin="7.2s" repeatCount="indefinite"/>
+  </rect>
+  <text x="410" y="355" style="font-weight: bold;">Policy:</text>
+  <text x="410" y="372" class="note">Only One Activity Running</text>
+  <text x="410" y="387" class="note">At Least 1 Active Guest</text>
+</g>
+
+<path d="M 280 365 L 320 365" class="arrow" style="animation: fadeIn 0.3s ease-in 7.5s both;">
+  <animate attributeName="stroke-dasharray" values="0,60;60,0" dur="0.6s" begin="7.5s"/>
+</path>
+
+<!-- ActivityStarted Event -->
+<g style="animation: slideRight 0.5s ease-out 8s both;">
+  <rect x="540" y="340" width="140" height="50" class="event" style="animation: glow 2s ease-in-out 8.3s infinite;">
+    <animate attributeName="fill" values="#FFD700;#FFE55C;#FFD700" dur="3s" begin="8.3s" repeatCount="indefinite"/>
+  </rect>
+  <text x="610" y="360">ActivityStarted</text>
+  <text x="610" y="375" class="note">(start_time)</text>
+</g>
+
+<path d="M 500 365 L 540 365" class="arrow" style="animation: fadeIn 0.3s ease-in 8.3s both;">
+  <animate attributeName="stroke-dasharray" values="0,60;60,0" dur="0.6s" begin="8.3s"/>
+</path>
+
+<!-- Players submit results -->
+<g style="animation: fadeIn 0.6s ease-in 8.8s both;">
+  <circle cx="80" cy="480" r="25" class="actor">
+    <animate attributeName="opacity" values="0.7;1;0.7" dur="3s" begin="8.8s" repeatCount="indefinite"/>
+  </circle>
+  <text x="80" y="485">Guest</text>
+</g>
+
+<g style="animation: slideRight 0.5s ease-out 9.2s both;">
+  <rect x="140" y="455" width="140" height="50" class="command">
+    <animate attributeName="fill" values="#87CEEB;#9DD6F0;#87CEEB" dur="4s" begin="9.2s" repeatCount="indefinite"/>
+  </rect>
+  <text x="210" y="475">SubmitResult</text>
+  <text x="210" y="490" class="note">(data, score)</text>
+</g>
+
+<path d="M 610 390 L 610 420 L 210 420 L 210 455" class="arrow" style="animation: fadeIn 0.5s ease-in 9s both;">
+  <animate attributeName="stroke-dasharray" values="0,180;180,0" dur="1.3s" begin="9s"/>
+</path>
+
+<path d="M 105 480 L 140 480" class="arrow" style="animation: fadeIn 0.3s ease-in 9.5s both;">
+  <animate attributeName="stroke-dasharray" values="0,50;50,0" dur="0.6s" begin="9.5s"/>
+</path>
+
+<!-- Activity receives result -->
+<g style="animation: fadeIn 0.6s ease-in 9.8s both;">
+  <rect x="320" y="430" width="180" height="100" class="aggregate">
+    <animate attributeName="stroke-width" values="3;4;3" dur="3s" begin="9.8s" repeatCount="indefinite"/>
+  </rect>
+  <text x="410" y="455" style="font-weight: bold;">Activity</text>
+  <text x="410" y="473" class="note">State: InProgress</text>
+  <text x="410" y="488" class="note">Results: 2/3</text>
+  <text x="410" y="503" class="note">Waiting for: Guest3</text>
+  <text x="410" y="518" class="note" style="fill: #FF8C00; animation: fadeIn 0.3s ease-in 10s both;">
+    <animate attributeName="opacity" values="0.6;1;0.6" dur="1.5s" begin="10s" repeatCount="indefinite"/>
+    ⏳ In progress...
+  </text>
+</g>
+
+<path d="M 280 480 L 320 480" class="arrow" style="animation: fadeIn 0.3s ease-in 10.2s both;">
+  <animate attributeName="stroke-dasharray" values="0,60;60,0" dur="0.6s" begin="10.2s"/>
+</path>
+
+<!-- ResultSubmitted Event -->
+<g style="animation: slideRight 0.5s ease-out 10.5s both;">
+  <rect x="540" y="455" width="140" height="50" class="event">
+    <animate attributeName="fill" values="#FFD700;#FFE55C;#FFD700" dur="3s" begin="10.5s" repeatCount="indefinite"/>
+  </rect>
+  <text x="610" y="475">ResultSubmitted</text>
+  <text x="610" y="490" class="note">(guest_id, score)</text>
+</g>
+
+<path d="M 500 480 L 540 480" class="arrow" style="animation: fadeIn 0.3s ease-in 10.8s both;">
+  <animate attributeName="stroke-dasharray" values="0,60;60,0" dur="0.6s" begin="10.8s"/>
+</path>
+
+<!-- Completion policy -->
+<g style="animation: fadeIn 0.6s ease-in 11.2s both;">
+  <rect x="730" y="445" width="160" height="70" class="policy">
+    <animate attributeName="opacity" values="0.8;1;0.8" dur="2s" begin="11.2s" repeatCount="indefinite"/>
+  </rect>
+  <text x="810" y="468" style="font-weight: bold;">Policy:</text>
+  <text x="810" y="485" class="note">All Active Guests</text>
+  <text x="810" y="500" class="note">Submitted?</text>
+</g>
+
+<path d="M 680 480 L 730 480" class="arrow" style="animation: fadeIn 0.3s ease-in 11.5s both;">
+  <animate attributeName="stroke-dasharray" values="0,70;70,0" dur="0.6s" begin="11.5s"/>
+</path>
+
+<!-- ActivityCompleted Event -->
+<g style="animation: slideDown 0.6s ease-out 12s both;">
+  <rect x="920" y="455" width="160" height="50" class="event" style="animation: glow 2s ease-in-out 12.3s infinite;">
+    <animate attributeName="fill" values="#90EE90;#A8F5A8;#90EE90" dur="3s" begin="12.3s" repeatCount="indefinite"/>
+  </rect>
+  <text x="1000" y="475">ActivityCompleted</text>
+  <text x="1000" y="490" class="note">(results[], final_state)</text>
+</g>
+
+<path d="M 890 480 L 920 480" class="arrow" style="animation: fadeIn 0.3s ease-in 12.3s both;">
+  <animate attributeName="stroke-dasharray" values="0,50;50,0" dur="0.5s" begin="12.3s"/>
+</path>
+
+<!-- Calculate scores policy -->
+<g style="animation: fadeIn 0.6s ease-in 12.8s both;">
+  <rect x="920" y="550" width="160" height="50" class="policy">
+    <animate attributeName="opacity" values="0.8;1;0.8" dur="2s" begin="12.8s" repeatCount="indefinite"/>
+  </rect>
+  <text x="1000" y="570">UpdateLeaderboard</text>
+  <text x="1000" y="585" class="note">Recalculate scores</text>
+</g>
+
+<path d="M 1000 505 L 1000 550" class="arrow" style="animation: fadeIn 0.3s ease-in 13.2s both;">
+  <animate attributeName="stroke-dasharray" values="0,70;70,0" dur="0.6s" begin="13.2s"/>
+</path>
+
+<!-- LeaderboardUpdated Event -->
+<g style="animation: slideDown 0.6s ease-out 13.6s both;">
+  <rect x="920" y="630" width="160" height="50" class="event">
+    <animate attributeName="fill" values="#FFD700;#FFE55C;#FFD700" dur="3s" begin="13.6s" repeatCount="indefinite"/>
+  </rect>
+  <text x="1000" y="650">LeaderboardUpdated</text>
+  <text x="1000" y="665" class="note">(rankings[])</text>
+</g>
+
+<path d="M 1000 600 L 1000 630" class="arrow" style="animation: fadeIn 0.3s ease-in 14s both;">
+  <animate attributeName="stroke-dasharray" values="0,50;50,0" dur="0.5s" begin="14s"/>
+</path>
+
+<!-- Legend -->
+<g style="animation: fadeIn 0.6s ease-in 14.5s both;">
+  <text x="50" y="630" style="font-weight: bold; text-anchor: start;">Key Points:</text>
+  <text x="50" y="650" style="text-anchor: start; font-size: 10px;">• Only 1 activity can be InProgress at a time</text>
+  <text x="50" y="665" style="text-anchor: start; font-size: 10px;">• Spectators don't block completion</text>
+  <text x="50" y="680" style="text-anchor: start; font-size: 10px;">• Leaderboard updates after each activity</text>
+</g>
+
+<!-- Replay button -->
+<g style="cursor: pointer; animation: fadeIn 0.6s ease-in 15s both;" onclick="window.location.reload();">
+  <rect x="1050" y="10" width="120" height="35" rx="5" fill="#4CAF50" stroke="#000">
+    <animate attributeName="fill" values="#4CAF50;#5CBF60;#4CAF50" dur="2s" repeatCount="indefinite"/>
+  </rect>
+  <text x="1110" y="33" fill="#FFF" style="font-size: 16px;">↻ Replay</text>
+</g>
+</svg>

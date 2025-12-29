@@ -1,0 +1,317 @@
+<svg viewBox="0 0 1400 800" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<style>
+.actor { fill: #FFB6C1; stroke: #000; stroke-width: 2; }
+.actor-host { fill: #FF6B9D; stroke: #000; stroke-width: 3; }
+.actor-guest { fill: #FFB6C1; stroke: #000; stroke-width: 2; }
+.command { fill: #87CEEB; stroke: #000; stroke-width: 2; rx: 10; }
+.event { fill: #FFD700; stroke: #000; stroke-width: 2; rx: 10; }
+.policy { fill: #DA70D6; stroke: #000; stroke-width: 2; rx: 5; }
+.timer { fill: #FF8C00; stroke: #000; stroke-width: 2; rx: 8; }
+.network { fill: #FF6B6B; stroke: #000; stroke-width: 2; rx: 5; }
+
+.arrow { stroke: #000; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+.disconnect-arrow { stroke: #FF0000; stroke-width: 3; stroke-dasharray: 8,4; fill: none; }
+.timer-arrow { stroke: #FF8C00; stroke-width: 2; stroke-dasharray: 5,3; fill: none; }
+.delegate-arrow { stroke: #4CAF50; stroke-width: 3; fill: none; marker-end: url(#arrowhead-green); }
+
+text { font-family: Arial, sans-serif; font-size: 12px; text-anchor: middle; }
+.title { font-size: 22px; font-weight: bold; }
+.subtitle { font-size: 15px; font-weight: bold; fill: #444; }
+.note { font-size: 10px; fill: #666; }
+.timestamp { font-size: 9px; fill: #999; font-family: monospace; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-30px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes slideRight {
+  from { transform: translateX(-40px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+
+@keyframes disconnect {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes timerTick {
+  0% { stroke-width: 2; }
+  50% { stroke-width: 3; }
+  100% { stroke-width: 2; }
+}
+
+@keyframes promote {
+  0% { fill: #FFB6C1; }
+  100% { fill: #FF6B9D; }
+}
+</style>
+
+<marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+<polygon points="0 0, 10 3, 0 6" fill="#000" />
+</marker>
+
+<marker id="arrowhead-green" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto">
+<polygon points="0 0, 12 4, 0 8" fill="#4CAF50" />
+</marker>
+</defs>
+
+<!-- Title -->
+<text x="700" y="35" class="title">Host Delegation Protocol: Automatic Failover</text>
+<text x="700" y="60" class="subtitle">30-Second Timeout with Deterministic Election</text>
+
+<!-- Timeline -->
+<line x1="100" y1="100" x2="1300" y2="100" stroke="#CCC" stroke-width="2"/>
+<text x="50" y="105" style="font-size: 11px; text-anchor: start;">Time →</text>
+
+<!-- T=0: Normal operation -->
+<g style="animation: fadeIn 0.6s ease-in 0.5s both;">
+  <text x="150" y="85" class="timestamp">T=0s</text>
+  <text x="150" y="125" style="font-size: 11px; font-weight: bold;">Normal Operation</text>
+</g>
+
+<!-- Original Host (Alice) -->
+<g style="animation: fadeIn 0.7s ease-in 1s both;">
+  <circle cx="150" cy="180" r="30" class="actor-host">
+    <animate attributeName="opacity" values="0.8;1;0.8" dur="2s" begin="1s" repeatCount="3"/>
+  </circle>
+  <text x="150" y="185" style="font-weight: bold;">Host</text>
+  <text x="150" y="198" style="font-size: 10px;">Alice</text>
+</g>
+
+<!-- Guest 1 (Bob) -->
+<g style="animation: fadeIn 0.7s ease-in 1.3s both;">
+  <circle cx="150" cy="280" r="28" class="actor-guest">
+    <animate attributeName="opacity" values="0.7;1;0.7" dur="3s" begin="1.3s" repeatCount="indefinite"/>
+  </circle>
+  <text x="150" y="285">Guest 1</text>
+  <text x="150" y="298" style="font-size: 10px;">Bob</text>
+  <text x="150" y="320" class="note">joined: T-10s</text>
+</g>
+
+<!-- Guest 2 (Carol) -->
+<g style="animation: fadeIn 0.7s ease-in 1.6s both;">
+  <circle cx="150" cy="380" r="28" class="actor-guest">
+    <animate attributeName="opacity" values="0.7;1;0.7" dur="3s" begin="1.6s" repeatCount="indefinite"/>
+  </circle>
+  <text x="150" y="385">Guest 2</text>
+  <text x="150" y="398" style="font-size: 10px;">Carol</text>
+  <text x="150" y="420" class="note">joined: T-5s</text>
+</g>
+
+<!-- Heartbeat connections -->
+<line x1="180" y1="180" x2="180" y2="280" stroke="#4CAF50" stroke-width="2" stroke-dasharray="3,3" style="animation: fadeIn 0.4s ease-in 2s both;">
+  <animate attributeName="opacity" values="0.3;1;0.3" dur="1.5s" begin="2s" repeatCount="2"/>
+</line>
+<text x="200" y="230" class="note" style="animation: fadeIn 0.4s ease-in 2s both;">
+  <animate attributeName="opacity" values="0.5;1;0.5" dur="1.5s" begin="2s" repeatCount="2"/>
+  ❤️ heartbeat
+</text>
+
+<line x1="180" y1="180" x2="180" y2="380" stroke="#4CAF50" stroke-width="2" stroke-dasharray="3,3" style="animation: fadeIn 0.4s ease-in 2.3s both;">
+  <animate attributeName="opacity" values="0.3;1;0.3" dur="1.5s" begin="2.3s" repeatCount="2"/>
+</line>
+
+<!-- T=10: Disconnect -->
+<g style="animation: fadeIn 0.6s ease-in 4s both;">
+  <text x="400" y="85" class="timestamp">T=10s</text>
+  <text x="400" y="125" style="font-size: 11px; font-weight: bold; fill: #FF0000;">Host Disconnects</text>
+</g>
+
+<!-- Alice disconnects -->
+<g style="animation: fadeIn 0.7s ease-in 4.3s both;">
+  <circle cx="400" cy="180" r="30" class="actor-host" style="animation: disconnect 2s ease-in-out 4.5s infinite;">
+    <animate attributeName="stroke-dasharray" values="0,200;10,5" dur="0.5s" begin="4.5s" fill="freeze"/>
+  </circle>
+  <text x="400" y="185" style="font-weight: bold; fill: #FF0000;">Host</text>
+  <text x="400" y="198" style="font-size: 10px; fill: #FF0000;">Alice</text>
+  <text x="400" y="145" style="font-size: 16px; animation: pulse 1s ease-in-out 4.5s infinite;">⚠️</text>
+</g>
+
+<!-- Network error -->
+<g style="animation: slideDown 0.5s ease-out 4.8s both;">
+  <rect x="220" y="160" width="150" height="40" class="network">
+    <animate attributeName="opacity" values="0.7;1;0.7" dur="1.5s" begin="4.8s" repeatCount="indefinite"/>
+  </rect>
+  <text x="295" y="180" style="fill: #FFF; font-weight: bold;">Network Failure</text>
+  <text x="295" y="193" class="note" style="fill: #FFF;">Connection lost</text>
+</g>
+
+<!-- Disconnect arrows -->
+<line x1="180" y1="180" x2="370" y2="180" class="disconnect-arrow" style="animation: fadeIn 0.5s ease-in 5s both;">
+  <animate attributeName="stroke-dashoffset" values="20;0" dur="1.5s" begin="5s" repeatCount="indefinite"/>
+</line>
+
+<!-- Bob and Carol detect -->
+<g style="animation: fadeIn 0.7s ease-in 5.3s both;">
+  <circle cx="400" cy="280" r="28" class="actor-guest">
+    <animate attributeName="stroke-width" values="2;4;2" dur="1s" begin="5.3s" repeatCount="3"/>
+  </circle>
+  <text x="400" y="285">Guest 1</text>
+  <text x="400" y="298" style="font-size: 10px;">Bob</text>
+  <text x="400" y="320" class="note" style="fill: #FF8C00;">⚠️ No heartbeat!</text>
+</g>
+
+<g style="animation: fadeIn 0.7s ease-in 5.6s both;">
+  <circle cx="400" cy="380" r="28" class="actor-guest">
+    <animate attributeName="stroke-width" values="2;4;2" dur="1s" begin="5.6s" repeatCount="3"/>
+  </circle>
+  <text x="400" y="385">Guest 2</text>
+  <text x="400" y="398" style="font-size: 10px;">Carol</text>
+  <text x="400" y="420" class="note" style="fill: #FF8C00;">⚠️ No heartbeat!</text>
+</g>
+
+<!-- T=20: Grace period -->
+<g style="animation: fadeIn 0.6s ease-in 6.5s both;">
+  <text x="650" y="85" class="timestamp">T=20s</text>
+  <text x="650" y="125" style="font-size: 11px; font-weight: bold; fill: #FF8C00;">Grace Period (10s elapsed)</text>
+</g>
+
+<!-- Timer -->
+<g style="animation: fadeIn 0.7s ease-in 7s both;">
+  <rect x="575" y="220" width="150" height="80" class="timer" style="animation: timerTick 1s ease-in-out 7s infinite;">
+    <animate attributeName="fill" values="#FF8C00;#FFA500;#FF8C00" dur="2s" begin="7s" repeatCount="indefinite"/>
+  </rect>
+  <text x="650" y="245" style="font-weight: bold; font-size: 14px;">⏱️ Timeout</text>
+  <text x="650" y="265" style="font-size: 18px; font-weight: bold; font-family: monospace;">
+    <animate attributeName="textContent" values="20;19;18;17;16;15;14;13;12;11;10" dur="10s" begin="7s"/>
+    20s
+  </text>
+  <text x="650" y="285" class="note">Waiting for reconnection...</text>
+</g>
+
+<!-- Guests waiting -->
+<g style="animation: fadeIn 0.7s ease-in 7.5s both;">
+  <circle cx="650" cy="360" r="28" class="actor-guest">
+    <animate attributeName="opacity" values="0.5;1;0.5" dur="2s" begin="7.5s" repeatCount="indefinite"/>
+  </circle>
+  <text x="650" y="365">Bob</text>
+  <text x="650" y="378" class="note">Waiting...</text>
+</g>
+
+<g style="animation: fadeIn 0.7s ease-in 7.8s both;">
+  <circle cx="650" cy="430" r="28" class="actor-guest">
+    <animate attributeName="opacity" values="0.5;1;0.5" dur="2s" begin="7.8s" repeatCount="indefinite"/>
+  </circle>
+  <text x="650" y="435">Carol</text>
+  <text x="650" y="448" class="note">Waiting...</text>
+</g>
+
+<!-- T=40: Timeout expires -->
+<g style="animation: fadeIn 0.6s ease-in 9s both;">
+  <text x="900" y="85" class="timestamp">T=40s</text>
+  <text x="900" y="125" style="font-size: 11px; font-weight: bold; fill: #FF0000;">Timeout Expired!</text>
+</g>
+
+<!-- Election process -->
+<g style="animation: slideDown 0.6s ease-out 9.5s both;">
+  <rect x="800" y="180" width="200" height="100" class="policy">
+    <animate attributeName="opacity" values="0.8;1;0.8" dur="1.5s" begin="9.5s" repeatCount="indefinite"/>
+  </rect>
+  <text x="900" y="205" style="font-weight: bold; font-size: 13px;">Election Algorithm</text>
+  <text x="900" y="225" class="note">1. Get all guests</text>
+  <text x="900" y="240" class="note">2. Sort by join timestamp</text>
+  <text x="900" y="255" class="note">3. Oldest = new host</text>
+  <text x="900" y="270" class="note" style="fill: #4CAF50; font-weight: bold;">✓ Bob (joined T-10s)</text>
+</g>
+
+<!-- Bob calculating -->
+<g style="animation: fadeIn 0.7s ease-in 10s both;">
+  <circle cx="900" cy="340" r="30" class="actor-guest">
+    <animate attributeName="stroke-width" values="2;5;2" dur="1s" begin="10s" repeatCount="2"/>
+  </circle>
+  <text x="900" y="340" style="font-size: 16px;">🤔</text>
+  <text x="900" y="365" style="font-size: 10px;">Bob calculating...</text>
+  <text x="900" y="380" class="note" style="fill: #4CAF50; font-weight: bold;">I'm oldest!</text>
+</g>
+
+<!-- Carol verifying -->
+<g style="animation: fadeIn 0.7s ease-in 10.3s both;">
+  <circle cx="900" cy="430" r="28" class="actor-guest">
+    <animate attributeName="opacity" values="0.6;1;0.6" dur="1.5s" begin="10.3s" repeatCount="indefinite"/>
+  </circle>
+  <text x="900" y="435">Carol</text>
+  <text x="900" y="450" class="note">Verifying Bob...</text>
+</g>
+
+<!-- T=45: Delegation complete -->
+<g style="animation: fadeIn 0.6s ease-in 11.5s both;">
+  <text x="1150" y="85" class="timestamp">T=45s</text>
+  <text x="1150" y="125" style="font-size: 11px; font-weight: bold; fill: #4CAF50;">Delegation Complete ✓</text>
+</g>
+
+<!-- Bob promoted to host -->
+<g style="animation: fadeIn 0.8s ease-in 12s both;">
+  <circle cx="1150" cy="210" r="32" class="actor-guest" style="animation: promote 1.5s ease-in-out 12s forwards;">
+    <animate attributeName="r" values="28;32" dur="0.8s" begin="12s"/>
+    <animate attributeName="stroke-width" values="2;3" dur="0.8s" begin="12s"/>
+  </circle>
+  <text x="1150" y="210" style="font-size: 22px;">👑</text>
+  <text x="1150" y="245" style="font-weight: bold; font-size: 13px;">New Host: Bob</text>
+</g>
+
+<!-- Delegation event -->
+<g style="animation: slideRight 0.6s ease-out 12.5s both;">
+  <rect x="1050" y="280" width="200" height="60" class="event" style="animation: pulse 2s ease-in-out 13s infinite;">
+    <animate attributeName="fill" values="#FFD700;#FFE55C;#FFD700" dur="3s" begin="13s" repeatCount="indefinite"/>
+  </rect>
+  <text x="1150" y="305" style="font-weight: bold;">HostDelegated</text>
+  <text x="1150" y="323" class="note">(from: Alice, to: Bob)</text>
+</g>
+
+<!-- Carol acknowledges -->
+<g style="animation: fadeIn 0.7s ease-in 13s both;">
+  <circle cx="1150" cy="380" r="28" class="actor-guest">
+    <animate attributeName="opacity" values="0.7;1;0.7" dur="2s" begin="13s" repeatCount="indefinite"/>
+  </circle>
+  <text x="1150" y="385">Carol</text>
+  <text x="1150" y="405" class="note" style="fill: #4CAF50;">✓ Acknowledged</text>
+</g>
+
+<!-- Delegation arrow -->
+<path d="M 1000 340 L 1120 230" class="delegate-arrow" style="animation: fadeIn 0.5s ease-in 13.5s both;">
+  <animate attributeName="stroke-dasharray" values="0,200;200,0" dur="1s" begin="13.5s"/>
+</path>
+
+<!-- If Alice returns -->
+<g style="animation: fadeIn 0.6s ease-in 14.5s both;">
+  <text x="1150" y="480" class="subtitle" style="font-size: 12px;">If Alice Reconnects:</text>
+  <rect x="1050" y="500" width="200" height="100" style="fill: #FFF3CD; stroke: #856404; stroke-width: 2; rx: 8;">
+    <animate attributeName="opacity" values="0.7;1;0.7" dur="2s" begin="14.5s" repeatCount="indefinite"/>
+  </rect>
+  <text x="1150" y="525" style="font-size: 11px; fill: #856404;">Alice rejoins as Guest</text>
+  <text x="1150" y="545" class="note" style="fill: #856404;">• Bob remains Host</text>
+  <text x="1150" y="560" class="note" style="fill: #856404;">• No auto-reclaim</text>
+  <text x="1150" y="575" class="note" style="fill: #856404;">• Can request delegation</text>
+  <text x="1150" y="590" class="note" style="fill: #856404;">  from Bob manually</text>
+</g>
+
+<!-- Legend -->
+<g style="animation: fadeIn 0.6s ease-in 15.5s both;">
+  <text x="100" y="680" style="font-weight: bold; text-anchor: start; font-size: 13px;">Protocol Summary:</text>
+  <text x="100" y="700" style="text-anchor: start; font-size: 11px;">• Host disconnect detected after 10s (no heartbeat)</text>
+  <text x="100" y="715" style="text-anchor: start; font-size: 11px;">• 30-second grace period for reconnection</text>
+  <text x="100" y="730" style="text-anchor: start; font-size: 11px;">• Oldest guest automatically promoted (deterministic election)</text>
+  <text x="100" y="745" style="text-anchor: start; font-size: 11px;">• All guests verify using join timestamps</text>
+  <text x="100" y="760" style="text-anchor: start; font-size: 11px;">• Original host rejoins as guest (no auto-reclaim)</text>
+</g>
+
+<!-- Replay button -->
+<g style="cursor: pointer; animation: fadeIn 0.6s ease-in 16s both;" onclick="window.location.reload();">
+  <rect x="1250" y="10" width="120" height="40" rx="5" fill="#4CAF50" stroke="#000">
+    <animate attributeName="fill" values="#4CAF50;#5CBF60;#4CAF50" dur="2s" repeatCount="indefinite"/>
+  </rect>
+  <text x="1310" y="35" fill="#FFF" style="font-size: 18px;">↻ Replay</text>
+</g>
+</svg>

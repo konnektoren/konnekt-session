@@ -148,6 +148,8 @@ Now let's drill into specific processes with more detail.
 
 ==== Process: Create and Join Lobby
 
+image::images/create-join-lobby.svg[Create and Join Lobby Process, 1000, 600]
+
 [plantuml, "eventstorming-create-join", png]
 ----
 @startuml
@@ -208,6 +210,8 @@ evt2 -.-> ext1 : broadcast to peers
 ----
 
 ==== Process: Start and Complete Activity
+
+image::images/activity-lifecycle.svg[Activity Lifecycle, 1000, 600]
 
 [plantuml, "eventstorming-activity-lifecycle", png]
 ----
@@ -806,6 +810,8 @@ note right: All 3 participate this time
 ----
 
 === Story 2: Host Delegation
+
+image::images/host-delegation.svg[Host Delegation, 1000, 600]
 
 [plantuml, "domain-story-host-delegation", png]
 ----

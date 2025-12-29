@@ -1,0 +1,248 @@
+<svg viewBox="0 0 1000 600" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<style>
+.actor { fill: #FFB6C1; stroke: #000; stroke-width: 2; }
+.command { fill: #87CEEB; stroke: #000; stroke-width: 2; rx: 10; }
+.event { fill: #FFD700; stroke: #000; stroke-width: 2; rx: 10; }
+.policy { fill: #DA70D6; stroke: #000; stroke-width: 2; rx: 5; }
+.aggregate { fill: #FFA500; stroke: #000; stroke-width: 3; rx: 5; }
+.external { fill: #90EE90; stroke: #000; stroke-width: 2; rx: 10; }
+.failure { fill: #FF6B6B; stroke: #000; stroke-width: 2; rx: 10; }
+
+.arrow { stroke: #000; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+.failure-arrow { stroke: #FF0000; stroke-width: 2; stroke-dasharray: 5,5; fill: none; marker-end: url(#arrowhead-red); }
+.sync-arrow { stroke: #90EE90; stroke-width: 2; stroke-dasharray: 3,3; fill: none; marker-end: url(#arrowhead-green); }
+
+text { font-family: Arial, sans-serif; font-size: 12px; text-anchor: middle; }
+.title { font-size: 18px; font-weight: bold; }
+.note { font-size: 10px; fill: #666; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideRight {
+  from { transform: translateX(-30px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes glow {
+  0%, 100% { filter: drop-shadow(0 0 0px rgba(255,215,0,0)); }
+  50% { filter: drop-shadow(0 0 8px rgba(255,215,0,0.8)); }
+}
+</style>
+
+<marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+<polygon points="0 0, 10 3, 0 6" fill="#000" />
+</marker>
+
+<marker id="arrowhead-red" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+<polygon points="0 0, 10 3, 0 6" fill="#FF0000" />
+</marker>
+
+<marker id="arrowhead-green" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+<polygon points="0 0, 10 3, 0 6" fill="#90EE90" />
+</marker>
+</defs>
+
+<!-- Title -->
+<text x="500" y="30" class="title">Process: Create and Join Lobby</text>
+
+<!-- Admin creates lobby -->
+<g style="animation: fadeIn 0.8s ease-in 0s both;">
+  <circle cx="50" cy="100" r="25" class="actor">
+    <animate attributeName="opacity" values="0.7;1;0.7" dur="3s" repeatCount="indefinite"/>
+  </circle>
+  <text x="50" y="105">Admin</text>
+</g>
+
+<g style="animation: slideRight 0.6s ease-out 0.4s both;">
+  <rect x="120" y="75" width="150" height="50" class="command">
+    <animate attributeName="fill" values="#87CEEB;#9DD6F0;#87CEEB" dur="4s" repeatCount="indefinite"/>
+  </rect>
+  <text x="195" y="95">CreateLobby</text>
+  <text x="195" y="110" class="note">(name, password?)</text>
+</g>
+
+<path d="M 75 100 L 120 100" class="arrow" style="animation: fadeIn 0.4s ease-in 1s both;">
+  <animate attributeName="stroke-dasharray" values="0,150;150,0" dur="1.5s" begin="1s"/>
+</path>
+
+<!-- Aggregate -->
+<g style="animation: fadeIn 0.8s ease-in 1.2s both;">
+  <rect x="320" y="50" width="200" height="100" class="aggregate">
+    <animate attributeName="stroke-width" values="3;4;3" dur="3s" repeatCount="indefinite"/>
+  </rect>
+  <text x="420" y="75" style="font-weight: bold;">Lobby Aggregate</text>
+  <text x="420" y="95" class="note">Invariants:</text>
+  <text x="420" y="110" class="note">• Unique lobby ID</text>
+  <text x="420" y="125" class="note">• Must have 1 admin</text>
+  <text x="420" y="140" class="note">• Name 3-50 chars</text>
+</g>
+
+<path d="M 270 100 L 320 100" class="arrow" style="animation: fadeIn 0.4s ease-in 1.6s both;">
+  <animate attributeName="stroke-dasharray" values="0,80;80,0" dur="1s" begin="1.6s"/>
+</path>
+
+<!-- LobbyCreated Event -->
+<g style="animation: slideRight 0.6s ease-out 2s both;">
+  <rect x="570" y="75" width="150" height="50" class="event" style="animation: glow 2s ease-in-out 2.5s infinite;">
+    <animate attributeName="fill" values="#FFD700;#FFE55C;#FFD700" dur="3s" repeatCount="indefinite"/>
+  </rect>
+  <text x="645" y="95">LobbyCreated</text>
+  <text x="645" y="110" class="note">(id, admin_id)</text>
+</g>
+
+<path d="M 520 100 L 570 100" class="arrow" style="animation: fadeIn 0.4s ease-in 2.4s both;">
+  <animate attributeName="stroke-dasharray" values="0,80;80,0" dur="0.8s" begin="2.4s"/>
+</path>
+
+<!-- Player joins -->
+<g style="animation: fadeIn 0.8s ease-in 3s both;">
+  <circle cx="50" cy="300" r="25" class="actor">
+    <animate attributeName="opacity" values="0.7;1;0.7" dur="3s" begin="3s" repeatCount="indefinite"/>
+  </circle>
+  <text x="50" y="305">Player</text>
+</g>
+
+<g style="animation: slideRight 0.6s ease-out 3.4s both;">
+  <rect x="120" y="275" width="150" height="50" class="command">
+    <animate attributeName="fill" values="#87CEEB;#9DD6F0;#87CEEB" dur="4s" begin="3.4s" repeatCount="indefinite"/>
+  </rect>
+  <text x="195" y="295">JoinLobby</text>
+  <text x="195" y="310" class="note">(lobby_id, password?)</text>
+</g>
+
+<path d="M 645 125 L 645 200 L 195 200 L 195 275" class="arrow" style="animation: fadeIn 0.6s ease-in 4s both;">
+  <animate attributeName="stroke-dasharray" values="0,300;300,0" dur="2s" begin="4s"/>
+</path>
+
+<!-- Policy checks -->
+<g style="animation: fadeIn 0.6s ease-in 4.4s both;">
+  <rect x="320" y="250" width="120" height="40" class="policy">
+    <animate attributeName="opacity" values="0.8;1;0.8" dur="2s" begin="4.4s" repeatCount="indefinite"/>
+  </rect>
+  <text x="380" y="270">Password</text>
+  <text x="380" y="285">Required?</text>
+</g>
+
+<g style="animation: fadeIn 0.6s ease-in 4.8s both;">
+  <rect x="480" y="250" width="120" height="40" class="policy">
+    <animate attributeName="opacity" values="0.8;1;0.8" dur="2s" begin="4.8s" repeatCount="indefinite"/>
+  </rect>
+  <text x="540" y="270">Lobby</text>
+  <text x="540" y="285">Full?</text>
+</g>
+
+<g style="animation: fadeIn 0.6s ease-in 5.2s both;">
+  <rect x="640" y="250" width="120" height="40" class="policy">
+    <animate attributeName="opacity" values="0.8;1;0.8" dur="2s" begin="5.2s" repeatCount="indefinite"/>
+  </rect>
+  <text x="700" y="270">Player</text>
+  <text x="700" y="285">Banned?</text>
+</g>
+
+<path d="M 270 300 L 320 270" class="arrow" style="animation: fadeIn 0.3s ease-in 4.4s both;">
+  <animate attributeName="stroke-dasharray" values="0,80;80,0" dur="0.6s" begin="4.4s"/>
+</path>
+<path d="M 440 270 L 480 270" class="arrow" style="animation: fadeIn 0.3s ease-in 4.8s both;">
+  <animate attributeName="stroke-dasharray" values="0,60;60,0" dur="0.5s" begin="4.8s"/>
+</path>
+<path d="M 600 270 L 640 270" class="arrow" style="animation: fadeIn 0.3s ease-in 5.2s both;">
+  <animate attributeName="stroke-dasharray" values="0,60;60,0" dur="0.5s" begin="5.2s"/>
+</path>
+
+<!-- Success path -->
+<g style="animation: fadeIn 0.6s ease-in 5.6s both;">
+  <rect x="800" y="250" width="150" height="50" class="event" style="animation: glow 2s ease-in-out 6s infinite;">
+    <animate attributeName="fill" values="#FFD700;#FFE55C;#FFD700" dur="3s" begin="5.6s" repeatCount="indefinite"/>
+  </rect>
+  <text x="875" y="270">PlayerJoined</text>
+  <text x="875" y="285" class="note">(player_id, role)</text>
+</g>
+
+<path d="M 760 270 L 800 270" class="arrow" style="animation: fadeIn 0.3s ease-in 6s both;">
+  <animate attributeName="stroke-dasharray" values="0,60;60,0" dur="0.6s" begin="6s"/>
+</path>
+
+<!-- Failure paths -->
+<g style="animation: fadeIn 0.6s ease-in 6.4s both;">
+  <rect x="320" y="380" width="150" height="50" class="failure">
+    <animate attributeName="opacity" values="0.7;1;0.7" dur="2s" begin="6.4s" repeatCount="indefinite"/>
+  </rect>
+  <text x="395" y="400">JoinRejected</text>
+  <text x="395" y="415" class="note">(reason)</text>
+</g>
+
+<path d="M 380 290 L 380 380" class="failure-arrow" style="animation: fadeIn 0.4s ease-in 6.8s both;">
+  <animate attributeName="stroke-dashoffset" values="10;0" dur="1.5s" begin="6.8s" repeatCount="indefinite"/>
+</path>
+<text x="400" y="340" class="note" style="fill: #FF0000; animation: fadeIn 0.4s ease-in 6.8s both;">
+  <animate attributeName="opacity" values="0.6;1;0.6" dur="2s" begin="6.8s" repeatCount="indefinite"/>
+  wrong password
+</text>
+
+<path d="M 540 290 L 470 380" class="failure-arrow" style="animation: fadeIn 0.4s ease-in 7.2s both;">
+  <animate attributeName="stroke-dashoffset" values="10;0" dur="1.5s" begin="7.2s" repeatCount="indefinite"/>
+</path>
+<text x="520" y="340" class="note" style="fill: #FF0000; animation: fadeIn 0.4s ease-in 7.2s both;">
+  <animate attributeName="opacity" values="0.6;1;0.6" dur="2s" begin="7.2s" repeatCount="indefinite"/>
+  lobby full
+</text>
+
+<path d="M 700 290 L 470 380" class="failure-arrow" style="animation: fadeIn 0.4s ease-in 7.6s both;">
+  <animate attributeName="stroke-dashoffset" values="10;0" dur="1.5s" begin="7.6s" repeatCount="indefinite"/>
+</path>
+<text x="620" y="340" class="note" style="fill: #FF0000; animation: fadeIn 0.4s ease-in 7.6s both;">
+  <animate attributeName="opacity" values="0.6;1;0.6" dur="2s" begin="7.6s" repeatCount="indefinite"/>
+  player banned
+</text>
+
+<!-- P2P sync -->
+<g style="animation: fadeIn 0.6s ease-in 8s both;">
+  <rect x="800" y="380" width="150" height="50" class="external">
+    <animate attributeName="fill" values="#90EE90;#A8F5A8;#90EE90" dur="3s" begin="8s" repeatCount="indefinite"/>
+  </rect>
+  <text x="875" y="405">Matchbox</text>
+  <text x="875" y="420" class="note">P2P Signaling</text>
+</g>
+
+<path d="M 875 300 L 875 380" class="sync-arrow" style="animation: fadeIn 0.4s ease-in 8.4s both;">
+  <animate attributeName="stroke-dashoffset" values="6;0" dur="1.2s" begin="8.4s" repeatCount="indefinite"/>
+</path>
+<text x="900" y="345" class="note" style="fill: #008000; animation: fadeIn 0.4s ease-in 8.4s both;">
+  <animate attributeName="opacity" values="0.6;1;0.6" dur="2s" begin="8.4s" repeatCount="indefinite"/>
+  broadcast to peers
+</text>
+
+<!-- Legend -->
+<g style="animation: fadeIn 0.8s ease-in 9s both;">
+  <text x="50" y="500" style="font-weight: bold; text-anchor: start;">Legend:</text>
+  <rect x="50" y="510" width="30" height="20" class="command"/>
+  <text x="85" y="525" style="text-anchor: start; font-size: 10px;">Command</text>
+
+  <rect x="150" y="510" width="30" height="20" class="event"/>
+  <text x="185" y="525" style="text-anchor: start; font-size: 10px;">Event</text>
+
+  <rect x="250" y="510" width="30" height="20" class="policy"/>
+  <text x="285" y="525" style="text-anchor: start; font-size: 10px;">Policy</text>
+
+  <rect x="350" y="510" width="30" height="20" class="aggregate"/>
+  <text x="385" y="525" style="text-anchor: start; font-size: 10px;">Aggregate</text>
+
+  <rect x="450" y="510" width="30" height="20" class="external"/>
+  <text x="485" y="525" style="text-anchor: start; font-size: 10px;">External</text>
+
+  <rect x="550" y="510" width="30" height="20" class="failure"/>
+  <text x="585" y="525" style="text-anchor: start; font-size: 10px;">Failure</text>
+</g>
+
+<!-- Replay button -->
+<g style="cursor: pointer; animation: fadeIn 0.6s ease-in 9.5s both;" onclick="window.location.reload();">
+  <rect x="850" y="500" width="100" height="30" rx="5" fill="#4CAF50" stroke="#000">
+    <animate attributeName="fill" values="#4CAF50;#5CBF60;#4CAF50" dur="2s" repeatCount="indefinite"/>
+  </rect>
+  <text x="900" y="520" fill="#FFF" style="font-size: 14px;">↻ Replay</text>
+</g>
+</svg>
