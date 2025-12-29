@@ -1,11 +1,17 @@
 use crate::application::{ConnectionEvent, SessionConfig};
 use crate::domain::{PeerId, SessionId};
 use crate::infrastructure::{connection::MatchboxConnection, error::Result};
+use instant::{Duration, Instant};
+use std::collections::HashMap;
 
 /// Application service: High-level P2P session management
 pub struct P2PSession {
     session_id: SessionId,
     connection: MatchboxConnection,
+    /// Track last heartbeat from each peer
+    peer_heartbeats: HashMap<PeerId, Instant>,
+    /// Grace period before considering a peer disconnected (30 seconds)
+    disconnect_timeout: Duration,
 }
 
 impl P2PSession {
@@ -39,6 +45,8 @@ impl P2PSession {
         Ok(P2PSession {
             session_id,
             connection,
+            peer_heartbeats: HashMap::new(),
+            disconnect_timeout: Duration::from_secs(30),
         })
     }
 
@@ -67,8 +75,55 @@ impl P2PSession {
         self.connection.broadcast(data)
     }
 
+    /// Update heartbeat for a peer
+    pub fn update_peer_heartbeat(&mut self, peer: PeerId) {
+        self.peer_heartbeats.insert(peer, Instant::now());
+    }
+
+    /// Check if a peer has timed out (no heartbeat for 30 seconds)
+    pub fn has_peer_timed_out(&self, peer: PeerId) -> bool {
+        if let Some(last_heartbeat) = self.peer_heartbeats.get(&peer) {
+            let elapsed: Duration = last_heartbeat.elapsed();
+            elapsed > self.disconnect_timeout
+        } else {
+            false
+        }
+    }
+
+    /// Get all timed-out peers
+    pub fn timed_out_peers(&self) -> Vec<PeerId> {
+        self.peer_heartbeats
+            .iter()
+            .filter_map(|(peer, last_heartbeat): (&PeerId, &Instant)| {
+                let elapsed: Duration = last_heartbeat.elapsed();
+                if elapsed > self.disconnect_timeout {
+                    Some(*peer)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     /// Poll for connection events
     pub fn poll_events(&mut self) -> Vec<ConnectionEvent> {
-        self.connection.poll_events()
+        let events = self.connection.poll_events();
+
+        // Update heartbeats for connected peers
+        for event in &events {
+            match event {
+                ConnectionEvent::PeerConnected(peer) => {
+                    self.update_peer_heartbeat(*peer);
+                }
+                ConnectionEvent::MessageReceived { from, .. } => {
+                    self.update_peer_heartbeat(*from);
+                }
+                ConnectionEvent::PeerDisconnected(peer) => {
+                    self.peer_heartbeats.remove(peer);
+                }
+            }
+        }
+
+        events
     }
 }
