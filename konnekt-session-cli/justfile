@@ -5,3 +5,11 @@ default:
 # Run CLI with custom args
 run *ARGS:
     cargo run -- {{ ARGS }}
+
+# Create a host session (example)
+host NAME="TestHost":
+    cargo run -- create-host --name "{{ NAME }}"
+
+# Join a session (example - requires session ID)
+join SESSION_ID NAME="TestGuest":
+    cargo run -- join --session-id "{{ SESSION_ID }}" --name "{{ NAME }}"

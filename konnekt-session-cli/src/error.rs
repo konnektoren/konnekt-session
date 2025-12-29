@@ -16,6 +16,21 @@ pub enum CliError {
 
     #[error("Invalid schema directory: {path}")]
     InvalidSchemaDirectory { path: PathBuf },
+
+    #[error("Failed to create participant: {0}")]
+    ParticipantCreation(String),
+
+    #[error("P2P connection failed: {0}")]
+    P2PConnection(String),
+
+    #[error("Invalid session ID: {0}")]
+    InvalidSessionId(String),
+
+    #[error("Failed to send message: {0}")]
+    MessageSend(String),
+
+    #[error("Serialization failed: {0}")]
+    Serialization(String),
 }
 
 impl CliError {
