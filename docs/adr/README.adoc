@@ -1,0 +1,141 @@
+= Architecture Decision Records
+:icons: font
+:toc: left
+:toclevels: 2
+:sectnums:
+
+== What is an ADR?
+
+An **Architecture Decision Record** (ADR) captures an important architectural decision made along with its context and consequences.
+
+ADRs help teams:
+
+* **Understand why** decisions were made, especially when revisiting them later
+* **Evaluate trade-offs** explicitly rather than implicitly
+* **Onboard new developers** by documenting the reasoning behind key choices
+* **Avoid repeating discussions** by providing a reference point
+
+== Format
+
+Each ADR in this directory follows the **Michael Nygard format**:
+
+[cols="1,3", options="header"]
+|===
+|Section
+|Purpose
+
+|**Title**
+|Short present-tense imperative statement (e.g., "Use Rust for Implementation")
+
+|**Status**
+|Proposed \| Accepted \| Deprecated \| Superseded
+
+|**Context**
+|The issue motivating this decision, including constraints and requirements
+
+|**Decision**
+|The change we're proposing or have agreed to implement
+
+|**Consequences**
+|Positive, negative, and neutral outcomes resulting from the decision
+|===
+
+== Index
+
+[cols="1,4,2,2", options="header"]
+|===
+|ID |Title |Status |Date
+
+|xref:0001-use-rust-for-implementation.adoc[ADR-0001]
+|Use Rust for Implementation
+|✅ Accepted
+|2025-12-29
+
+|xref:0002-use-yew-for-frontend.adoc[ADR-0002]
+|Use Yew for Frontend Framework
+|✅ Accepted
+|2025-12-29
+
+|xref:0003-use-matchbox-for-signaling.adoc[ADR-0003]
+|Use Matchbox for WebRTC Signaling
+|✅ Accepted
+|2025-12-29
+|===
+
+== Guidelines for Writing ADRs
+
+When creating a new ADR:
+
+1. **Number sequentially** – Use the next available number (e.g., `0004-...`)
+2. **Use imperative mood** – "Use X" not "Using X" or "We will use X"
+3. **Document alternatives** – Show what was considered and why it was rejected
+4. **Be honest about trade-offs** – Every decision has downsides
+5. **Link to related docs** – Reference DDD docs, code, or external resources
+6. **Keep it concise** – Aim for 1-2 pages; details can go in separate docs
+
+== When to Write an ADR
+
+Write an ADR when making decisions that:
+
+* **Affect multiple components** or the entire system
+* **Are difficult to reverse** (e.g., choice of programming language)
+* **Have significant trade-offs** that need to be understood
+* **Impact non-functional requirements** (performance, security, scalability)
+* **Require explanation** to future team members
+
+== Template
+
+When creating a new ADR, copy this template:
+
+[source,adoc]
+----
+= ADR-XXXX: [Decision Title]
+
+**Status**: Proposed +
+**Date**: YYYY-MM-DD +
+**Deciders**: [Names/Roles]
+
+== Context
+
+[Describe the issue and constraints]
+
+=== Alternatives Considered
+
+==== [Alternative 1]
+* ✅ Pros
+* ❌ Cons
+
+==== [Alternative 2]
+* ✅ Pros
+* ❌ Cons
+
+== Decision
+
+We will [decision statement].
+
+=== Rationale
+
+[Explain why this decision was made]
+
+== Consequences
+
+=== Positive
+
+* [Good outcome 1]
+* [Good outcome 2]
+
+=== Negative
+
+* [Drawback 1]
+* [Drawback 2]
+
+=== Neutral
+
+* [Neutral consequence 1]
+----
+
+== References
+
+* **ADR GitHub Organization** – https://adr.github.io/
+* **Michael Nygard's original post** – https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions
+* **ADR Tools** – https://github.com/npryce/adr-tools

@@ -1,0 +1,111 @@
+= ADR-0001: Use Rust for Implementation
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+Konnekt Session is a decentralized peer-to-peer multiplayer lobby library that requires:
+
+* **Strong type safety** for domain modeling and state management
+* **WebAssembly compilation** to run in browsers
+* **Cryptographic operations** (Ed25519 signatures) for message verification
+* **Memory safety** without garbage collection pauses
+* **Cross-platform compatibility** (browser WASM + potential native clients)
+
+We needed to choose a language that could deliver on these requirements while providing excellent developer experience and ecosystem support.
+
+=== Alternatives Considered
+
+==== TypeScript/JavaScript
+* ✅ Native browser support
+* ✅ Large ecosystem
+* ❌ Weak type system (TypeScript helps but not enough)
+* ❌ Runtime errors instead of compile-time guarantees
+* ❌ No built-in crypto primitives
+* ❌ Difficult to enforce domain boundaries
+
+==== Go
+* ✅ Simple language
+* ✅ Good concurrency primitives
+* ✅ Growing WASM support
+* ❌ Garbage collection (pauses in WASM)
+* ❌ Larger WASM binary sizes
+* ❌ Less mature WASM ecosystem
+
+==== C++
+* ✅ Excellent performance
+* ✅ Full control over memory
+* ✅ Mature WASM tooling (Emscripten)
+* ❌ Manual memory management complexity
+* ❌ Undefined behavior risks
+* ❌ Poor ergonomics for domain modeling
+
+== Decision
+
+We will use **Rust** as the primary implementation language for Konnekt Session.
+
+=== Rationale
+
+==== Type Safety & Domain Modeling
+Rust's type system excels at encoding domain invariants:
+
+[source,rust]
+----
+pub enum ParticipationMode {
+    Active,
+    Spectating,
+}
+
+pub enum Participant {
+    Host { peer_id: PeerId, public_key: PublicKey },
+    Guest { peer_id: PeerId, mode: ParticipationMode },
+}
+----
+
+This prevents invalid states at compile time, aligning perfectly with DDD principles.
+
+==== WebAssembly First-Class Support
+* `wasm-bindgen` provides seamless JavaScript interop
+* `wasm-pack` simplifies build and packaging
+* Excellent tooling for browser APIs via `web-sys`
+* Small binary sizes with aggressive optimization
+
+==== Cryptographic Safety
+* `ed25519-dalek` provides audited Ed25519 signatures
+* Type system prevents key misuse
+* No timing attack vulnerabilities from careless implementations
+
+==== Memory Safety Without GC
+* Zero-cost abstractions
+* No garbage collection pauses affecting frame rates
+* Ownership system prevents data races in concurrent scenarios
+
+==== Ecosystem Maturity
+* Strong WebRTC support via `webrtc-unreliable` and similar crates
+* Excellent serialization with `serde`
+* Active WASM community
+
+== Consequences
+
+=== Positive
+
+* **Compile-time guarantees** catch bugs before deployment
+* **Excellent performance** in WASM with small bundle sizes
+* **Safe concurrency** when adding async features
+* **Strong domain modeling** capabilities align with DDD
+* **Single codebase** can target both WASM and native if needed
+
+=== Negative
+
+* **Steeper learning curve** for developers unfamiliar with ownership/borrowing
+* **Slower compile times** compared to interpreted languages
+* **Smaller talent pool** than JavaScript/TypeScript
+* **Verbose syntax** in some cases compared to dynamic languages
+
+=== Neutral
+
+* Requires **toolchain setup** (`rustup`, `wasm-pack`)
+* Need to **educate team** on Rust idioms and patterns
+* Must be **disciplined about dependencies** to control binary size

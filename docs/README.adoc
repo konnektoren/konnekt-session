@@ -21,6 +21,29 @@ This project follows the **Domain-Driven Design Starter Modelling Process**. The
 
 Start with **Step 1: Understand** to see the business context, then **Step 4: Strategize** to see our core domain investment strategy.
 
+=== Architecture Decision Records
+
+Significant architectural and technology decisions are documented as ADRs following the **Nygard ADR format**:
+
+[cols="1,3,2", options="header"]
+|===
+|ID |Title |Status
+
+|xref:adr/0001-use-rust-for-implementation.adoc[ADR-0001]
+|Use Rust for Implementation
+|Accepted
+
+|xref:adr/0002-use-yew-for-frontend.adoc[ADR-0002]
+|Use Yew for Frontend Framework
+|Accepted
+
+|xref:adr/0003-use-matchbox-for-signaling.adoc[ADR-0003]
+|Use Matchbox for WebRTC Signaling
+|Accepted
+|===
+
+See the full **xref:adr/README.adoc[ADR Index]** for details on context, alternatives considered, and consequences of each decision.
+
 == 1. Overview
 
 Konnekt Session is a **Rust-based, decentralized multiplayer-lobby library**.
@@ -174,35 +197,54 @@ Rel(activity, status, "has")
 
 == 12. Architectural Decisions
 
-[cols="2,3", options="header"]
+[cols="2,3,2", options="header"]
 |===
 |Decision
 |Rationale
+|Reference
 
 |No game server
 |Reduces infrastructure costs, improves scalability, enables offline play.
+|xref:01-understand.adoc[Understand]
 
 |Host/Guest model
 |Intuitive natural language ("host invites guests"). Clear authority hierarchy.
+|xref:02-discover.adoc[Discover]
 
 |Spectator mode
 |Flexible participation - guests can watch before playing, or take breaks without leaving.
+|xref:02-discover.adoc[Discover]
 
 |Single host (v1.0)
 |Simplicity. Host can delegate but not share role. Avoids permission conflicts.
+|xref:04-strategize.adoc[Strategize]
 
 |Cryptographic authentication
 |Enables persistent identity, prevents impersonation.
+|xref:01-understand.adoc[Understand]
 
-|Matchbox for signalling only
-|Delegates WebRTC complexity to proven library, keeps codebase focused.
+|**Rust for implementation**
+|Type safety, WASM-first, memory safety without GC, excellent domain modeling.
+|**xref:adr/0001-use-rust-for-implementation.adoc[ADR-0001]**
+
+|**Yew for frontend**
+|React-like components, hooks, zero-cost integration with domain logic, type-safe props.
+|**xref:adr/0002-use-yew-for-frontend.adoc[ADR-0002]**
+
+|**Matchbox for signalling**
+|Rust-native WebRTC, minimal infrastructure, game-specific API, reliable/unreliable channels.
+|**xref:adr/0003-use-matchbox-for-signaling.adoc[ADR-0003]**
 
 |Client-side state
 |Enables instant UI updates, reduces server load, supports offline mode.
+|xref:01-understand.adoc[Understand]
 
 |Separation: LobbyRole vs ParticipationMode
 |Host/Guest is about authority, Active/Spectating is about participation. Independent concerns.
+|xref:02-discover.adoc[Discover]
 |===
+
+TIP: Technology decisions (Rust, Yew, Matchbox) are documented with full context, alternatives, and trade-offs in the **xref:adr/README.adoc[ADR section]**.
 
 == 13. Quality Attributes
 
@@ -249,8 +291,21 @@ Rel(activity, status, "has")
 
 == 16. References
 
+=== External Technologies
+
 * **Matchbox** – https://github.com/johanhelsing/matchbox
 * **Yew** – https://yew.rs/docs/getting-started/introduction
+* **Rust WebAssembly** – https://rustwasm.github.io/
+
+=== Architectural Patterns
+
 * **C4 Model** – https://c4model.com/
 * **ARC42** – https://arc42.org/
 * **DDD** – _Domain-Driven Design_ by Eric Evans
+* **ADR** – https://adr.github.io/ (Nygard format)
+
+=== Internal Documentation
+
+* **xref:adr/README.adoc[Architecture Decision Records]** – Technology choices and trade-offs
+* **xref:01-understand.adoc[DDD Process: Understand]** – Business model and constraints
+* **xref:04-strategize.adoc[DDD Process: Strategize]** – Core domain investment strategy

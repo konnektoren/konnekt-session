@@ -1,0 +1,137 @@
+= ADR-0002: Use Yew for Frontend Framework
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+After deciding to use Rust (ADR-0001), we needed a frontend framework for building the browser-based UI. Requirements:
+
+* **Component-based architecture** for maintainable UI
+* **Reactive state management** for lobby updates
+* **Type-safe props** for component communication
+* **Integration with Rust domain logic** without FFI overhead
+* **Hooks/composability** for reusable UI logic
+
+=== Alternatives Considered
+
+==== Rust + JavaScript Framework (React/Vue/Svelte)
+* ✅ Mature ecosystems
+* ✅ Large component libraries
+* ✅ Well-known patterns
+* ❌ FFI overhead for every state update
+* ❌ Two-language maintenance burden
+* ❌ Type safety boundary at WASM interface
+* ❌ Duplicate state management logic
+
+==== Leptos
+* ✅ Modern reactive primitives (signals)
+* ✅ Excellent performance
+* ✅ Server-side rendering support
+* ❌ Younger ecosystem (less mature)
+* ❌ Smaller community
+* ❌ SSR not needed for P2P-only app
+
+==== Dioxus
+* ✅ React-like API
+* ✅ Multi-platform (web, desktop, mobile)
+* ✅ Good developer experience
+* ❌ Younger than Yew
+* ❌ Multi-platform features not needed
+* ❌ Smaller ecosystem
+
+==== Seed
+* ✅ Elm-inspired architecture
+* ✅ Pure Rust
+* ❌ Less active development
+* ❌ Smaller community
+* ❌ Less mature tooling
+
+== Decision
+
+We will use **Yew** as the frontend framework for Konnekt Session.
+
+=== Rationale
+
+==== React-Like Component Model
+Yew uses a familiar component-based architecture:
+
+[source,rust]
+----
+#[function_component(LobbyView)]
+pub fn lobby_view(props: &LobbyViewProps) -> Html {
+    let lobby_state = use_context::<LobbyState>().expect("LobbyState context");
+
+    html! {
+        <div class="lobby">
+            <ParticipantList participants={lobby_state.participants.clone()} />
+            <ActivityPanel activities={lobby_state.activities.clone()} />
+        </div>
+    }
+}
+----
+
+This makes it accessible to developers familiar with React while remaining type-safe.
+
+==== Hooks for State Management
+Modern Yew supports hooks for composable logic:
+
+[source,rust]
+----
+#[hook]
+pub fn use_lobby_connection() -> UseLobbyConnectionHandle {
+    let peer_state = use_state(|| PeerState::Disconnected);
+    let on_message = use_callback(/* ... */);
+    // ...
+}
+----
+
+==== Mature Ecosystem
+* **Battle-tested** in production applications
+* **Active community** and maintainers
+* **Good documentation** and examples
+* **Component libraries** like `yew-router`, `yewtil`
+
+==== Zero-Cost Integration
+* **Direct access** to domain types without serialization
+* **Shared state** between UI and P2P logic
+* **Type-safe props** enforced at compile time
+
+==== WebAssembly Optimized
+* Built specifically for WASM from the ground up
+* Efficient virtual DOM implementation
+* Tree-shaking friendly for small bundles
+
+== Consequences
+
+=== Positive
+
+* **Type safety** extends through the entire UI layer
+* **Single language** simplifies development and onboarding
+* **Direct domain integration** without marshaling overhead
+* **Compile-time UI checks** prevent runtime errors
+* **Familiar patterns** for React developers
+
+=== Negative
+
+* **Smaller ecosystem** than mainstream JavaScript frameworks
+* **No CSS-in-Rust** solution (must use separate CSS/Tailwind)
+* **Limited third-party components** compared to React
+* **Recompile required** for UI changes (slower iteration)
+
+=== Neutral
+
+* Need to **learn Yew-specific patterns** (props, callbacks, contexts)
+* **Hot-reload** possible but not as smooth as JavaScript
+* May need to **wrap JavaScript libraries** for rich components (charts, etc.)
+
+=== Migration Path
+
+If Yew proves insufficient, we can:
+
+1. **Keep domain logic** in Rust
+2. **Expose WASM API** via `wasm-bindgen`
+3. **Switch UI framework** to React/Vue while preserving core logic
+
+The domain layer remains isolated and reusable regardless of UI technology.

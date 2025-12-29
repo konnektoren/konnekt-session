@@ -1,0 +1,170 @@
+= ADR-0003: Use Matchbox for WebRTC Signaling
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+Konnekt Session requires peer-to-peer connectivity between browsers. WebRTC needs a **signaling mechanism** to:
+
+* **Exchange SDP offers/answers** between peers
+* **Discover ICE candidates** for NAT traversal
+* **Establish data channels** for P2P communication
+
+Critical constraint: **No central game server** - we want minimal infrastructure and cannot rely on a custom backend for game logic.
+
+=== Alternatives Considered
+
+==== Custom Signaling Server (WebSocket)
+* ✅ Full control over protocol
+* ✅ Can optimize for specific needs
+* ❌ Must implement and maintain server
+* ❌ Requires deployment infrastructure
+* ❌ Not aligned with "minimal infrastructure" goal
+* ❌ Significant development overhead
+
+==== PeerJS
+* ✅ Mature and widely used
+* ✅ Managed signaling servers
+* ✅ Simple JavaScript API
+* ❌ JavaScript-only (poor Rust integration)
+* ❌ FFI overhead for every message
+* ❌ Not type-safe
+* ❌ Limited control over signaling
+
+==== WebRTC-RS
+* ✅ Pure Rust implementation
+* ✅ Full WebRTC stack
+* ❌ Incomplete browser support
+* ❌ Primarily for server-side use
+* ❌ No built-in signaling
+* ❌ Complex API
+
+==== Simple-Peer (via wasm-bindgen)
+* ✅ Popular JavaScript library
+* ✅ Simple abstraction
+* ❌ FFI boundary overhead
+* ❌ No Rust-native signaling
+* ❌ Manual bridging required
+
+== Decision
+
+We will use **Matchbox** (specifically `matchbox_socket`) for WebRTC signaling.
+
+=== What is Matchbox?
+
+Matchbox is a Rust-native WebRTC library designed specifically for **browser-based multiplayer games**:
+
+* **Signaling server** included (open-source, deployable)
+* **Rust client** for WASM
+* **Game-focused API** with room-based matchmaking
+* **Reliable/unreliable channels** for different message types
+
+=== Rationale
+
+==== Rust-Native WASM Integration
+
+[source,rust]
+----
+let (mut socket, message_loop) = WebRtcSocket::new_reliable(room_url);
+
+// Native Rust async
+while let Some(event) = socket.next().await {
+    match event {
+        MessageLoopEvent::PeerConnected(peer_id) => {
+            info!("Peer connected: {:?}", peer_id);
+        }
+        MessageLoopEvent::Message(peer_id, message) => {
+            handle_peer_message(peer_id, &message);
+        }
+    }
+}
+----
+
+No FFI overhead, direct integration with Rust async ecosystem.
+
+==== Minimal Infrastructure Requirements
+* **Public signaling server** available at `matchbox.johanhelsing.studio`
+* **Self-hostable** if we need control (single binary, minimal resources)
+* **No game state** on server - pure signaling
+* **Stateless** - signaling server can restart without affecting games
+
+==== Game-Specific Design
+* **Room-based matching** built-in
+* **Unreliable channels** for low-latency state updates
+* **Reliable channels** for critical messages (lobby updates)
+* **Peer discovery** handled automatically
+
+==== Type-Safe Message Handling
+
+[source,rust]
+----
+#[derive(Serialize, Deserialize)]
+enum LobbyMessage {
+    StateUpdate(SignedLobbyState),
+    HostDelegation(HostDelegationRequest),
+}
+
+fn send_message(&mut self, peer_id: PeerId, msg: LobbyMessage) {
+    let bytes = bincode::serialize(&msg).unwrap();
+    self.socket.send(bytes.into(), peer_id);
+}
+----
+
+Full type safety from serialization through transmission.
+
+==== Active Development
+* Maintained by Johan Helsing (active in Rust gamedev community)
+* Used in production games (Extreme Bevy)
+* Regular updates and bug fixes
+* Responsive to issues
+
+== Consequences
+
+=== Positive
+
+* **Zero FFI overhead** - pure Rust communication
+* **Minimal ops burden** - can use public server or simple self-host
+* **Type-safe messaging** end-to-end
+* **Async/await native** integration with Yew
+* **Unreliable channels** for future optimization (state snapshots)
+* **Battle-tested** in real games
+
+=== Negative
+
+* **Smaller community** than PeerJS or similar
+* **Dependency on maintainer** (single primary developer)
+* **Less documentation** than mainstream alternatives
+* **Signaling server is a single point of failure** (but not critical - peers stay connected)
+
+=== Neutral
+
+* Need to **run signaling server** (but minimal cost)
+* **Room IDs** must be communicated out-of-band (share link)
+* May need **STUN/TURN servers** for difficult NAT scenarios
+
+=== Operational Considerations
+
+==== Development
+Use public server: `wss://matchbox.johanhelsing.studio`
+
+==== Production
+Options:
+
+1. **Continue using public server** (acceptable for MVP)
+2. **Self-host signaling server** (recommended for control)
+   ```bash
+   docker run -p 3536:3536 ghcr.io/johanhelsing/matchbox-server
+   ```
+3. **Add TURN server** if NAT traversal issues arise
+
+=== Future Flexibility
+
+Matchbox's abstraction allows future migration:
+
+* **Protocol is simple** - could implement custom signaling if needed
+* **Room-based model** is standard - portable to other solutions
+* **Data channel API** is generic - underlying transport replaceable
+
+The domain layer remains independent of transport mechanism.
