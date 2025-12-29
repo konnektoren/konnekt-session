@@ -120,6 +120,11 @@ Each ADR in this directory follows the **Michael Nygard format**:
 |Use Feature-Gated Event Cache
 |✅ Accepted
 |2025-12-29
+
+|xref:0016-use-clap-for-cli-tooling.adoc[ADR-0016]
+|Use Clap for CLI Tooling
+|✅ Accepted
+|2025-12-29
 |===
 
 == Guidelines for Writing ADRs

@@ -1,0 +1,161 @@
+= ADR-0016: Use Clap for CLI Tooling
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+We need a **minimal testing CLI** to validate P2P functionality without browser overhead:
+
+* **Test two clients joining** the same lobby
+* **Display participant roles** (Host/Guest)
+* **Show domain events** in real-time (LobbyCreated, GuestJoined, etc.)
+* **Validate core logic** before UI development
+* **Debug P2P issues** with clear terminal output
+
+=== Requirements
+
+* **Simple argument parsing** - lobby ID, participant name, role
+* **Subcommands** - `create`, `join`, `events`
+* **Help generation** - auto-generated usage docs
+* **Type-safe** - compile-time validation of args
+* **Native-only** - doesn't need to work in WASM
+
+=== Example Usage
+
+[source,bash]
+----
+# Host creates lobby
+cargo run --bin konnekt-cli create --name "Alice"
+# Output: Lobby created: lobby_abc123
+
+# Guest joins in separate terminal
+cargo run --bin konnekt-cli join --lobby lobby_abc123 --name "Bob"
+# Output: Joined as Guest. Host: Alice
+
+# Watch events
+cargo run --bin konnekt-cli events --lobby lobby_abc123
+# Output (live):
+# [10:00:01] LobbyCreated { host: Alice }
+# [10:00:15] GuestJoined { name: Bob, mode: Active }
+# [10:00:30] ActivityStarted { id: act_001 }
+----
+
+=== Alternatives Considered
+
+==== structopt
+* ✅ Derive-based (similar to Clap 3.x)
+* ❌ **Merged into Clap 3.0** - use Clap directly
+* ❌ Deprecated
+
+==== argh (Google)
+* ✅ Very lightweight
+* ❌ **No subcommands** - would need manual routing
+* ❌ Less feature-rich
+
+==== Manual parsing (std::env::args)
+* ✅ Zero dependencies
+* ❌ **Lots of boilerplate** - help text, validation, error messages
+* ❌ Error-prone
+
+== Decision
+
+Use **Clap v4** with derive macros for CLI argument parsing.
+
+=== Dependencies
+
+[source,toml]
+----
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+----
+
+=== Rationale
+
+* **Derive macros** - minimal boilerplate, clear structure
+* **Auto-generated help** - `--help` for free
+* **Subcommands** - clean separation (`create`, `join`, `events`)
+* **Type safety** - args validated at compile time
+* **Industry standard** - used by Cargo, Rustup, etc.
+* **Native-only** - binary size doesn't matter (not WASM)
+
+== Consequences
+
+=== Positive
+
+* ✅ **Fast prototyping** - test domain logic without browser
+* ✅ **Clear output** - terminal events easier to debug than browser console
+* ✅ **CI/CD integration** - automated P2P tests in terminal
+* ✅ **Documentation** - CLI help serves as usage guide
+* ✅ **Type-safe args** - Clap validates types (usize, bool, etc.)
+
+=== Negative
+
+* ❌ **Binary size** (~500KB) - acceptable for CLI tool
+* ❌ **Compile time** - Clap adds ~5s to clean builds
+* ❌ **Not for production** - CLI is dev/test tool only
+
+=== Neutral
+
+* CLI is **development tool** - not shipped to end users
+* May be **replaced by Cucumber tests** (ADR-0007) for full scenarios
+
+== Use Cases
+
+=== Development Workflow
+
+1. **Develop domain logic** in `konnekt-session-core`
+2. **Test with CLI** - validate events, roles, state
+3. **Fix bugs** based on CLI output
+4. **Build Yew UI** with confidence core works
+
+=== CI/CD Pipeline
+
+[source,yaml]
+----
+- name: Test P2P Connection
+  run: |
+    cargo build --bin konnekt-cli
+    ./target/debug/konnekt-cli create --name Host &
+    sleep 2
+    ./target/debug/konnekt-cli join --lobby <id> --name Guest
+----
+
+=== Debugging
+
+Run two terminals side-by-side to see event synchronization:
+
+[source]
+----
+Terminal 1 (Host)              Terminal 2 (Guest)
+─────────────────────────────────────────────────
+$ cli create --name Alice
+Lobby: abc123
+Waiting for guests...
+                               $ cli join abc123 --name Bob
+GuestJoined: Bob               Joined as Guest
+ActivityStarted: Quiz          ActivityStarted: Quiz
+----
+
+== Implementation Checklist
+
+- [ ] Add `clap` to `konnekt-session-core` dev-dependencies
+- [ ] Create `src/bin/konnekt_cli.rs`
+- [ ] Implement `create` subcommand (host)
+- [ ] Implement `join` subcommand (guest)
+- [ ] Implement `events` subcommand (observer)
+- [ ] Add event stream formatting (pretty-print)
+- [ ] Test with 2 terminals
+- [ ] Document in `README.md`
+
+== References
+
+* **Clap Documentation** – https://docs.rs/clap/
+* **Clap Derive Tutorial** – https://github.com/clap-rs/clap/tree/master/examples/tutorial_derive
+
+=== Related ADRs
+
+* xref:0007-use-cucumber-for-behavior-driven-testing.adoc[ADR-0007] – Cucumber for full scenarios, CLI for quick tests
+* xref:0010-use-event-sourcing-for-lobby-state.adoc[ADR-0010] – CLI displays event stream
+* xref:0005-use-tracing-for-logging-and-diagnostics.adoc[ADR-0005] – CLI uses tracing for output
