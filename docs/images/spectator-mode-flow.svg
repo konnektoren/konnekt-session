@@ -1,0 +1,188 @@
+<svg viewBox="0 0 1400 800" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<style>
+.swimlane { fill: #F5F5F5; stroke: #BDBDBD; stroke-width: 2; }
+.actor { fill: #FFB6C1; stroke: #000; stroke-width: 2; }
+.component { fill: #E1F5FE; stroke: #0277BD; stroke-width: 2; rx: 6; }
+.message { stroke: #000; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+.error-message { stroke: #F44336; stroke-width: 3; stroke-dasharray: 6,3; fill: none; marker-end: url(#arrowhead-error); }
+.success-message { stroke: #4CAF50; stroke-width: 2.5; fill: none; marker-end: url(#arrowhead-success); }
+.activation { fill: rgba(2, 119, 189, 0.15); stroke: #0277BD; stroke-width: 2; }
+.error-box { fill: #FFEBEE; stroke: #C62828; stroke-width: 2; rx: 8; }
+.success-box { fill: #E8F5E9; stroke: #2E7D32; stroke-width: 2; rx: 8; }
+
+text { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; text-anchor: middle; }
+.title { font-size: 20px; font-weight: bold; fill: #1A237E; }
+.scenario-title { font-size: 14px; font-weight: bold; fill: #0D47A1; }
+.step { font-size: 10px; fill: #424242; }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+@keyframes checkmark { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+</style>
+
+<marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+<polygon points="0 0, 10 3, 0 6" fill="#000" />
+</marker>
+<marker id="arrowhead-error" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto">
+<polygon points="0 0, 12 4, 0 8" fill="#F44336" />
+</marker>
+<marker id="arrowhead-success" markerWidth="11" markerHeight="11" refX="9" refY="3.5" orient="auto">
+<polygon points="0 0, 11 3.5, 0 7" fill="#4CAF50" />
+</marker>
+</defs>
+
+<!-- Title -->
+<text x="700" y="35" class="title">Participation Mode Toggling: Active ↔ Spectating</text>
+
+<!-- Swimlanes -->
+<g style="animation: fadeIn 0.4s ease-in 0.3s both;">
+<rect x="50" y="70" width="350" height="700" class="swimlane"/>
+<text x="225" y="95" style="font-size: 13px; font-weight: 600;">Guest (Carol)</text>
+
+<rect x="420" y="70" width="350" height="700" class="swimlane"/>
+<text x="595" y="95" style="font-size: 13px; font-weight: 600;">Host</text>
+
+<rect x="790" y="70" width="350" height="700" class="swimlane"/>
+<text x="965" y="95" style="font-size: 13px; font-weight: 600;">Activity Management</text>
+</g>
+
+<!-- Components -->
+<g style="animation: fadeIn 0.4s ease-in 0.7s both;">
+<rect x="80" y="120" width="120" height="30" class="component"/>
+<text x="140" y="140">Carol UI</text>
+
+<rect x="230" y="120" width="140" height="30" class="component"/>
+<text x="300" y="140">Participant Mgmt</text>
+
+<rect x="450" y="120" width="140" height="30" class="component"/>
+<text x="520" y="140">Host Domain</text>
+
+<rect x="820" y="120" width="140" height="30" class="component"/>
+<text x="890" y="140">Activity State</text>
+</g>
+
+<!-- Scenario 1: Success (Before Activity) -->
+<text x="50" y="190" class="scenario-title" style="text-anchor: start; animation: fadeIn 0.5s ease-in 1.2s both;">Scenario 1: Toggle Before Activity ✓</text>
+
+<g style="animation: fadeIn 0.5s ease-in 1.5s both;">
+<circle cx="100" cy="220" r="18" class="actor">
+<animate attributeName="opacity" values="0.7;1;0.7" dur="2s" repeatCount="indefinite"/>
+</circle>
+<text x="100" y="225" style="font-size: 9px;">Carol</text>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 2s both;">
+<path d="M 118 220 L 280 240" class="message">
+<animate attributeName="stroke-dashoffset" values="200;0" dur="0.6s" begin="2s"/>
+</path>
+<text x="200" y="228" class="step">1. ToggleSpectatorMode</text>
+<rect x="290" y="240" width="20" height="120" class="activation"/>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 2.7s both;">
+<path d="M 300 260 L 880 275" class="message">
+<animate attributeName="stroke-dashoffset" values="700;0" dur="0.8s" begin="2.7s"/>
+</path>
+<text x="590" y="265" class="step">2. Check: activity running?</text>
+<rect x="880" y="275" width="20" height="40" class="activation"/>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 3.6s both;">
+<path d="M 890 315 L 310 330" class="message" style="stroke: #666; stroke-dasharray: 4,2;">
+<animate attributeName="stroke-dashoffset" values="700;0" dur="0.8s" begin="3.6s"/>
+</path>
+<text x="600" y="320" class="step">3. No ✓</text>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 4.5s both;">
+<rect x="290" y="330" width="20" height="30" class="activation" style="fill: rgba(76, 175, 80, 0.2); stroke: #4CAF50;"/>
+<text x="250" y="350" class="step" style="text-anchor: start; fill: #2E7D32; font-weight: bold;">4. Update mode:</text>
+<text x="250" y="362" class="step" style="text-anchor: start; fill: #2E7D32; font-weight: bold;">   → Spectating</text>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 5.2s both;">
+<path d="M 300 360 L 140 380" class="success-message">
+<animate attributeName="stroke-dashoffset" values="200;0" dur="0.6s" begin="5.2s"/>
+</path>
+<text x="220" y="368" class="step" style="fill: #4CAF50; font-weight: bold;">5. Success!</text>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 5.9s both;">
+<rect x="80" y="390" width="200" height="45" class="success-box">
+<animate attributeName="opacity" values="0.6;1;0.6" dur="2s" repeatCount="indefinite"/>
+</rect>
+<text x="180" y="410" style="fill: #2E7D32; font-weight: bold;">Mode: Spectating 👁️</text>
+<text x="180" y="425" class="step" style="fill: #2E7D32;">Cannot submit results</text>
+</g>
+
+<!-- Scenario 2: Rejected (During Activity) -->
+<text x="50" y="475" class="scenario-title" style="text-anchor: start; animation: fadeIn 0.5s ease-in 6.5s both;">Scenario 2: Toggle During Activity ✗</text>
+
+<g style="animation: fadeIn 0.5s ease-in 7s both;">
+<path d="M 118 500 L 280 520" class="message">
+<animate attributeName="stroke-dashoffset" values="200;0" dur="0.6s" begin="7s"/>
+</path>
+<text x="200" y="508" class="step">6. ToggleSpectatorMode</text>
+<rect x="290" y="520" width="20" height="100" class="activation"/>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 7.7s both;">
+<path d="M 300 540 L 880 555" class="message">
+<animate attributeName="stroke-dashoffset" values="700;0" dur="0.8s" begin="7.7s"/>
+</path>
+<text x="590" y="545" class="step">7. Check: activity running?</text>
+<rect x="880" y="555" width="20" height="40" class="activation" style="fill: rgba(244, 67, 54, 0.2); stroke: #F44336;"/>
+<circle cx="890" cy="575" r="12" style="fill: #F44336; opacity: 0.3; animation: pulse 1s ease-in-out 8s 3;"/>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 8.6s both;">
+<path d="M 890 595 L 310 605" class="error-message">
+<animate attributeName="stroke-dashoffset" values="700;0" dur="0.8s" begin="8.6s"/>
+</path>
+<text x="600" y="598" class="step" style="fill: #C62828; font-weight: bold;">8. Yes! InProgress</text>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 9.5s both;">
+<path d="M 300 620 L 140 640" class="error-message" style="animation: shake 0.5s ease-in-out 9.5s 2;">
+<animate attributeName="stroke-dashoffset" values="200;0" dur="0.6s" begin="9.5s"/>
+</path>
+<text x="220" y="628" class="step" style="fill: #C62828; font-weight: bold;">9. Rejected!</text>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 10.2s both;">
+<rect x="80" y="650" width="240" height="60" class="error-box" style="animation: shake 0.3s ease-in-out 10.2s 3;">
+<animate attributeName="opacity" values="0.7;1;0.7" dur="1.5s" repeatCount="indefinite"/>
+</rect>
+<text x="200" y="670" style="fill: #C62828; font-weight: bold;">❌ Error</text>
+<text x="200" y="690" class="step" style="fill: #C62828;">Cannot toggle mode</text>
+<text x="200" y="703" class="step" style="fill: #C62828;">during active activity</text>
+</g>
+
+<!-- Legend -->
+<g style="animation: fadeIn 0.6s ease-in 11s both;">
+<text x="1200" y="130" style="font-weight: bold; text-anchor: start; font-size: 12px;">Outcomes:</text>
+
+<line x1="1200" y1="150" x2="1250" y2="150" class="success-message"/>
+<text x="1260" y="154" style="text-anchor: start; font-size: 10px;">Success</text>
+
+<line x1="1200" y1="170" x2="1250" y2="170" class="error-message"/>
+<text x="1260" y="174" style="text-anchor: start; font-size: 10px;">Rejected</text>
+
+<text x="1200" y="205" style="font-weight: bold; text-anchor: start; font-size: 11px;">Rules:</text>
+<text x="1200" y="220" style="text-anchor: start; font-size: 9px;">✓ Can toggle when</text>
+<text x="1200" y="233" style="text-anchor: start; font-size: 9px;">   no activity running</text>
+<text x="1200" y="250" style="text-anchor: start; font-size: 9px;">✗ Cannot toggle during</text>
+<text x="1200" y="263" style="text-anchor: start; font-size: 9px;">   InProgress activity</text>
+<text x="1200" y="280" style="text-anchor: start; font-size: 9px;">✓ Host can force anytime</text>
+</g>
+
+<!-- Replay button -->
+<g style="cursor: pointer; animation: fadeIn 0.6s ease-in 11.5s both;" onclick="window.location.reload();">
+<rect x="1250" y="15" width="120" height="40" rx="5" fill="#0277BD" stroke="#000">
+<animate attributeName="fill" values="#0277BD;#0288D1;#0277BD" dur="2s" repeatCount="indefinite"/>
+</rect>
+<text x="1310" y="40" fill="#FFF" style="font-size: 16px; font-weight: bold;">↻ Replay</text>
+</g>
+
+</svg>

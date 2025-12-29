@@ -1,0 +1,235 @@
+<svg viewBox="0 0 1400 900" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<style>
+.swimlane { fill: #F8F9FA; stroke: #DEE2E6; stroke-width: 2; }
+.actor { fill: #FFB6C1; stroke: #000; stroke-width: 2; }
+.component { fill: #E3F2FD; stroke: #1976D2; stroke-width: 2; rx: 8; }
+.service { fill: #FFF3E0; stroke: #F57C00; stroke-width: 2; rx: 8; }
+.external { fill: #90EE90; stroke: #388E3C; stroke-width: 2; rx: 8; }
+.message { stroke: #000; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+.message-return { stroke: #666; stroke-width: 1.5; stroke-dasharray: 4,3; fill: none; marker-end: url(#arrowhead-return); }
+.activation { fill: rgba(25, 118, 210, 0.1); stroke: #1976D2; stroke-width: 2; }
+
+text { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; text-anchor: middle; }
+.title { font-size: 20px; font-weight: bold; fill: #212121; }
+.label { font-size: 13px; font-weight: 600; fill: #424242; }
+.step { font-size: 10px; fill: #666; }
+.note { font-size: 9px; fill: #888; font-style: italic; }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideDown { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes pulse { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
+@keyframes flowMessage { from { stroke-dashoffset: 200; } to { stroke-dashoffset: 0; } }
+</style>
+
+<marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+<polygon points="0 0, 10 3, 0 6" fill="#000" />
+</marker>
+<marker id="arrowhead-return" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+<polygon points="0 0, 8 3, 0 6" fill="#666" />
+</marker>
+</defs>
+
+<!-- Title -->
+<text x="700" y="35" class="title">Message Flow: Create Lobby and First Guest Joins</text>
+
+<!-- Swimlanes -->
+<g style="animation: fadeIn 0.5s ease-in 0.2s both;">
+<rect x="50" y="70" width="250" height="800" class="swimlane"/>
+<text x="175" y="95" class="label">Host's Browser</text>
+
+<rect x="320" y="70" width="250" height="800" class="swimlane"/>
+<text x="445" y="95" class="label">Matchbox Signaling</text>
+
+<rect x="590" y="70" width="250" height="800" class="swimlane"/>
+<text x="715" y="95" class="label">Guest's Browser</text>
+</g>
+
+<!-- Components -->
+<g style="animation: slideDown 0.4s ease-out 0.6s both;">
+<rect x="70" y="120" width="90" height="40" class="component"/>
+<text x="115" y="145">Yew UI</text>
+</g>
+
+<g style="animation: slideDown 0.4s ease-out 0.8s both;">
+<rect x="70" y="180" width="90" height="40" class="component"/>
+<text x="115" y="205">Lobby Domain</text>
+</g>
+
+<g style="animation: slideDown 0.4s ease-out 1s both;">
+<rect x="180" y="180" width="90" height="40" class="component"/>
+<text x="225" y="205">Auth Service</text>
+</g>
+
+<g style="animation: slideDown 0.4s ease-out 1.2s both;">
+<rect x="180" y="240" width="90" height="40" class="component"/>
+<text x="225" y="265">P2P Sync</text>
+</g>
+
+<g style="animation: slideDown 0.4s ease-out 1.4s both;">
+<rect x="350" y="180" width="150" height="80" class="external">
+<animate attributeName="fill" values="#90EE90;#A8F5A8;#90EE90" dur="3s" begin="2s" repeatCount="indefinite"/>
+</rect>
+<text x="425" y="215">Matchbox</text>
+<text x="425" y="235" class="note">WebRTC Signaling</text>
+</g>
+
+<g style="animation: slideDown 0.4s ease-out 1.6s both;">
+<rect x="610" y="120" width="90" height="40" class="component"/>
+<text x="655" y="145">Yew UI</text>
+</g>
+
+<g style="animation: slideDown 0.4s ease-out 1.8s both;">
+<rect x="610" y="180" width="90" height="40" class="component"/>
+<text x="655" y="205">Lobby Domain</text>
+</g>
+
+<g style="animation: slideDown 0.4s ease-out 2s both;">
+<rect x="720" y="180" width="90" height="40" class="component"/>
+<text x="765" y="205">Auth Service</text>
+</g>
+
+<g style="animation: slideDown 0.4s ease-out 2.2s both;">
+<rect x="720" y="240" width="90" height="40" class="component"/>
+<text x="765" y="265">P2P Sync</text>
+</g>
+
+<!-- Phase 1: Host Creates Lobby -->
+<text x="50" y="330" class="label" style="text-anchor: start; animation: fadeIn 0.4s ease-in 2.5s both;">Phase 1: Host Creates Lobby</text>
+
+<!-- Step 1: CreateLobby -->
+<g style="animation: fadeIn 0.5s ease-in 3s both;">
+<path d="M 115 310 L 115 350" class="message" stroke-dasharray="200">
+<animate attributeName="stroke-dashoffset" values="200;0" dur="0.6s" begin="3s"/>
+</path>
+<text x="140" y="335" class="step">1. CreateLobby</text>
+<rect x="105" y="310" width="20" height="80" class="activation" style="animation: fadeIn 0.3s ease-in 3s both;"/>
+</g>
+
+<!-- Step 2-3: Domain processing -->
+<g style="animation: fadeIn 0.5s ease-in 3.6s both;">
+<rect x="105" y="350" width="20" height="60" class="activation"/>
+<text x="50" y="380" class="step" style="text-anchor: start;">2. Generate ID</text>
+<text x="50" y="395" class="step" style="text-anchor: start;">3. Create Host</text>
+</g>
+
+<!-- Step 4: LobbyCreated -->
+<g style="animation: fadeIn 0.5s ease-in 4.2s both;">
+<path d="M 115 410 L 115 440" class="message-return">
+<animate attributeName="stroke-dashoffset" values="100;0" dur="0.5s" begin="4.2s"/>
+</path>
+<text x="140" y="430" class="step">4. LobbyCreated</text>
+</g>
+
+<!-- Step 5-6: Auth keypair -->
+<g style="animation: fadeIn 0.5s ease-in 4.7s both;">
+<path d="M 115 460 L 220 470" class="message">
+<animate attributeName="stroke-dashoffset" values="150;0" dur="0.5s" begin="4.7s"/>
+</path>
+<text x="170" y="463" class="step">5. Generate keys</text>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 5.2s both;">
+<rect x="210" y="470" width="30" height="40" class="activation"/>
+<path d="M 220 510 L 115 520" class="message-return">
+<animate attributeName="stroke-dashoffset" values="150;0" dur="0.5s" begin="5.2s"/>
+</path>
+<text x="170" y="513" class="step">6. Keys ready</text>
+</g>
+
+<!-- Step 7-8: Matchbox connection -->
+<g style="animation: fadeIn 0.5s ease-in 5.7s both;">
+<path d="M 225 540 L 350 560" class="message">
+<animate attributeName="stroke-dashoffset" values="200;0" dur="0.7s" begin="5.7s"/>
+</path>
+<text x="290" y="548" class="step">7. Connect</text>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 6.4s both;">
+<rect x="415" y="560" width="20" height="60" class="activation">
+<animate attributeName="fill" values="rgba(144,238,144,0.2);rgba(144,238,144,0.4);rgba(144,238,144,0.2)" dur="2s" begin="6.4s" repeatCount="indefinite"/>
+</rect>
+<path d="M 425 620 L 235 640" class="message-return">
+<animate attributeName="stroke-dashoffset" values="250;0" dur="0.8s" begin="6.4s"/>
+</path>
+<text x="330" y="628" class="step">8. WebRTC ready</text>
+</g>
+
+<!-- Phase 2: Guest Joins -->
+<text x="50" y="680" class="label" style="text-anchor: start; animation: fadeIn 0.4s ease-in 7.5s both;">Phase 2: Guest Discovers and Joins</text>
+
+<!-- Step 9-10: Guest UI -->
+<g style="animation: fadeIn 0.5s ease-in 8s both;">
+<path d="M 655 660 L 655 690" class="message">
+<animate attributeName="stroke-dashoffset" values="50;0" dur="0.4s" begin="8s"/>
+</path>
+<text x="680" y="678" class="step">9. Enter lobby_id</text>
+<rect x="645" y="660" width="20" height="80" class="activation"/>
+</g>
+
+<!-- Step 11-12: Guest auth -->
+<g style="animation: fadeIn 0.5s ease-in 8.5s both;">
+<path d="M 655 710 L 760 720" class="message">
+<animate attributeName="stroke-dashoffset" values="150;0" dur="0.5s" begin="8.5s"/>
+</path>
+<text x="710" y="713" class="step">10. Generate keys</text>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 9s both;">
+<rect x="750" y="720" width="30" height="40" class="activation"/>
+<path d="M 760 760 L 655 770" class="message-return">
+<animate attributeName="stroke-dashoffset" values="150;0" dur="0.5s" begin="9s"/>
+</path>
+<text x="710" y="763" class="step">11. Keys ready</text>
+</g>
+
+<!-- Step 13-14: Matchbox P2P setup -->
+<g style="animation: fadeIn 0.5s ease-in 9.5s both;">
+<path d="M 720 790 L 500 800" class="message">
+<animate attributeName="stroke-dashoffset" values="300;0" dur="0.8s" begin="9.5s"/>
+</path>
+<text x="610" y="793" class="step">12. Connect to room</text>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 10.3s both;">
+<rect x="415" y="800" width="20" height="80" class="activation">
+<animate attributeName="fill" values="rgba(144,238,144,0.2);rgba(144,238,144,0.4);rgba(144,238,144,0.2)" dur="2s" begin="10.3s" repeatCount="indefinite"/>
+</rect>
+
+<!-- Peer discovery -->
+<path d="M 425 830 L 235 840" class="message" stroke="#4CAF50" stroke-width="3">
+<animate attributeName="stroke-dashoffset" values="250;0" dur="0.7s" begin="10.5s"/>
+</path>
+<text x="330" y="833" class="step" style="fill: #4CAF50; font-weight: bold;">13. Peer connected!</text>
+
+<path d="M 425 850 L 720 860" class="message-return" stroke="#4CAF50">
+<animate attributeName="stroke-dashoffset" values="400;0" dur="1s" begin="11.2s"/>
+</path>
+<text x="570" y="853" class="step" style="fill: #4CAF50;">14. P2P channel ready</text>
+</g>
+
+<!-- Legend -->
+<g style="animation: fadeIn 0.6s ease-in 12s both;">
+<text x="900" y="120" style="font-weight: bold; text-anchor: start; font-size: 13px;">Legend:</text>
+<line x1="900" y1="140" x2="950" y2="140" class="message"/>
+<text x="960" y="144" style="text-anchor: start; font-size: 11px;">Synchronous call</text>
+
+<line x1="900" y1="160" x2="950" y2="160" class="message-return"/>
+<text x="960" y="164" style="text-anchor: start; font-size: 11px;">Return/Response</text>
+
+<rect x="900" y="175" width="30" height="20" class="activation"/>
+<text x="940" y="189" style="text-anchor: start; font-size: 11px;">Active processing</text>
+
+<line x1="900" y1="210" x2="950" y2="210" stroke="#4CAF50" stroke-width="3"/>
+<text x="960" y="214" style="text-anchor: start; font-size: 11px;">P2P connection</text>
+</g>
+
+<!-- Replay button -->
+<g style="cursor: pointer; animation: fadeIn 0.6s ease-in 12.5s both;" onclick="window.location.reload();">
+<rect x="1250" y="15" width="120" height="40" rx="5" fill="#4CAF50" stroke="#000">
+<animate attributeName="fill" values="#4CAF50;#5CBF60;#4CAF50" dur="2s" repeatCount="indefinite"/>
+</rect>
+<text x="1310" y="40" fill="#FFF" style="font-size: 16px; font-weight: bold;">↻ Replay</text>
+</g>
+
+</svg>

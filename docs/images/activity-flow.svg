@@ -1,0 +1,203 @@
+<svg viewBox="0 0 1600 1000" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<style>
+.swimlane { fill: #FAFAFA; stroke: #E0E0E0; stroke-width: 2; }
+.phase-divider { stroke: #BDBDBD; stroke-width: 3; stroke-dasharray: 10,5; }
+.actor { fill: #FFB6C1; stroke: #000; stroke-width: 2; }
+.host-actor { fill: #FF6B9D; stroke: #000; stroke-width: 3; }
+.component { fill: #E8EAF6; stroke: #3F51B5; stroke-width: 2; rx: 6; }
+.message { stroke: #000; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+.broadcast { stroke: #FF9800; stroke-width: 3; fill: none; marker-end: url(#arrowhead-broadcast); }
+.activation { fill: rgba(63, 81, 181, 0.15); stroke: #3F51B5; stroke-width: 2; }
+
+text { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; text-anchor: middle; }
+.title { font-size: 22px; font-weight: bold; fill: #1A237E; }
+.phase-title { font-size: 15px; font-weight: bold; fill: #FF6F00; }
+.label { font-size: 12px; font-weight: 600; fill: #424242; }
+.step { font-size: 10px; fill: #616161; }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes broadcast { from { stroke-width: 3; opacity: 1; } to { stroke-width: 6; opacity: 0.3; } }
+</style>
+
+<marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+<polygon points="0 0, 10 3, 0 6" fill="#000" />
+</marker>
+<marker id="arrowhead-broadcast" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto">
+<polygon points="0 0, 12 4, 0 8" fill="#FF9800" />
+</marker>
+</defs>
+
+<!-- Title -->
+<text x="800" y="35" class="title">Activity Lifecycle: Plan → Start → Submit → Complete</text>
+
+<!-- Swimlanes -->
+<g style="animation: fadeIn 0.4s ease-in 0.3s both;">
+<rect x="50" y="70" width="280" height="900" class="swimlane"/>
+<text x="190" y="95" class="label">Host</text>
+
+<rect x="350" y="70" width="280" height="900" class="swimlane"/>
+<text x="490" y="95" class="label">Guest 1 (Active)</text>
+
+<rect x="650" y="70" width="280" height="900" class="swimlane"/>
+<text x="790" y="95" class="label">Guest 2 (Spectating)</text>
+
+<rect x="950" y="70" width="280" height="900" class="swimlane"/>
+<text x="1090" y="95" class="label">P2P Network</text>
+</g>
+
+<!-- Components -->
+<g style="animation: fadeIn 0.4s ease-in 0.7s both;">
+<rect x="80" y="120" width="220" height="30" class="component"/>
+<text x="190" y="140">Activity Management</text>
+
+<rect x="380" y="120" width="220" height="30" class="component"/>
+<text x="490" y="140">Activity Management</text>
+
+<rect x="680" y="120" width="220" height="30" class="component"/>
+<text x="790" y="140">Activity Management</text>
+</g>
+
+<!-- Phase 1: Plan Activity -->
+<line x1="40" y1="190" x2="1240" y2="190" class="phase-divider" style="animation: fadeIn 0.4s ease-in 1.2s both;"/>
+<text x="50" y="210" class="phase-title" style="text-anchor: start; animation: fadeIn 0.4s ease-in 1.2s both;">Phase 1: Plan Activity</text>
+
+<g style="animation: fadeIn 0.5s ease-in 1.5s both;">
+<circle cx="100" cy="240" r="20" class="host-actor">
+<animate attributeName="opacity" values="0.7;1;0.7" dur="2s" repeatCount="indefinite"/>
+</circle>
+<text x="100" y="245" style="font-size: 10px; font-weight: bold;">Host</text>
+</g>
+
+<!-- Step 1-2: Plan -->
+<g style="animation: fadeIn 0.5s ease-in 2s both;">
+<path d="M 100 260 L 190 280" class="message">
+<animate attributeName="stroke-dashoffset" values="150;0" dur="0.5s" begin="2s"/>
+</path>
+<text x="145" y="268" class="step">1. PlanActivity</text>
+<rect x="180" y="280" width="20" height="60" class="activation"/>
+<text x="130" y="320" class="step" style="text-anchor: start;">2. Add to queue</text>
+</g>
+
+<!-- Step 3: Broadcast -->
+<g style="animation: fadeIn 0.5s ease-in 2.7s both;">
+<path d="M 190 340 L 1090 360" class="broadcast" style="animation: broadcast 1.5s ease-out 2.7s infinite;">
+<animate attributeName="stroke-dashoffset" values="1200;0" dur="1.2s" begin="2.7s"/>
+</path>
+<text x="640" y="348" class="step" style="fill: #FF6F00; font-weight: bold;">3. Broadcast: ActivityPlanned</text>
+</g>
+
+<!-- Guests receive -->
+<g style="animation: fadeIn 0.5s ease-in 3.5s both;">
+<rect x="480" y="365" width="20" height="40" class="activation"/>
+<text x="500" y="390" class="step" style="text-anchor: start;">4. Update queue</text>
+
+<rect x="780" y="365" width="20" height="40" class="activation"/>
+<text x="800" y="390" class="step" style="text-anchor: start;">5. Update queue</text>
+</g>
+
+<!-- Phase 2: Start Activity -->
+<line x1="40" y1="430" x2="1240" y2="430" class="phase-divider" style="animation: fadeIn 0.4s ease-in 4.2s both;"/>
+<text x="50" y="450" class="phase-title" style="text-anchor: start; animation: fadeIn 0.4s ease-in 4.2s both;">Phase 2: Start Activity</text>
+
+<g style="animation: fadeIn 0.5s ease-in 4.5s both;">
+<path d="M 100 470 L 190 490" class="message">
+<animate attributeName="stroke-dashoffset" values="150;0" dur="0.5s" begin="4.5s"/>
+</path>
+<text x="145" y="478" class="step">6. StartActivity</text>
+<rect x="180" y="490" width="20" height="80" class="activation"/>
+<text x="130" y="520" class="step" style="text-anchor: start;">7. Check policy:</text>
+<text x="130" y="535" class="step" style="text-anchor: start;">   Only 1 running?</text>
+<text x="130" y="550" class="step" style="text-anchor: start;">8. → InProgress</text>
+</g>
+
+<!-- Step 9: Broadcast start -->
+<g style="animation: fadeIn 0.5s ease-in 5.5s both;">
+<path d="M 190 570 L 1090 590" class="broadcast" style="animation: broadcast 1.5s ease-out 5.5s infinite;">
+<animate attributeName="stroke-dashoffset" values="1200;0" dur="1.2s" begin="5.5s"/>
+</path>
+<text x="640" y="578" class="step" style="fill: #FF6F00; font-weight: bold;">9. Broadcast: ActivityStarted</text>
+</g>
+
+<!-- Guests start playing -->
+<g style="animation: fadeIn 0.5s ease-in 6.3s both;">
+<rect x="480" y="595" width="20" height="80" class="activation" style="fill: rgba(76, 175, 80, 0.2); stroke: #4CAF50;"/>
+<text x="500" y="625" class="step" style="text-anchor: start; fill: #4CAF50; font-weight: bold;">10. Launch UI</text>
+<text x="500" y="640" class="step" style="text-anchor: start; fill: #4CAF50;">11. Playing...</text>
+<circle cx="400" cy="650" r="15" style="fill: #4CAF50; opacity: 0.3; animation: pulse 1.5s ease-in-out 6.5s infinite;"/>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 6.8s both;">
+<rect x="780" y="595" width="20" height="80" class="activation" style="fill: rgba(158, 158, 158, 0.2); stroke: #9E9E9E;"/>
+<text x="800" y="625" class="step" style="text-anchor: start; fill: #757575;">12. Launch UI</text>
+<text x="800" y="640" class="step" style="text-anchor: start; fill: #757575;">(read-only)</text>
+<text x="800" y="655" class="step" style="text-anchor: start; fill: #757575;">👁️ Watching...</text>
+</g>
+
+<!-- Phase 3: Submit Results -->
+<line x1="40" y1="700" x2="1240" y2="700" class="phase-divider" style="animation: fadeIn 0.4s ease-in 7.5s both;"/>
+<text x="50" y="720" class="phase-title" style="text-anchor: start; animation: fadeIn 0.4s ease-in 7.5s both;">Phase 3: Submit Results</text>
+
+<!-- Guest 1 submits -->
+<g style="animation: fadeIn 0.5s ease-in 8s both;">
+<path d="M 490 740 L 490 770" class="message">
+<animate attributeName="stroke-dashoffset" values="50;0" dur="0.4s" begin="8s"/>
+</path>
+<text x="515" y="758" class="step">13. SubmitResult</text>
+<rect x="480" y="770" width="20" height="40" class="activation" style="fill: rgba(76, 175, 80, 0.3); stroke: #4CAF50;"/>
+<text x="500" y="795" class="step" style="text-anchor: start; fill: #4CAF50;">score: 8/10</text>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 8.6s both;">
+<path d="M 490 810 L 1090 830" class="broadcast">
+<animate attributeName="stroke-dashoffset" values="800;0" dur="1s" begin="8.6s"/>
+</path>
+<text x="790" y="818" class="step" style="fill: #FF6F00;">14. Broadcast: ResultSubmitted</text>
+</g>
+
+<!-- Host receives and submits -->
+<g style="animation: fadeIn 0.5s ease-in 9.3s both;">
+<rect x="180" y="835" width="20" height="80" class="activation"/>
+<text x="130" y="865" class="step" style="text-anchor: start;">15. Update: 1/2</text>
+<text x="130" y="880" class="step" style="text-anchor: start;">16. Host submits</text>
+<text x="130" y="895" class="step" style="text-anchor: start;">score: 9/10</text>
+</g>
+
+<!-- Phase 4: Complete -->
+<line x1="40" y1="930" x2="1240" y2="930" class="phase-divider" style="animation: fadeIn 0.4s ease-in 10.2s both;"/>
+<text x="50" y="950" class="phase-title" style="text-anchor: start; animation: fadeIn 0.4s ease-in 10.2s both;">Phase 4: Activity Complete</text>
+
+<g style="animation: fadeIn 0.5s ease-in 10.5s both;">
+<rect x="180" y="960" width="20" height="20" class="activation" style="fill: rgba(255, 215, 0, 0.3); stroke: #FFD700;"/>
+<text x="130" y="975" class="step" style="text-anchor: start; fill: #F57C00; font-weight: bold;">17. All active done!</text>
+</g>
+
+<g style="animation: fadeIn 0.5s ease-in 11s both;">
+<path d="M 190 980 L 1090 990" class="broadcast" style="stroke: #4CAF50; animation: broadcast 1.5s ease-out 11s 2;">
+<animate attributeName="stroke-dashoffset" values="1200;0" dur="1.2s" begin="11s"/>
+</path>
+<text x="640" y="983" class="step" style="fill: #4CAF50; font-weight: bold; font-size: 12px;">18. Broadcast: ActivityCompleted ✓</text>
+</g>
+
+<!-- Legend -->
+<g style="animation: fadeIn 0.6s ease-in 12s both;">
+<text x="1300" y="120" style="font-weight: bold; text-anchor: start;">Key:</text>
+<rect x="1300" y="135" width="40" height="20" class="activation" style="fill: rgba(76, 175, 80, 0.2); stroke: #4CAF50;"/>
+<text x="1350" y="149" style="text-anchor: start; font-size: 10px;">Active guest</text>
+
+<rect x="1300" y="160" width="40" height="20" class="activation" style="fill: rgba(158, 158, 158, 0.2); stroke: #9E9E9E;"/>
+<text x="1350" y="174" style="text-anchor: start; font-size: 10px;">Spectator</text>
+
+<line x1="1300" y1="190" x2="1340" y2="190" class="broadcast"/>
+<text x="1350" y="194" style="text-anchor: start; font-size: 10px;">P2P broadcast</text>
+</g>
+
+<!-- Replay button -->
+<g style="cursor: pointer; animation: fadeIn 0.6s ease-in 12.5s both;" onclick="window.location.reload();">
+<rect x="1450" y="15" width="120" height="40" rx="5" fill="#4CAF50" stroke="#000">
+<animate attributeName="fill" values="#4CAF50;#5CBF60;#4CAF50" dur="2s" repeatCount="indefinite"/>
+</rect>
+<text x="1510" y="40" fill="#FFF" style="font-size: 16px; font-weight: bold;">↻ Replay</text>
+</g>
+
+</svg>

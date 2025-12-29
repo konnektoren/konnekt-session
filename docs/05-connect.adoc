@@ -12,6 +12,8 @@ Connect the subdomains into a loosely-coupled architecture by modeling end-to-en
 
 === Flow 1: Create Lobby & First Guest Joins
 
+image::images/create-and-join-flow.svg[Create Lobby and Join Flow, 1400, 900]
+
 [plantuml, "flow-create-and-join", png]
 ----
 @startuml
@@ -200,6 +202,8 @@ struct LobbyState {
 '''
 
 === Flow 2: Start Activity & Collect Results
+
+image::images/activity-flow.svg[Activity Lifecycle Flow, 1600, 1000]
 
 [plantuml, "flow-activity-lifecycle", png]
 ----
@@ -660,6 +664,8 @@ struct GuestRejoined {
 '''
 
 === Flow 4: Guest Toggles Spectator Mode
+
+image::images/spectator-mode-flow.svg[Spectator Mode Toggle Flow, 1400, 800]
 
 [plantuml, "flow-spectator-toggle", png]
 ----
