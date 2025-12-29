@@ -1,4 +1,4 @@
-use crate::domain::{Participant, ParticipantError, Timestamp};
+use crate::domain::{Participant, ParticipantError, ParticipationMode, Timestamp};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -179,6 +179,53 @@ impl Lobby {
     /// Check if there are any guests in the lobby
     pub fn has_guests(&self) -> bool {
         self.participants.values().any(|p| !p.is_host())
+    }
+
+    /// Toggle participation mode for a guest (self-requested)
+    pub fn toggle_guest_participation_mode(
+        &mut self,
+        guest_id: Uuid,
+        activity_in_progress: bool,
+    ) -> Result<ParticipationMode, LobbyError> {
+        let participant = self
+            .participants
+            .get_mut(&guest_id)
+            .ok_or(LobbyError::ParticipantNotFound(guest_id))?;
+
+        participant
+            .toggle_participation_mode(activity_in_progress)
+            .map_err(Into::into)
+    }
+
+    /// Force a guest's participation mode (host action)
+    pub fn force_guest_participation_mode(
+        &mut self,
+        guest_id: Uuid,
+        mode: ParticipationMode,
+    ) -> Result<(), LobbyError> {
+        let participant = self
+            .participants
+            .get_mut(&guest_id)
+            .ok_or(LobbyError::ParticipantNotFound(guest_id))?;
+
+        participant.force_participation_mode(mode);
+        Ok(())
+    }
+
+    /// Get all active participants (excluding spectators)
+    pub fn active_participants(&self) -> Vec<&Participant> {
+        self.participants
+            .values()
+            .filter(|p| p.can_submit_results())
+            .collect()
+    }
+
+    /// Get all spectating participants
+    pub fn spectating_participants(&self) -> Vec<&Participant> {
+        self.participants
+            .values()
+            .filter(|p| !p.can_submit_results())
+            .collect()
     }
 }
 
@@ -524,5 +571,106 @@ mod tests {
         } else {
             panic!("Delegation should succeed");
         }
+    }
+
+    #[test]
+    fn test_toggle_guest_participation_mode() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let guest = Participant::new_guest("Bob".to_string()).unwrap();
+        let guest_id = guest.id();
+        lobby.add_guest(guest).unwrap();
+
+        // Toggle to spectating
+        let result = lobby.toggle_guest_participation_mode(guest_id, false);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), ParticipationMode::Spectating);
+
+        let participant = lobby.participants().get(&guest_id).unwrap();
+        assert_eq!(
+            participant.participation_mode(),
+            ParticipationMode::Spectating
+        );
+
+        // Toggle back to active
+        let result = lobby.toggle_guest_participation_mode(guest_id, false);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), ParticipationMode::Active);
+    }
+
+    #[test]
+    fn test_cannot_toggle_during_activity() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let guest = Participant::new_guest("Bob".to_string()).unwrap();
+        let guest_id = guest.id();
+        lobby.add_guest(guest).unwrap();
+
+        // Try to toggle during activity
+        let result = lobby.toggle_guest_participation_mode(guest_id, true);
+
+        assert!(matches!(
+            result,
+            Err(LobbyError::ParticipantError(
+                ParticipantError::CannotToggleDuringActivity
+            ))
+        ));
+    }
+
+    #[test]
+    fn test_force_guest_participation_mode() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let guest = Participant::new_guest("Bob".to_string()).unwrap();
+        let guest_id = guest.id();
+        lobby.add_guest(guest).unwrap();
+
+        lobby
+            .force_guest_participation_mode(guest_id, ParticipationMode::Spectating)
+            .unwrap();
+
+        let participant = lobby.participants().get(&guest_id).unwrap();
+        assert_eq!(
+            participant.participation_mode(),
+            ParticipationMode::Spectating
+        );
+    }
+
+    #[test]
+    fn test_active_participants_filter() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let guest1 = Participant::new_guest("Bob".to_string()).unwrap();
+        let guest1_id = guest1.id();
+        lobby.add_guest(guest1).unwrap();
+
+        let guest2 = Participant::new_guest("Carol".to_string()).unwrap();
+        lobby.add_guest(guest2).unwrap();
+
+        // Toggle Bob to spectating
+        lobby
+            .toggle_guest_participation_mode(guest1_id, false)
+            .unwrap();
+
+        let active = lobby.active_participants();
+        assert_eq!(active.len(), 2); // Alice (host) + Carol
+
+        let spectating = lobby.spectating_participants();
+        assert_eq!(spectating.len(), 1); // Bob
+    }
+
+    #[test]
+    fn test_toggle_nonexistent_participant() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let fake_id = Uuid::new_v4();
+        let result = lobby.toggle_guest_participation_mode(fake_id, false);
+
+        assert_eq!(result, Err(LobbyError::ParticipantNotFound(fake_id)));
     }
 }
