@@ -1,0 +1,826 @@
+= Step 3: Decompose – Subdomain Boundaries
+:icons: font
+:toc: left
+:toclevels: 3
+:sectnums:
+
+== Purpose
+
+Decompose the **Konnekt Session** domain into well-defined subdomains with clear boundaries. This enables:
+
+* **Reduced cognitive load** - reason about parts independently
+* **Team autonomy** - different teams can own different subdomains
+* **Loose coupling** - changes in one subdomain don't ripple to others
+* **Clear ownership** - each subdomain has a clear purpose and owner
+
+== Subdomain Identification
+
+Based on our EventStorming sessions, we've identified the following subdomains:
+
+[plantuml, "subdomain-map", png]
+----
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title Konnekt Session – Subdomain Map
+
+LAYOUT_WITH_LEGEND()
+
+' Core Subdomains
+System_Boundary(core, "Core Subdomains") {
+  System(lobby_mgmt, "Lobby Management", "Create, join, manage lobbies\nHost/Guest roles\nLobby lifecycle")
+  System(activity_mgmt, "Activity Management", "Plan, start, complete activities\nCollect results\nCalculate scores")
+  System(participant_mgmt, "Participant Management", "Track participants\nManage participation modes\nHost delegation")
+}
+
+' Supporting Subdomains
+System_Boundary(supporting, "Supporting Subdomains") {
+  System(activity_catalog, "Activity Catalog", "Register activities\nActivity discovery\nPlugin system")
+  System(identity_auth, "Identity & Auth", "Key generation\nSignature verification\nIdentity persistence")
+}
+
+' Generic Subdomains
+System_Boundary(generic, "Generic Subdomains") {
+  System(p2p_sync, "P2P State Sync", "Round-robin broadcast\nMessage ordering\nConflict resolution")
+  System(connection_mgmt, "Connection Management", "Heartbeat monitoring\nDisconnect detection\nReconnection handling")
+}
+
+' External
+System_Ext(matchbox, "Matchbox Signalling", "WebRTC signalling server")
+
+' Relationships
+Rel(lobby_mgmt, participant_mgmt, "manages")
+Rel(lobby_mgmt, activity_mgmt, "contains")
+Rel(activity_mgmt, participant_mgmt, "tracks submissions from")
+Rel(activity_mgmt, activity_catalog, "uses")
+Rel(participant_mgmt, identity_auth, "authenticates via")
+Rel(lobby_mgmt, p2p_sync, "broadcasts state via")
+Rel(p2p_sync, connection_mgmt, "uses")
+Rel(connection_mgmt, matchbox, "connects via")
+
+@enduml
+----
+
+== Core Subdomains
+
+=== 1. Lobby Management
+
+[cols="1,3", options="header"]
+|===
+|Aspect
+|Details
+
+|**Purpose**
+|Manage the lifecycle of game lobbies from creation to closure
+
+|**Key Responsibilities**
+a|
+* Create new lobbies with configuration (name, password, max guests)
+* Accept/reject guest join requests
+* Close lobbies
+* Enforce lobby invariants (unique names, capacity limits)
+* Coordinate with other subdomains
+
+|**Key Entities**
+a|
+* `Lobby` (Aggregate Root)
+* `LobbySettings` (Value Object)
+* `LobbyStatus` (Enum: Open, Closed, Archived)
+
+|**Key Events**
+a|
+* `LobbyCreated`
+* `LobbySettingsUpdated`
+* `LobbyClosed`
+* `LobbyArchived`
+
+|**Complexity Drivers**
+a|
+* State machine (Open → Closed → Archived)
+* Concurrent join requests
+* Password validation
+* Capacity enforcement
+* Integration with activity and participant subdomains
+
+|**Ubiquitous Language**
+a|
+* **Lobby**: A virtual space where participants gather to play activities
+* **Host**: The organizer of the lobby with management privileges
+* **Guest**: A regular participant in the lobby
+* **Lobby Settings**: Configuration (name, password, max capacity, privacy)
+* **Open Lobby**: Accepting new guests
+* **Closed Lobby**: No longer accepting new guests, but activities can continue
+* **Archived Lobby**: Read-only historical record
+|===
+
+'''
+
+=== 2. Activity Management
+
+[cols="1,3", options="header"]
+|===
+|Aspect
+|Details
+
+|**Purpose**
+|Manage the lifecycle of activities within a lobby
+
+|**Key Responsibilities**
+a|
+* Plan activities (add to queue)
+* Start activities (transition to in-progress)
+* Collect results from active participants
+* Complete activities when all active participants submit
+* Calculate scores and update leaderboards
+* Cancel activities if needed
+
+|**Key Entities**
+a|
+* `Activity` (Aggregate Root)
+* `ActivityQueue` (Entity)
+* `ActivityResult` (Value Object)
+* `Leaderboard` (Entity)
+
+|**Key Events**
+a|
+* `ActivityPlanned`
+* `ActivityStarted`
+* `ResultSubmitted`
+* `ActivityCompleted`
+* `ActivityCancelled`
+* `LeaderboardUpdated`
+
+|**Complexity Drivers**
+a|
+* Activity state machine (Planned → InProgress → Completed)
+* Result collection from multiple participants
+* Only active participants count (spectators excluded)
+* Timeout handling
+* Score calculation algorithms
+* Edge case: activity running when host disconnects
+
+|**Ubiquitous Language**
+a|
+* **Activity**: A game or challenge that participants can play
+* **Activity Queue**: Ordered list of planned activities
+* **Activity Status**: State: Planned, InProgress, Completed, Cancelled
+* **Result**: A participant's submission after completing an activity
+* **Leaderboard**: Ranked list of participants by score
+* **Active Participant**: Participant in Active mode who can submit results
+|===
+
+'''
+
+=== 3. Participant Management
+
+[cols="1,3", options="header"]
+|===
+|Aspect
+|Details
+
+|**Purpose**
+|Manage participants, their roles, and participation modes
+
+|**Key Responsibilities**
+a|
+* Track all participants in a lobby
+* Manage lobby roles (Host/Guest)
+* Manage participation modes (Active/Spectating)
+* Handle host delegation
+* Detect disconnections and trigger host election
+* Enforce role-based permissions
+
+|**Key Entities**
+a|
+* `Participant` (Entity)
+* `LobbyRole` (Enum: Host, Guest)
+* `ParticipationMode` (Enum: Active, Spectating)
+* `HostDelegationProtocol` (Service)
+
+|**Key Events**
+a|
+* `GuestJoined`
+* `GuestLeft`
+* `GuestKicked`
+* `ParticipationModeChanged`
+* `HostDelegated`
+* `HostDisconnectDetected`
+
+|**Complexity Drivers**
+a|
+* Host delegation protocol (30s timeout, deterministic election)
+* Reconnection handling (grace period vs permanent loss)
+* Role transitions (Guest → Host)
+* Mode transitions (Active ↔ Spectating)
+* Permission enforcement
+* Disconnect detection via heartbeat
+
+|**Ubiquitous Language**
+a|
+* **Participant**: Anyone in the lobby (host or guest)
+* **Host**: Participant with management privileges
+* **Guest**: Regular participant without management privileges
+* **Active Mode**: Participant can submit activity results
+* **Spectating Mode**: Participant is watching only (read-only)
+* **Host Delegation**: Transfer of host role to another participant
+* **Automatic Delegation**: System-triggered host transfer after disconnect timeout
+* **Oldest Guest**: Guest with earliest join timestamp (becomes host on auto-delegation)
+|===
+
+'''
+
+== Supporting Subdomains
+
+=== 4. Activity Catalog
+
+[cols="1,3", options="header"]
+|===
+|Aspect
+|Details
+
+|**Purpose**
+|Provide a registry of available activity types and plugin management
+
+|**Key Responsibilities**
+a|
+* Register activity types (via plugins)
+* Discover available activities
+* Version management for activity plugins
+* Activity schema validation
+
+|**Key Entities**
+a|
+* `ActivityCatalog` (Aggregate Root)
+* `ActivityType` (Entity)
+* `ActivityPlugin` (Value Object)
+* `ActivitySchema` (Value Object)
+
+|**Key Events**
+a|
+* `ActivityTypeRegistered`
+* `ActivityTypeUnregistered`
+* `PluginLoaded`
+
+|**Complexity Drivers**
+a|
+* Plugin system (trait-based)
+* Versioning (breaking vs non-breaking changes)
+* Schema validation
+* Hot-reload considerations
+
+|**Ubiquitous Language**
+a|
+* **Activity Catalog**: Registry of all available activity types
+* **Activity Type**: A specific kind of activity (e.g., "Trivia Quiz", "Drawing Game")
+* **Activity Plugin**: Rust crate that implements an activity type
+* **Activity Schema**: Data structure definition for an activity
+|===
+
+'''
+
+=== 5. Identity & Authentication
+
+[cols="1,3", options="header"]
+|===
+|Aspect
+|Details
+
+|**Purpose**
+|Manage participant identity and cryptographic authentication
+
+|**Key Responsibilities**
+a|
+* Generate Ed25519 key pairs for participants
+* Sign outgoing messages
+* Verify incoming message signatures
+* Persist keys in LocalStorage
+* Provide key export/import for backup
+
+|**Key Entities**
+a|
+* `PrivateKey` (Value Object)
+* `PublicKey` (Value Object)
+* `Signature` (Value Object)
+* `Identity` (Entity)
+
+|**Key Events**
+a|
+* `KeyGenerated`
+* `MessageSigned`
+* `SignatureVerified`
+* `SignatureRejected`
+
+|**Complexity Drivers**
+a|
+* Cryptography (Ed25519 signing/verification)
+* Key persistence (LocalStorage)
+* Key recovery (export/import)
+* Clock skew handling (timestamp validation)
+
+|**Ubiquitous Language**
+a|
+* **Private Key**: Secret key used to sign messages (never shared)
+* **Public Key**: Participant's identity (derived from private key)
+* **Signature**: Cryptographic proof that a message came from a specific participant
+* **Identity**: Persistent participant ID (derived from public key)
+|===
+
+'''
+
+== Generic Subdomains
+
+=== 6. P2P State Sync
+
+[cols="1,3", options="header"]
+|===
+|Aspect
+|Details
+
+|**Purpose**
+|Replicate state across all peers using round-robin consensus
+
+|**Key Responsibilities**
+a|
+* Broadcast state updates to all peers
+* Round-robin leader election
+* Message ordering (sequence numbers)
+* Conflict resolution (last-write-wins)
+* State reconciliation on reconnect
+
+|**Key Entities**
+a|
+* `SyncLeader` (Value Object)
+* `MessageSequence` (Value Object)
+* `P2PMessage` (Value Object)
+
+|**Key Events**
+a|
+* `StateUpdateBroadcast`
+* `SyncLeaderRotated`
+* `StateReconciled`
+
+|**Complexity Drivers**
+a|
+* Round-robin leader rotation
+* Message ordering (out-of-order delivery)
+* Conflict resolution
+* Network partitions
+* State reconciliation after disconnect
+
+|**Ubiquitous Language**
+a|
+* **Sync Leader**: Current peer responsible for broadcasting (rotates round-robin)
+* **Message Sequence**: Monotonically increasing number for message ordering
+* **State Reconciliation**: Process of synchronizing state after reconnection
+* **Round-Robin**: Fair rotation of broadcast responsibility among peers
+|===
+
+'''
+
+[cols="1,3", options="header"]
+|===
+|Aspect
+|Details
+
+|**Purpose**
+|Monitor P2P connections and detect disconnects
+
+|**Key Responsibilities**
+a|
+* Send heartbeat messages (every 5s)
+* Detect missing heartbeats (10s timeout)
+* Trigger disconnect events (30s total timeout)
+* Handle reconnections
+* Manage WebRTC data channels
+
+|**Key Entities**
+a|
+* `Connection` (Entity)
+* `Heartbeat` (Value Object)
+* `TimeoutMonitor` (Service)
+
+|**Key Events**
+a|
+* `HeartbeatSent`
+* `HeartbeatReceived`
+* `DisconnectDetected`
+* `Reconnected`
+
+|**Complexity Drivers**
+a|
+* Heartbeat timing (5s send, 10s detect, 30s confirm)
+* False positives (temporary network issues)
+* Reconnection handling (grace period)
+* WebRTC connection state management
+
+|**Ubiquitous Language**
+a|
+* **Heartbeat**: Periodic "I'm alive" message sent to peers
+* **Heartbeat Timeout**: No heartbeat received for 10 seconds (suspected disconnect)
+* **Disconnect Timeout**: No heartbeat for 30 seconds (confirmed disconnect)
+* **Grace Period**: Time window allowing reconnection without role loss (30s)
+* **Reconnection**: Re-establishing connection after temporary network loss
+|===
+
+'''
+
+== Subdomain Relationships
+
+=== Context Map
+
+[plantuml, "context-map-detailed", png]
+----
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title Context Map – Subdomain Relationships
+
+LAYOUT_WITH_LEGEND()
+
+rectangle "Lobby Management" as lobby <<Core>> #FF6B6B
+rectangle "Activity Management" as activity <<Core>> #FF6B6B
+rectangle "Participant Management" as participant <<Core>> #FF6B6B
+
+rectangle "Activity Catalog" as catalog <<Supporting>> #4ECDC4
+rectangle "Identity & Auth" as auth <<Supporting>> #4ECDC4
+
+rectangle "P2P State Sync" as sync <<Generic>> #95E1D3
+rectangle "Connection Management" as connection <<Generic>> #95E1D3
+
+rectangle "Matchbox" as matchbox <<External>> #90EE90
+
+' Relationships with patterns
+lobby -down-> participant : "U/D\nUpstream/Downstream"
+note on link
+  Lobby is upstream,
+  Participant is downstream
+end note
+
+lobby -down-> activity : "U/D\nUpstream/Downstream"
+
+activity -right-> participant : "CF\nConformist"
+note on link
+  Activity conforms to
+  Participant's model
+end note
+
+activity -up-> catalog : "ACL\nAnti-Corruption Layer"
+note on link
+  Activity uses catalog
+  via adapter pattern
+end note
+
+participant -down-> auth : "OHS\nOpen Host Service"
+note on link
+  Auth provides
+  public API
+end note
+
+lobby -down-> sync : "Published Language"
+activity -down-> sync : "Published Language"
+participant -down-> sync : "Published Language"
+
+sync -down-> connection : "U/D"
+connection -down-> matchbox : "Separate Ways"
+note on link
+  No shared model,
+  independent integration
+end note
+
+@enduml
+----
+
+=== Relationship Patterns
+
+[cols="2,2,3,3", options="header"]
+|===
+|Upstream
+|Downstream
+|Pattern
+|Description
+
+|Lobby Management
+|Participant Management
+|**Upstream/Downstream**
+|Lobby defines participant lifecycle; Participant adapts
+
+|Lobby Management
+|Activity Management
+|**Upstream/Downstream**
+|Lobby controls activity queue; Activity adapts
+
+|Activity Management
+|Participant Management
+|**Conformist**
+|Activity accepts Participant's model as-is (who can submit)
+
+|Activity Management
+|Activity Catalog
+|**Anti-Corruption Layer**
+|Activity uses adapter to isolate from catalog changes
+
+|Participant Management
+|Identity & Auth
+|**Open Host Service**
+| Private Public Key, auto generated keys.
+
+|All Core
+|P2P State Sync
+|**Published Language**
+|Core subdomains publish events in standard format
+
+|P2P State Sync
+|Connection Management
+|**Upstream/Downstream**
+|Sync defines message protocol; Connection delivers
+
+|Connection Management
+|Matchbox
+|**Separate Ways**
+|No shared model; independent integration via Matchbox API
+|===
+
+'''
+
+== Bounded Context Canvas (Per Subdomain)
+
+=== Lobby Management Context
+
+[cols="1,3", options="header"]
+|===
+|Aspect
+|Description
+
+|**Purpose**
+|Create and manage game lobbies
+
+|**Strategic Classification**
+|Core Domain
+
+|**Business Decisions**
+a|
+* Lobby capacity limits
+* Password protection rules
+* Lobby closure policies
+* Archive retention period (24h)
+
+|**Inbound Communication**
+a|
+* Commands: `CreateLobby`, `JoinLobby`, `CloseLobby`
+* Events consumed: `HostDelegated`, `AllGuestsLeft`
+
+|**Outbound Communication**
+a|
+* Events published: `LobbyCreated`, `LobbyClosed`, `LobbyArchived`
+* Queries to: Participant Management (get host)
+
+|**Ubiquitous Language**
+|Lobby, Host, Guest, Lobby Settings, Open, Closed, Archived
+
+|**Dependencies**
+a|
+* Participant Management (who is host?)
+* Activity Management (what activities are planned?)
+* P2P State Sync (broadcast lobby state)
+
+|**Assumptions**
+a|
+* Maximum 11 participants (1 host + 10 guests)
+* Password max length: 50 chars
+* Lobby name: 3-50 chars
+|===
+
+'''
+
+=== Activity Management Context
+
+[cols="1,3", options="header"]
+|===
+|Aspect
+|Description
+
+|**Purpose**
+|Manage activity lifecycle within lobbies
+
+|**Strategic Classification**
+|Core Domain
+
+|**Business Decisions**
+a|
+* Only one activity in-progress at a time
+* Only active participants count for completion
+* Timeout for inactive activities (configurable)
+* Score calculation algorithms
+
+|**Inbound Communication**
+a|
+* Commands: `PlanActivity`, `StartActivity`, `SubmitResult`, `CancelActivity`
+* Events consumed: `HostDelegated`, `ParticipationModeChanged`
+
+|**Outbound Communication**
+a|
+* Events published: `ActivityStarted`, `ActivityCompleted`, `LeaderboardUpdated`
+* Queries to: Participant Management (who is active?)
+
+|**Ubiquitous Language**
+|Activity, Queue, Planned, InProgress, Completed, Result, Leaderboard
+
+|**Dependencies**
+a|
+* Participant Management (who can submit?)
+* Activity Catalog (what activity types exist?)
+* P2P State Sync (broadcast activity state)
+
+|**Assumptions**
+a|
+* Activity timeout: 30 minutes default
+* Max 100 results per activity
+* Scores are unsigned 32-bit integers
+|===
+
+'''
+
+=== Participant Management Context
+
+[cols="1,3", options="header"]
+|===
+|Aspect
+|Description
+
+|**Purpose**
+|Manage participants, roles, and participation modes
+
+|**Strategic Classification**
+|Core Domain
+
+|**Business Decisions**
+a|
+* Exactly one host per lobby at all times
+* Automatic host delegation on 30s disconnect timeout
+* Oldest guest becomes host (deterministic election)
+* No auto-reclaim for original host after delegation
+* Guests can toggle Active ↔ Spectating (except during activity)
+
+|**Inbound Communication**
+a|
+* Commands: `JoinLobby`, `LeaveLobby`, `ToggleSpectatorMode`, `DelegateHost`
+* Events consumed: `DisconnectDetected`, `ActivityStarted`, `ActivityCompleted`
+
+|**Outbound Communication**
+a|
+* Events published: `GuestJoined`, `GuestLeft`, `HostDelegated`, `ParticipationModeChanged`
+* Queries to: Identity & Auth (verify signature)
+
+|**Ubiquitous Language**
+|Participant, Host, Guest, Active, Spectating, Delegation, Election, Oldest Guest
+
+|**Dependencies**
+a|
+* Identity & Auth (who is this person?)
+* Connection Management (is host disconnected?)
+* P2P State Sync (broadcast role changes)
+
+|**Assumptions**
+a|
+* Heartbeat interval: 5 seconds
+* Disconnect detection: 10 seconds
+* Disconnect confirmation: 30 seconds
+* Timestamp precision: milliseconds (for election tie-breaking)
+|===
+
+'''
+
+== Design Heuristics Applied
+
+[cols="2,3,3", options="header"]
+|===
+|Heuristic
+|Goal
+|Application in Konnekt Session
+
+|**Autonomy**
+|Subdomains should be independently changeable
+a|
+* Activity Catalog can add new activity types without changing Activity Management
+* Identity & Auth can switch crypto libraries without affecting Participant Management
+* P2P State Sync can swap from round-robin to Raft without touching core domains
+
+|**Coupling**
+|Minimize coupling between subdomains
+a|
+* Activity Management doesn't know about Lobby Management (only knows "is there a host?")
+* Participant Management doesn't know about Activity Management (only knows "who is active?")
+* All cross-subdomain communication via events (not direct calls)
+
+|**Cohesion**
+|Related concepts should be in the same subdomain
+a|
+* Host delegation + participation modes → Participant Management (both about roles)
+* Activity queue + result collection → Activity Management (both about activity lifecycle)
+* Heartbeat + disconnect detection → Connection Management (both about connectivity)
+
+|**Volatility**
+|Group things that change for the same reasons
+a|
+* Activity Catalog isolated (activity types change frequently)
+* P2P State Sync isolated (may swap algorithms)
+* Identity & Auth isolated (crypto standards evolve)
+|===
+
+'''
+
+== Validation Questions
+
+=== Can subdomains be deployed independently?
+
+**Lobby Management**: No (depends on Participant, Activity, P2P Sync) +
+**Activity Management**: No (depends on Participant, Catalog, P2P Sync) +
+**Participant Management**: No (depends on Identity, Connection, P2P Sync) +
+**Activity Catalog**: Yes (standalone library) ✅ +
+**Identity & Auth**: Yes (standalone crypto library) ✅ +
+**P2P State Sync**: Partial (needs Connection) +
+**Connection Management**: Partial (needs Matchbox)
+
+**Conclusion**: Core subdomains are tightly coupled (expected for a library). Supporting/Generic subdomains can be extracted.
+
+'''
+
+=== Can different teams own different subdomains?
+
+**Yes, with clear contracts**:
+
+[cols="1,2,3", options="header"]
+|===
+|Team
+|Subdomains
+|Expertise Required
+
+|**Core Team**
+|Lobby + Activity + Participant
+|Domain knowledge, DDD, multiplayer games
+
+|**Platform Team**
+|P2P Sync + Connection
+|Distributed systems, networking
+
+|**Ecosystem Team**
+|Activity Catalog
+|Plugin systems, extensibility
+
+|**Security Team**
+|Identity & Auth
+|Cryptography, security
+|===
+
+'''
+
+=== Are the bounded contexts clear?
+
+[cols="2,1,3", options="header"]
+|===
+|Subdomain
+|Clear Boundary?
+|Evidence
+
+|Lobby Management
+|✅ Yes
+|Clear lifecycle (create → close → archive)
+
+|Activity Management
+|✅ Yes
+|Clear lifecycle (plan → start → complete)
+
+|Participant Management
+|✅ Yes
+|Clear responsibilities (roles, modes, delegation)
+
+|Activity Catalog
+|✅ Yes
+|Plugin interface is well-defined
+
+|Identity & Auth
+|✅ Yes
+|Standard crypto primitives
+
+|P2P State Sync
+|⚠️ Partial
+|May need to split "leader election" from "state broadcast"
+
+|Connection Management
+|⚠️ Partial
+|Very thin (just heartbeat + timeout)
+|===
+
+**Refinement Needed**: Consider merging Connection Management into P2P State Sync.
+
+'''
+
+== Next Steps
+
+1. **Validate boundaries** with EventStorming participants
+2. **Prototype interfaces** between subdomains (event schemas)
+3. **Identify bounded context invariants** (what must be true?)
+4. Move to **Step 4: Strategize** (already done - Core Domain Charts)
+5. Move to **Step 5: Connect** to validate end-to-end flows
+
+'''

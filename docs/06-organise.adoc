@@ -1,0 +1,812 @@
+= Step 6: Organise – Team Topology & Repository Structure
+:icons: font
+:toc: left
+:toclevels: 3
+:sectnums:
+
+== Purpose
+
+Organise the codebase and development workflow for a **single developer** maintaining a **monorepo library** with **consuming applications** as external repositories.
+
+Since this is a library project (not a product with multiple teams), the focus is on:
+
+* **Module boundaries** that map to subdomain boundaries
+* **Clear API surface** for library consumers
+* **Example applications** that demonstrate library usage
+* **Plugin architecture** where activities are provided by consuming apps
+
+== Context
+
+[cols="1,3", options="header"]
+|===
+|Aspect
+|Details
+
+|**Team Size**
+|Single developer (maintainer)
+
+|**Repository Structure**
+|Monorepo for library, separate repos for consuming apps
+
+|**Deployment Model**
+a|
+* Library published to crates.io
+* Apps deployed independently by their owners
+* Signalling server (Matchbox) deployed separately
+
+|**Versioning**
+|Semantic versioning for library releases
+
+|**Plugin Model**
+|Activities are implemented in consuming apps (not in library)
+|===
+
+'''
+
+== Repository Structure
+
+=== Monorepo Layout
+
+[source]
+----
+konnekt-session/
+├── Cargo.toml                    # Workspace root
+├── README.adoc                   # Project overview
+├── LICENSE-MIT
+├── LICENSE-APACHE
+│
+├── docs/                         # Architecture documentation (this)
+│   ├── README.adoc               # DDD process overview
+│   ├── 01-understand.adoc
+│   ├── 02-discover.adoc
+│   ├── 03-decompose.adoc
+│   ├── 04-strategize.adoc
+│   ├── 05-connect.adoc
+│   └── 06-organise.adoc
+│
+├── konnekt-session-core/         # Core library (published crate)
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── lib.rs
+│   │   ├── domain/               # Domain layer (pure business logic)
+│   │   │   ├── mod.rs
+│   │   │   ├── lobby.rs          # Lobby aggregate
+│   │   │   ├── participant.rs    # Participant entity
+│   │   │   ├── activity.rs       # Activity entity
+│   │   │   └── events.rs         # Domain events
+│   │   │
+│   │   ├── application/          # Application services
+│   │   │   ├── mod.rs
+│   │   │   ├── lobby_service.rs
+│   │   │   ├── participant_service.rs
+│   │   │   └── activity_service.rs
+│   │   │
+│   │   ├── infrastructure/       # Infrastructure layer
+│   │   │   ├── mod.rs
+│   │   │   ├── p2p/              # P2P networking
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── matchbox.rs   # Matchbox integration
+│   │   │   │   ├── sync.rs       # State sync
+│   │   │   │   └── heartbeat.rs  # Connection monitoring
+│   │   │   │
+│   │   │   ├── auth/             # Authentication
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── keys.rs       # Key generation
+│   │   │   │   └── signing.rs    # Message signing
+│   │   │   │
+│   │   │   └── storage/          # Persistence
+│   │   │       ├── mod.rs
+│   │   │       └── local_storage.rs
+│   │   │
+│   │   └── traits/               # Public traits for extensibility
+│   │       ├── mod.rs
+│   │       ├── activity.rs       # Activity trait
+│   │       └── sync.rs           # SyncStrategy trait
+│   │
+│   └── tests/                    # Integration tests
+│       ├── lobby_lifecycle.rs
+│       ├── host_delegation.rs
+│       └── spectator_mode.rs
+│
+├── konnekt-session-yew/          # Yew UI components (published crate)
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── lib.rs
+│   │   ├── components/
+│   │   │   ├── mod.rs
+│   │   │   ├── lobby.rs          # Lobby component
+│   │   │   ├── participant_list.rs
+│   │   │   ├── activity_queue.rs
+│   │   │   └── activity_view.rs
+│   │   │
+│   │   └── hooks/                # Yew hooks
+│   │       ├── mod.rs
+│   │       ├── use_lobby.rs
+│   │       └── use_p2p.rs
+│   │
+│   └── examples/                 # Standalone component demos
+│       └── lobby_demo.rs
+│
+├── examples/                     # Library usage examples
+│   ├── simple/                   # Minimal example
+│   │   ├── Cargo.toml
+│   │   ├── src/
+│   │   │   └── main.rs
+│   │   └── index.html
+│   │
+│   └── full_featured/            # Complete example with activities
+│       ├── Cargo.toml
+│       ├── src/
+│       │   ├── main.rs
+│       │   └── activities/       # Example activity implementations
+│       │       ├── mod.rs
+│       │       ├── trivia.rs
+│       │       └── drawing.rs
+│       └── index.html
+│
+└── scripts/                      # Development scripts
+    ├── test.sh                   # Run all tests
+    ├── lint.sh                   # Clippy + fmt
+    └── publish.sh                # Publish to crates.io
+----
+
+'''
+
+=== Module Boundaries (Subdomain Mapping)
+
+[plantuml, "module-boundaries", png]
+----
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Module Boundaries – Subdomain Mapping
+
+Person(app_dev, "App Developer", "Uses library to build game")
+
+System_Boundary(core, "konnekt-session-core (Core Library)") {
+    Container(domain, "domain/", "Pure Rust", "Lobby, Participant, Activity aggregates")
+    Container(application, "application/", "Services", "Lobby/Participant/Activity services")
+    Container(infrastructure, "infrastructure/", "Adapters", "P2P, Auth, Storage")
+    Container(traits_mod, "traits/", "Public API", "Activity, SyncStrategy traits")
+}
+
+System_Boundary(ui, "konnekt-session-yew (UI Library)") {
+    Container(components, "components/", "Yew", "LobbyComp, ParticipantList, etc.")
+    Container(hooks, "hooks/", "Yew Hooks", "use_lobby, use_p2p")
+}
+
+System_Boundary(app, "Consuming Application (Separate Repo)") {
+    Container(app_main, "src/main.rs", "Yew SPA", "Entry point")
+    Container(activities, "src/activities/", "Plugins", "Trivia, Drawing games")
+}
+
+System_Ext(matchbox, "Matchbox Signalling", "External")
+
+' Dependencies
+Rel(application, domain, "Uses")
+Rel(infrastructure, application, "Implements")
+Rel(infrastructure, traits_mod, "Implements")
+Rel(components, application, "Uses")
+Rel(hooks, infrastructure, "Uses")
+
+Rel(app_main, components, "Uses")
+Rel(app_main, hooks, "Uses")
+Rel(activities, traits_mod, "Implements")
+
+Rel(infrastructure, matchbox, "Connects to")
+
+Rel_U(app_dev, app, "Develops")
+
+@enduml
+----
+
+'''
+
+=== Dependency Rules
+
+**Layered Architecture** (Hexagonal/Onion):
+
+[source]
+----
+┌─────────────────────────────────────────────┐
+│  traits/ (Public API for extensibility)     │
+│  ┌───────────────────────────────────────┐  │
+│  │  domain/ (Pure business logic)        │  │
+│  │  ┌─────────────────────────────────┐  │  │
+│  │  │  application/ (Use cases)       │  │  │
+│  │  └─────────────────────────────────┘  │  │
+│  └───────────────────────────────────────┘  │
+└─────────────────────────────────────────────┘
+              ↑
+              │
+┌─────────────────────────────────────────────┐
+│  infrastructure/ (Adapters)                 │
+│    • p2p/ (Matchbox, sync)                  │
+│    • auth/ (Ed25519 signing)                │
+│    • storage/ (LocalStorage)                │
+└─────────────────────────────────────────────┘
+              ↑
+              │
+┌─────────────────────────────────────────────┐
+│  konnekt-session-yew/ (UI components)       │
+│    • components/ (Lobby, Activity views)    │
+│    • hooks/ (use_lobby, use_p2p)            │
+└─────────────────────────────────────────────┘
+              ↑
+              │
+┌─────────────────────────────────────────────┐
+│  Consuming App (External repo)              │
+│    • Custom activities (Trivia, Drawing)    │
+│    • App-specific UI                        │
+└─────────────────────────────────────────────┘
+----
+
+**Rules:**
+1. `domain/` has **zero dependencies** (pure Rust, no I/O)
+2. `application/` depends only on `domain/` and `traits/`
+3. `infrastructure/` depends on `application/` and implements `traits/`
+4. `yew/` depends on `core` but not vice versa
+5. Consuming apps depend on both `core` and `yew`
+
+'''
+
+== Plugin Architecture: Activities
+
+=== How Activities Work
+
+**Activities are NOT in the library** – they are provided by consuming applications.
+
+The library provides:
+
+1. **Activity trait** (`traits/activity.rs`) – Contract for activities
+2. **Activity lifecycle** (`domain/activity.rs`) – State management (Planned → InProgress → Completed)
+3. **Result collection** (`application/activity_service.rs`) – Gathering results from active participants
+
+Consuming apps provide:
+
+1. **Activity implementations** – Concrete games (Trivia, Drawing, etc.)
+2. **Activity UI** – Yew components for playing the activity
+3. **Result types** – Custom data structures for activity results
+
+'''
+
+=== Activity Trait (Library)
+
+[source,rust]
+----
+// konnekt-session-core/src/traits/activity.rs
+
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+/// Trait that all activities must implement.
+/// Consuming apps implement this trait for their specific activities.
+pub trait Activity: Send + Sync {
+    /// Unique type identifier (e.g., "trivia-quiz-v1")
+    fn activity_type(&self) -> &str;
+
+    /// Human-readable name (e.g., "Trivia Quiz")
+    fn name(&self) -> &str;
+
+    /// Serialize activity configuration
+    fn serialize_config(&self) -> Result<serde_json::Value, ActivityError>;
+
+    /// Deserialize activity configuration
+    fn deserialize_config(config: serde_json::Value) -> Result<Self, ActivityError>
+    where
+        Self: Sized;
+
+    /// Validate a result submission
+    fn validate_result(&self, result: &ActivityResult) -> Result<(), ActivityError>;
+}
+
+/// Generic activity result that activities can extend
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivityResult {
+    pub activity_id: Uuid,
+    pub participant_id: Uuid,
+    pub score: u32,
+    pub time_taken: std::time::Duration,
+    pub data: serde_json::Value, // Activity-specific data
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ActivityError {
+    #[error("Invalid configuration: {0}")]
+    InvalidConfig(String),
+
+    #[error("Invalid result: {0}")]
+    InvalidResult(String),
+
+    #[error("Serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
+}
+----
+
+'''
+
+=== Activity Implementation (Consuming App)
+
+[source,rust]
+----
+// consuming-app/src/activities/trivia.rs
+
+use konnekt_session_core::traits::{Activity, ActivityResult, ActivityError};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TriviaQuiz {
+    pub questions: Vec<Question>,
+    pub time_limit: std::time::Duration,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Question {
+    pub text: String,
+    pub options: Vec<String>,
+    pub correct_index: usize,
+}
+
+impl Activity for TriviaQuiz {
+    fn activity_type(&self) -> &str {
+        "trivia-quiz-v1"
+    }
+
+    fn name(&self) -> &str {
+        "Trivia Quiz"
+    }
+
+    fn serialize_config(&self) -> Result<serde_json::Value, ActivityError> {
+        Ok(serde_json::to_value(self)?)
+    }
+
+    fn deserialize_config(config: serde_json::Value) -> Result<Self, ActivityError> {
+        Ok(serde_json::from_value(config)?)
+    }
+
+    fn validate_result(&self, result: &ActivityResult) -> Result<(), ActivityError> {
+        // Ensure score doesn't exceed max possible
+        if result.score > self.questions.len() as u32 {
+            return Err(ActivityError::InvalidResult(
+                format!("Score {} exceeds max {}", result.score, self.questions.len())
+            ));
+        }
+
+        // Ensure time_taken is within limit
+        if result.time_taken > self.time_limit {
+            return Err(ActivityError::InvalidResult(
+                "Time limit exceeded".to_string()
+            ));
+        }
+
+        Ok(())
+    }
+}
+----
+
+'''
+
+=== Activity Registration (Consuming App)
+
+[source,rust]
+----
+// consuming-app/src/main.rs
+
+use konnekt_session_core::application::LobbyService;
+use konnekt_session_yew::components::LobbyComp;
+use yew::prelude::*;
+
+mod activities;
+use activities::trivia::TriviaQuiz;
+use activities::drawing::DrawingGame;
+
+#[function_component(App)]
+fn app() -> Html {
+    let lobby_service = use_memo((), |_| {
+        LobbyService::new()
+    });
+
+    // Register available activities
+    use_effect_with(lobby_service.clone(), |service| {
+        service.register_activity_type(Box::new(TriviaQuiz::default()));
+        service.register_activity_type(Box::new(DrawingGame::default()));
+        || ()
+    });
+
+    html! {
+        <LobbyComp service={(*lobby_service).clone()} />
+    }
+}
+
+fn main() {
+    yew::Renderer::<App>::new().render();
+}
+----
+
+'''
+
+== Workflow: Library Development
+
+=== Development Loop
+
+[plantuml, "dev-workflow", png]
+----
+@startuml
+title Library Development Workflow
+
+skinparam packageStyle rectangle
+
+actor Developer as dev
+
+rectangle "Local Development" as local {
+  component "konnekt-session-core" as core
+  component "konnekt-session-yew" as yew
+  component "examples/full_featured" as example
+}
+
+rectangle "CI/CD Pipeline" as ci {
+  component "Integration Tests" as tests
+  component "Documentation Build" as docs
+  component "crates.io Publish" as publish
+}
+
+cloud "Consuming Apps" as consumers
+
+' Feature Development
+dev -down-> core : "1. Implement\ndomain logic"
+dev -down-> yew : "2. Create UI\ncomponents"
+dev -down-> example : "3. Test in\nexample app"
+
+example -up-> core : "4. Exercise\nnew feature"
+example -up-> yew : "5. Render\ncomponents"
+
+dev -down-> tests : "6. Run integration\ntests"
+tests -up-> core : "7. Validate\nbehavior"
+
+' Release
+dev -right-> ci : "8. Push to\nmain branch"
+ci -down-> tests : "9. Run full\ntest suite"
+ci -down-> docs : "10. Build\nrustdoc"
+ci -down-> publish : "11. Publish to\ncrates.io"
+
+publish -right-> consumers : "12. New version\navailable"
+
+@enduml
+----
+
+'''
+
+=== Testing Strategy
+
+[cols="2,3,2,3", options="header"]
+|===
+|Test Type
+|Location
+|Scope
+|Tools
+
+|**Unit Tests**
+|`src/domain/*.rs`
+|Pure domain logic
+|`#[cfg(test)]` modules
+
+|**Integration Tests**
+|`tests/*.rs`
+|Cross-module behavior
+|Separate `tests/` directory
+
+|**Component Tests**
+|`konnekt-session-yew/src/components/*.rs`
+|Yew components
+|`yew::functional::use_test_component`
+
+|**Example Tests**
+|`examples/*/tests/`
+|End-to-end scenarios
+|`wasm-pack test --headless`
+
+|**Property Tests**
+|`tests/property_tests.rs`
+|Domain invariants
+|`proptest`, `quickcheck`
+|===
+
+'''
+
+=== Documentation Strategy
+
+[cols="2,3,3", options="header"]
+|===
+|Audience
+|Documentation Type
+|Location
+
+|**Library Users**
+|API reference (rustdoc)
+|`cargo doc --open`
+
+|**Library Users**
+|Usage examples
+|`examples/` directory
+
+|**Library Users**
+|Cookbook / recipes
+|`docs/cookbook.adoc`
+
+|**Maintainers**
+|Architecture docs
+|`docs/*.adoc` (these files)
+
+|**Contributors**
+|Contribution guide
+|`CONTRIBUTING.md`
+
+|**Domain Experts**
+|Domain model
+|`docs/02-discover.adoc` (EventStorming)
+|===
+
+'''
+
+== Publishing Strategy
+
+=== Crates
+
+Two published crates:
+
+1. **`konnekt-session-core`**
+   - Pure Rust (no WASM deps)
+   - Can be used in native apps (future)
+   - Semantic versioning
+
+2. **`konnekt-session-yew`**
+   - Depends on `konnekt-session-core`
+   - WASM-specific
+   - Versioned in sync with core
+
+'''
+
+=== Versioning Policy
+
+**Semantic Versioning (SemVer):**
+
+[cols="1,3,3", options="header"]
+|===
+|Version Bump
+|When to Use
+|Example
+
+|**Patch (0.1.x)**
+|Bug fixes, documentation, internal refactoring
+|`0.1.2` → `0.1.3`
+
+|**Minor (0.x.0)**
+|New features, new traits, new components (backwards compatible)
+|`0.1.3` → `0.2.0`
+
+|**Major (x.0.0)**
+|Breaking API changes, removed features, trait changes
+|`0.2.0` → `1.0.0`
+|===
+
+**Pre-1.0 Disclaimer:**
+- Library is in active development
+- Minor versions may include breaking changes
+- Will stabilize API for 1.0 release
+
+'''
+
+=== Release Checklist
+
+[source,bash]
+----
+# 1. Update CHANGELOG.md
+vim CHANGELOG.md
+
+# 2. Bump version in Cargo.toml files
+vim konnekt-session-core/Cargo.toml
+vim konnekt-session-yew/Cargo.toml
+
+# 3. Run full test suite
+./scripts/test.sh
+
+# 4. Build documentation
+cargo doc --no-deps --open
+
+# 5. Publish core first (yew depends on it)
+cd konnekt-session-core
+cargo publish --dry-run
+cargo publish
+
+# 6. Publish yew (after core is available)
+cd ../konnekt-session-yew
+cargo publish --dry-run
+cargo publish
+
+# 7. Tag release
+git tag -a v0.2.0 -m "Release v0.2.0"
+git push --tags
+
+# 8. Create GitHub release with changelog
+----
+
+'''
+
+== Consuming Applications
+
+=== How Apps Use the Library
+
+**Example: Game Developer Building Trivia App**
+
+[plantuml, "app-usage", png]
+----
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Consuming App Structure
+
+Person(player, "Player")
+
+System_Boundary(app, "Trivia Game App (Separate Repo)") {
+    Container(app_ui, "App UI", "Yew", "Game-specific components")
+    Container(activities, "Activities", "Rust", "TriviaQuiz, FastTrivial")
+}
+
+System_Boundary(lib_core, "konnekt-session-core (crates.io)") {
+    Container(domain, "Domain", "Pure Rust")
+    Container(services, "Services", "Application Layer")
+    Container(traits_mod, "Traits", "Activity, SyncStrategy")
+}
+
+System_Boundary(lib_yew, "konnekt-session-yew (crates.io)") {
+    Container(lobby_comp, "LobbyComp", "Yew Component")
+    Container(hooks, "Hooks", "use_lobby, use_p2p")
+}
+
+System_Ext(matchbox, "Matchbox")
+
+Rel(player, app_ui, "Plays game")
+Rel(app_ui, lobby_comp, "Uses")
+Rel(app_ui, hooks, "Uses")
+Rel(app_ui, activities, "Renders")
+
+Rel(activities, traits_mod, "Implements")
+Rel(lobby_comp, services, "Uses")
+Rel(hooks, services, "Uses")
+Rel(services, domain, "Uses")
+Rel(services, matchbox, "Connects via")
+
+@enduml
+----
+
+'''
+
+=== App Directory Structure
+
+[source]
+----
+trivia-game-app/               # Separate repo
+├── Cargo.toml
+├── src/
+│   ├── main.rs                # App entry point
+│   ├── app.rs                 # Root Yew component
+│   │
+│   ├── activities/            # Custom activities
+│   │   ├── mod.rs
+│   │   ├── trivia.rs          # Implements Activity trait
+│   │   └── fast_trivia.rs
+│   │
+│   ├── components/            # App-specific UI
+│   │   ├── trivia_view.rs     # Activity UI component
+│   │   └── leaderboard.rs
+│   │
+│   └── config.rs              # App config
+│
+├── index.html                 # Yew entry point
+└── Trunk.toml                 # Trunk config
+----
+
+'''
+
+=== App Dependencies
+
+[source,toml]
+----
+# trivia-game-app/Cargo.toml
+
+[package]
+name = "trivia-game-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Konnekt Session library
+konnekt-session-core = "0.2"
+konnekt-session-yew = "0.2"
+
+# Yew ecosystem
+yew = "0.21"
+yew-router = "0.18"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# WASM
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["Window", "Document"] }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+----
+
+'''
+
+== Communication Channels
+
+=== Between Library Maintainer & App Developers
+
+[cols="2,3,3", options="header"]
+|===
+|Channel
+|Purpose
+|Tool
+
+|**GitHub Issues**
+|Bug reports, feature requests
+|github.com/yourorg/konnekt-session
+
+|**GitHub Discussions**
+|Questions, best practices, ideas
+|github.com/yourorg/konnekt-session/discussions
+
+|**Changelog**
+|Release notes, breaking changes
+|CHANGELOG.md + GitHub Releases
+
+|**Documentation**
+|API reference, guides
+|docs.rs, README.adoc
+
+|**Examples**
+|Working code samples
+|examples/ directory in repo
+|===
+
+'''
+
+=== Feedback Loop
+
+[plantuml, "feedback-loop", png]
+----
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Dynamic.puml
+
+title Feedback Loop: Library ↔ Apps
+
+Person(app_dev, "App Developer")
+Person(maintainer, "Library Maintainer")
+
+System_Boundary(app, "Consuming App") {
+    Container(app_code, "App Code")
+}
+
+System_Boundary(lib, "Library") {
+    Container(lib_code, "Library Code")
+    Container(examples, "Examples")
+}
+
+app_dev -> app_code : 1. Build app using library
+app_code -> lib_code : 2. Uses library API
+
+app_dev -> maintainer : 3. Report bug / request feature (GitHub)
+maintainer -> lib_code : 4. Fix bug / add feature
+maintainer -> examples : 5. Update examples
+
+lib_code -> app_code : 6. New version available (crates.io)
+app_dev -> app_code : 7. Upgrade dependency
+
+@enduml
+----
+
+'''
