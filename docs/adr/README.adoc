@@ -125,6 +125,11 @@ Each ADR in this directory follows the **Michael Nygard format**:
 |Use Clap for CLI Tooling
 |✅ Accepted
 |2025-12-29
+
+|xref:0017-use-schemars-and-aide-for-schema-generation.adoc[ADR-0017]
+|Use Schemars for Schema Generation with Aide for OpenAPI
+|✅ Accepted
+|2025-12-29
 |===
 
 == Guidelines for Writing ADRs

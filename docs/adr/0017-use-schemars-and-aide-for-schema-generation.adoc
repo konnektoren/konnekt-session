@@ -1,0 +1,572 @@
+= ADR-0017: Use Schemars for Schema Generation with Aide for OpenAPI
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+Konnekt Session requires **schema documentation** for:
+
+* **P2P protocol documentation** - describe message formats for developers
+* **TypeScript bindings** - generate types for potential web clients
+* **OpenAPI specs** - document any future HTTP APIs (CLI tools, monitoring)
+* **Validation** - runtime schema validation in development
+* **Single source of truth** - code as the schema definition
+
+=== Requirements
+
+* **Rust-native** - derive macros, no external tooling
+* **WASM-compatible** - must work in browser if needed
+* **Serialization-aligned** - works with serde
+* **JSON Schema output** - standard format for interoperability
+* **OpenAPI capable** - can generate OpenAPI 3.x specs
+* **Minimal overhead** - small binary size impact
+* **Examples in schema** - help documentation consumers
+
+=== Use Cases
+
+1. **P2P Message Documentation**
+   ```json
+   {
+     "$schema": "http://json-schema.org/draft-07/schema#",
+     "title": "ParticipantJoined",
+     "type": "object",
+     "properties": {
+       "participant": { "$ref": "#/definitions/Participant" }
+     }
+   }
+   ```
+
+2. **CLI OpenAPI Generation** (for future HTTP admin API)
+   ```yaml
+   openapi: 3.0.0
+   paths:
+     /lobbies/{id}:
+       get:
+         responses:
+           200:
+             content:
+               application/json:
+                 schema:
+                   $ref: '#/components/schemas/Lobby'
+   ```
+
+3. **TypeScript Generation** (from JSON Schema)
+   ```bash
+   json-schema-to-typescript schemas/Participant.json > bindings/Participant.ts
+   ```
+
+=== Alternatives Considered
+
+==== utoipa only
+
+```rust
+use utoipa::ToSchema;
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct Participant {
+    #[schema(min_length = 1, max_length = 50)]
+    name: String,
+}
+```
+
+* ✅ **Direct OpenAPI** generation
+* ✅ **HTTP-focused** - integrates with Axum/Actix
+* ✅ **Examples in schema**
+* ❌ **HTTP-centric** - we're primarily P2P
+* ❌ **No JSON Schema** - only OpenAPI
+* ❌ **Heavier** - more features than we need
+* ❌ **Duplicates serde** - separate annotation syntax
+
+==== ts-rs only
+
+```rust
+use ts_rs::TS;
+
+#[derive(Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Participant {
+    name: String,
+}
+```
+
+* ✅ **Direct TypeScript** generation
+* ✅ **Lightweight**
+* ✅ **Rust-native**
+* ❌ **TypeScript-only** - no JSON Schema or OpenAPI
+* ❌ **No validation** - just type definitions
+* ❌ **No examples** - types don't include sample data
+
+==== aide
+
+```rust
+use aide::openapi::OpenApi;
+use schemars::JsonSchema;
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct Participant {
+    name: String,
+}
+```
+
+* ✅ **Uses schemars** internally
+* ✅ **OpenAPI + JSON Schema**
+* ✅ **Axum integration**
+* ✅ **Best of both worlds**
+* ⚠️ **Less mature** than utoipa
+* ⚠️ **Smaller ecosystem**
+
+== Decision
+
+We will use **`schemars`** for JSON Schema generation as the primary schema tool, with **`aide`** available for OpenAPI generation when needed (e.g., CLI tools).
+
+=== Architecture
+
+**Primary: Schemars for all domain types**
+
+```rust
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+/// A participant in a lobby session.
+///
+/// # Examples
+///
+/// ```json
+/// {
+///   "id": "550e8400-e29b-41d4-a716-446655440000",
+///   "name": "Alice",
+///   "lobby_role": "Host",
+///   "participation_mode": "Active"
+/// }
+/// ```
+pub struct Participant {
+    /// Unique identifier for this participant
+    #[schemars(example = "example_uuid")]
+    pub id: Uuid,
+
+    /// Display name (1-50 characters, unique within lobby)
+    #[schemars(length(min = 1, max = 50))]
+    #[schemars(example = "Alice")]
+    pub name: String,
+
+    /// Role determining permissions (Host or Guest)
+    pub lobby_role: LobbyRole,
+
+    /// Participation mode (Active or Spectating)
+    pub participation_mode: ParticipationMode,
+
+    /// Monotonic timestamp when participant joined
+    pub joined_at: Timestamp,
+}
+
+fn example_uuid() -> &'static str {
+    "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Optional: aide for OpenAPI** (feature-gated)
+
+```toml
+[dependencies]
+schemars = { version = "0.8", features = ["uuid1"] }
+
+# Optional for CLI tools with HTTP APIs
+aide = { version = "0.13", optional = true }
+axum = { version = "0.7", optional = true }
+
+[features]
+default = []
+openapi = ["aide", "axum"]
+```
+
+```rust
+#[cfg(feature = "openapi")]
+use aide::axum::routing::get;
+
+#[cfg(feature = "openapi")]
+pub fn api_routes() -> axum::Router {
+    use aide::axum::ApiRouter;
+
+    ApiRouter::new()
+        .api_route("/lobbies/:id", get(get_lobby))
+        .api_route("/schemas", get(get_schemas))
+}
+
+#[cfg(feature = "openapi")]
+async fn get_schemas() -> impl axum::response::IntoResponse {
+    use aide::openapi::OpenApi;
+
+    let api = OpenApi::default()
+        .add_schema::<Participant>()
+        .add_schema::<Lobby>()
+        .add_schema::<Activity>();
+
+    axum::Json(api)
+}
+```
+
+=== Dependencies
+
+```toml
+[dependencies]
+schemars = { version = "0.8", features = ["uuid1", "preserve_order"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Optional
+aide = { version = "0.13", optional = true }
+axum = { version = "0.7", optional = true }
+
+[dev-dependencies]
+# For schema validation in tests
+jsonschema = "0.26"
+
+[features]
+default = []
+openapi = ["aide", "axum"]
+```
+
+=== Rationale
+
+==== Schemars as Foundation
+
+**JSON Schema is the interchange format:**
+
+```
+Schemars → JSON Schema → {TypeScript, OpenAPI, GraphQL, ...}
+```
+
+* **Standard format** - JSON Schema is RFC 8927
+* **Tool ecosystem** - converters for TypeScript, OpenAPI, GraphQL
+* **Validation** - can validate messages at runtime
+* **Documentation** - human-readable, machine-parseable
+
+**Example workflow:**
+
+```bash
+# 1. Generate JSON Schema from Rust
+cargo test generate_schemas
+
+# 2. Generate TypeScript (if needed)
+json-schema-to-typescript schemas/Participant.json > bindings/Participant.ts
+
+# 3. Generate OpenAPI (via aide or manual)
+cargo run --bin schema-cli --features openapi > openapi.yaml
+
+# 4. Validate P2P messages (development)
+jsonschema -i message.json schemas/ParticipantJoined.json
+```
+
+==== Schemars Advantages
+
+**Derive-based, minimal boilerplate:**
+
+```rust
+#[derive(JsonSchema)]  // That's it!
+pub struct Participant {
+    #[schemars(length(min = 1, max = 50))]
+    name: String,
+}
+```
+
+**Rich annotations:**
+
+```rust
+#[schemars(
+    example = "Alice",
+    description = "Participant display name",
+    regex = "^[a-zA-Z0-9_]+$"
+)]
+pub name: String,
+```
+
+**Composition:**
+
+```rust
+#[derive(JsonSchema)]
+pub struct Lobby {
+    #[schemars(extend(|schema| {
+        schema.metadata.description = Some("Participants in this lobby".into());
+    }))]
+    participants: Vec<Participant>,  // Nested schema
+}
+```
+
+==== aide for OpenAPI (When Needed)
+
+**Uses schemars internally:**
+
+```rust
+// Same derive - works with both schemars and aide
+#[derive(JsonSchema)]
+pub struct Participant { /* ... */ }
+
+// aide extracts schemars schema for OpenAPI
+impl aide::OperationIo for Participant {
+    // Automatically uses JsonSchema implementation
+}
+```
+
+**Clean separation:**
+
+* **Domain types** - `#[derive(JsonSchema)]` always
+* **HTTP handlers** - `aide` annotations only if HTTP API exists
+* **Tests** - schemars for validation
+
+==== Why Not utoipa?
+
+utoipa is **HTTP-first**, not schema-first:
+
+```rust
+// utoipa - duplicates serde
+#[derive(Serialize, ToSchema)]  // Two separate annotations
+pub struct Participant {
+    #[serde(rename = "id")]
+    #[schema(value_type = String)]  // Must duplicate type info
+    id: Uuid,
+}
+
+// schemars - reuses serde
+#[derive(Serialize, JsonSchema)]  // Single source of truth
+pub struct Participant {
+    #[serde(rename = "id")]  // schemars reads serde annotations
+    id: Uuid,
+}
+```
+
+=== Schema Generation
+
+**Automatic in tests:**
+
+```rust
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+    use schemars::schema_for;
+    use std::fs;
+
+    #[test]
+    fn generate_participant_schema() {
+        let schema = schema_for!(Participant);
+        let json = serde_json::to_string_pretty(&schema).unwrap();
+
+        fs::create_dir_all("../docs/schemas").unwrap();
+        fs::write("../docs/schemas/Participant.schema.json", json).unwrap();
+    }
+
+    #[test]
+    fn generate_all_schemas() {
+        for_each_domain_type!(|Type| {
+            let schema = schema_for!(Type);
+            let json = serde_json::to_string_pretty(&schema).unwrap();
+            fs::write(
+                format!("../docs/schemas/{}.schema.json", stringify!(Type)),
+                json
+            ).unwrap();
+        });
+    }
+}
+```
+
+**Validation in tests:**
+
+```rust
+#[cfg(test)]
+mod validation_tests {
+    use jsonschema::JSONSchema;
+    use schemars::schema_for;
+
+    #[test]
+    fn validate_participant_json() {
+        let schema = schema_for!(Participant);
+        let compiled = JSONSchema::compile(&serde_json::to_value(schema).unwrap())
+            .expect("Invalid schema");
+
+        let valid_instance = json!({
+            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "name": "Alice",
+            "lobby_role": "Host",
+            "participation_mode": "Active",
+            "joined_at": 12345
+        });
+
+        assert!(compiled.is_valid(&valid_instance));
+
+        let invalid_instance = json!({
+            "id": "not-a-uuid",
+            "name": "",  // Too short
+        });
+
+        assert!(!compiled.is_valid(&invalid_instance));
+    }
+}
+```
+
+=== OpenAPI Generation (Optional)
+
+**Only for CLI tools with HTTP:**
+
+```rust
+// bin/konnekt-admin-api.rs (hypothetical)
+#![cfg(feature = "openapi")]
+
+use aide::axum::{ApiRouter, IntoApiResponse};
+use axum::Json;
+
+#[tokio::main]
+async fn main() {
+    let app = ApiRouter::new()
+        .api_route("/lobbies", get(list_lobbies))
+        .finish_api()  // Generate OpenAPI spec
+        .route("/openapi.json", get(serve_openapi));
+
+    axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
+}
+
+async fn list_lobbies() -> impl IntoApiResponse {
+    Json(vec![
+        Lobby { /* ... */ },
+    ])
+}
+
+async fn serve_openapi() -> impl IntoApiResponse {
+    Json(aide::openapi::OpenApi::default())
+}
+```
+
+== Consequences
+
+=== Positive
+
+* ✅ **JSON Schema as foundation** - standard interchange format
+* ✅ **Minimal dependencies** - schemars is lightweight (~60KB)
+* ✅ **Reuses serde** - no duplicate annotations
+* ✅ **Tool ecosystem** - convert to TypeScript, OpenAPI, GraphQL
+* ✅ **Validation** - runtime schema validation in tests
+* ✅ **Examples in schema** - aid documentation
+* ✅ **aide compatibility** - can add OpenAPI later without refactoring
+* ✅ **P2P-friendly** - document message formats, not HTTP endpoints
+
+=== Negative
+
+* ❌ **Not direct OpenAPI** - need aide or manual conversion
+* ❌ **Two tools** - schemars + aide (but aide is optional)
+* ❌ **Schema size** - JSON Schema can be verbose (~2KB per type)
+* ❌ **Compile time** - schemars adds ~2s to clean builds
+
+=== Neutral
+
+* **Not HTTP-first** - good for P2P library
+* **JSON Schema intermediate** - extra step but more flexible
+* **aide is optional** - only enabled if needed
+
+=== Implementation Strategy
+
+**Phase 1: Domain Schemas (Week 1)**
+- [ ] Add `schemars` dependency
+- [ ] Add `#[derive(JsonSchema)]` to all domain types
+- [ ] Add schema examples with `#[schemars(example)]`
+- [ ] Generate schemas in tests
+- [ ] Commit schemas to `docs/schemas/`
+
+**Phase 2: Validation (Week 2)**
+- [ ] Add `jsonschema` dev-dependency
+- [ ] Write schema validation tests
+- [ ] Validate P2P messages against schemas in integration tests
+
+**Phase 3: TypeScript (Week 3, if needed)**
+- [ ] Install `json-schema-to-typescript`
+- [ ] Generate TypeScript bindings
+- [ ] Commit to `bindings/` directory
+
+**Phase 4: OpenAPI (Week 4, optional)**
+- [ ] Add `aide` feature flag
+- [ ] Create example HTTP API (admin CLI)
+- [ ] Generate OpenAPI spec
+- [ ] Serve via `/openapi.json` endpoint
+
+=== Guidelines
+
+**Always derive JsonSchema:**
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DomainType { /* ... */ }
+```
+
+**Add examples:**
+
+```rust
+#[schemars(example = "Alice")]
+pub name: String,
+```
+
+**Validate constraints:**
+
+```rust
+#[schemars(length(min = 1, max = 50))]
+pub name: String,
+
+#[schemars(range(min = 2, max = 50))]
+pub max_participants: usize,
+```
+
+**Test schemas:**
+
+```rust
+#[test]
+fn schema_matches_type() {
+    let schema = schema_for!(Participant);
+    let instance = Participant::new_guest("Alice".into()).unwrap();
+    let json = serde_json::to_value(&instance).unwrap();
+
+    let compiled = JSONSchema::compile(&serde_json::to_value(schema).unwrap()).unwrap();
+    assert!(compiled.is_valid(&json));
+}
+```
+
+=== Directory Structure
+
+```
+docs/
+├── schemas/                    # Generated JSON Schemas
+│   ├── Participant.schema.json
+│   ├── Lobby.schema.json
+│   ├── Activity.schema.json
+│   └── DomainEvent.schema.json
+│
+└── openapi/                    # Generated OpenAPI (optional)
+    └── admin-api.yaml
+
+bindings/                       # Generated bindings (optional)
+└── typescript/
+    ├── Participant.ts
+    ├── Lobby.ts
+    └── Activity.ts
+```
+
+== References
+
+=== Libraries
+
+* **schemars** – https://docs.rs/schemars/
+* **JSON Schema** – https://json-schema.org/
+* **aide** – https://docs.rs/aide/
+* **jsonschema (validator)** – https://docs.rs/jsonschema/
+
+=== Tools
+
+* **json-schema-to-typescript** – https://github.com/bcherny/json-schema-to-typescript
+* **OpenAPI Generator** – https://openapi-generator.tech/
+
+=== Related ADRs
+
+* xref:0001-use-rust-for-implementation.adoc[ADR-0001] – Rust enables derive-based schemas
+* xref:0009-use-json-with-feature-gated-messagepack.adoc[ADR-0009] – Schemas document serialization format
+* xref:0016-use-clap-for-cli-tooling.adoc[ADR-0016] – CLI tools may expose HTTP APIs with OpenAPI
