@@ -60,13 +60,23 @@ Each ADR in this directory follows the **Michael Nygard format**:
 |Use Matchbox for WebRTC Signaling
 |✅ Accepted
 |2025-12-29
+
+|xref:0004-use-client-side-key-generation-for-identity.adoc[ADR-0004]
+|Use Client-Side Key Generation for Persistent Identity
+|✅ Accepted
+|2025-12-29
+
+|xref:0005-use-tracing-for-logging-and-diagnostics.adoc[ADR-0005]
+|Use Tracing for Logging and Diagnostics
+|✅ Accepted
+|2025-12-29
 |===
 
 == Guidelines for Writing ADRs
 
 When creating a new ADR:
 
-1. **Number sequentially** – Use the next available number (e.g., `0004-...`)
+1. **Number sequentially** – Use the next available number (e.g., `0005-...`)
 2. **Use imperative mood** – "Use X" not "Using X" or "We will use X"
 3. **Document alternatives** – Show what was considered and why it was rejected
 4. **Be honest about trade-offs** – Every decision has downsides

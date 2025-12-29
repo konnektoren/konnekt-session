@@ -1,0 +1,270 @@
+= ADR-0004: Use Client-Side Key Generation for Persistent Identity
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+Konnekt Session requires **persistent participant identity** across reconnections to:
+
+* **Preserve participant names** when network drops occur
+* **Prevent impersonation** - ensure only the original participant can reclaim their identity
+* **Enable host delegation** - verify who can legitimately become host
+* **Maintain activity state** - associate results with the correct participant after reconnect
+
+=== Requirements
+
+* **Client-side generation** - no server trust required
+* **Browser-only operation** - must work in WASM environment
+* **Deterministic from seed** - allow password-based recovery
+* **Cryptographically secure** - prevent forgery/impersonation
+* **Small signatures** - efficient P2P message overhead
+* **Fast verification** - no lag on message processing
+
+=== User Scenarios
+
+==== Anonymous Join (No Password)
+```
+1. User enters name "Alice"
+2. Client generates keypair from: hash(name + session_id)
+3. Session_id stored in sessionStorage (lost on tab close)
+4. Can reconnect within same browser session
+```
+
+==== Password-Protected Join
+```
+1. User enters name "Alice" + password "secret123"
+2. Client generates keypair from: hash(name + password + session_id)
+3. Password not stored - must re-enter to reconnect
+4. Can reconnect across browser sessions/devices
+```
+
+=== Alternatives Considered
+
+==== Browser Crypto API with Random Keys
+* ✅ Native browser support
+* ✅ Hardware-backed key storage possible
+* ❌ **Cannot derive from password** - user must export/import keys manually
+* ❌ **No deterministic generation** - can't recover from name+password
+* ❌ Complex UX for key management
+
+==== OAuth/Social Login
+* ✅ Familiar UX
+* ✅ Persistent across devices
+* ❌ **Requires external service** - violates decentralization principle
+* ❌ **Privacy concerns** - tracks users
+* ❌ **Network dependency** - can't work offline
+
+==== Symmetric Keys (HMAC)
+* ✅ Simpler cryptography
+* ✅ Small message overhead
+* ❌ **Cannot verify signatures** - only the participant can validate their own messages
+* ❌ **No public key** - peers can't verify identity
+* ❌ Doesn't support delegation verification
+
+==== RSA Keys
+* ✅ Industry standard
+* ✅ Widely supported
+* ❌ **Large signatures** (256+ bytes) - inefficient for P2P
+* ❌ **Slow generation** in WASM
+* ❌ Overkill for our use case
+
+== Decision
+
+We will use **Ed25519 key pairs** generated client-side from a **deterministic seed** derived from username, optional password, and session ID.
+
+=== Key Generation Flow
+
+```rust
+use blake3::Hasher;
+use ed25519_dalek::{SigningKey, VerifyingKey};
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
+pub fn generate_participant_key(
+    name: &str,
+    password: Option<&str>,
+    session_id: &str,
+) -> (SigningKey, VerifyingKey) {
+    // Create deterministic seed
+    let mut hasher = Hasher::new();
+    hasher.update(name.as_bytes());
+    if let Some(pwd) = password {
+        hasher.update(pwd.as_bytes());
+    }
+    hasher.update(session_id.as_bytes());
+
+    let seed_hash = hasher.finalize();
+    let seed: [u8; 32] = seed_hash.as_bytes()[..32].try_into().unwrap();
+
+    // Generate deterministic keypair
+    let mut rng = StdRng::from_seed(seed);
+    let signing_key = SigningKey::generate(&mut rng);
+    let verifying_key = signing_key.verifying_key();
+
+    (signing_key, verifying_key)
+}
+```
+
+=== Library Choice: `ed25519-dalek`
+
+**Primary**: `ed25519-dalek` v2.1+ +
+**Hashing**: `blake3` for seed derivation +
+**RNG**: `rand` with `StdRng` for deterministic generation
+
+=== Rationale
+
+==== Why Ed25519?
+* **Small signatures** - 64 bytes (vs 256+ for RSA)
+* **Fast verification** - ~50μs in WASM
+* **Widely adopted** - SSH, Signal, Tor all use Ed25519
+* **Secure** - 128-bit security level
+* **Deterministic** - same seed = same keypair
+
+==== Why `ed25519-dalek`?
+* ✅ **Pure Rust** - compiles to WASM easily
+* ✅ **Well-maintained** - active development by Isis Lovecruft & Henry de Valence
+* ✅ **Audited** - used in production by major projects (Tor, Zcash)
+* ✅ **No unsafe code** in core signing/verification
+* ✅ **Batch verification** - can verify multiple signatures efficiently
+* ✅ **zeroize support** - clears keys from memory on drop
+
+==== Why `blake3` for Hashing?
+* ✅ **Faster than SHA-256** - especially in WASM
+* ✅ **Parallelizable** - future-proof for larger inputs
+* ✅ **Fixed output** - always 32 bytes (perfect for seed)
+* ✅ **No length extension attacks**
+* ✅ **Pure Rust** - WASM-compatible
+
+=== Alternative Libraries Considered
+
+==== `ring`
+* ✅ Google-maintained
+* ✅ Very fast
+* ❌ **Large binary size** in WASM (~200KB overhead)
+* ❌ **Uses unsafe extensively**
+* ❌ Less ergonomic API
+
+==== `ed25519-compact`
+* ✅ Smaller footprint
+* ✅ Simpler API
+* ❌ **Less battle-tested** than dalek
+* ❌ Fewer features (no batch verification)
+* ❌ Less active maintenance
+
+==== `sodiumoxide` / `libsodium`
+* ✅ Industry standard
+* ✅ Very secure
+* ❌ **C dependency** - complicates WASM builds
+* ❌ Requires JS bindings in browser
+* ❌ Not pure Rust
+
+=== Storage Strategy
+
+==== Session Storage (No Password)
+```rust
+// Store in sessionStorage (cleared on tab close)
+let session_id = uuid::Uuid::new_v4().to_string();
+web_sys::window()?
+    .session_storage()?
+    .set_item("konnekt_session_id", &session_id)?;
+```
+
+==== Password-Based (Cross-Session)
+```rust
+// User must re-enter password to derive same keys
+// Session_id can be stored in localStorage for convenience
+let session_id = web_sys::window()?
+    .local_storage()?
+    .get_item("konnekt_lobby_session")?
+    .unwrap_or_else(|| {
+        let id = uuid::Uuid::new_v4().to_string();
+        // Store for future reconnects from same lobby
+        web_sys::window()?.local_storage()?
+            .set_item("konnekt_lobby_session", &id)?;
+        id
+    });
+```
+
+== Consequences
+
+=== Positive
+
+* **Seamless reconnection** - user just needs to remember their name (+ password if set)
+* **No key management UX** - deterministic derivation handles it
+* **Cross-device recovery** - password allows joining from different browsers
+* **Small message overhead** - 64-byte signatures
+* **Fast verification** - <100μs per message in WASM
+* **No server trust** - client generates keys independently
+* **Privacy-preserving** - no external identity providers
+
+=== Negative
+
+* **Password not stored** - user must remember it for cross-session reconnect
+* **Weak passwords vulnerable** - if user chooses "123" as password, keys can be brute-forced
+* **No key rotation** - same seed always generates same key (by design)
+* **Session ID loss** - if localStorage cleared, new session ID = new identity
+
+=== Neutral
+
+* **Binary size** - adds ~40KB to WASM bundle (`ed25519-dalek` + `blake3`)
+* **Compile time** - cryptographic crates slow down builds slightly
+* **Must educate users** - password is for identity recovery, not authentication
+
+=== Security Considerations
+
+==== Brute-Force Protection
+For password-protected keys, we mitigate weak passwords by:
+
+1. **Including session_id** - adds entropy even for weak passwords
+2. **UI warnings** - encourage strong passwords if user wants cross-device recovery
+3. **Optional passphrase** - anonymous mode doesn't require password at all
+
+==== Key Compromise
+If a user's key is compromised:
+
+* **Host can kick** the compromised participant
+* **New lobby** requires new session_id = new keys
+* **Password change** generates new keys
+
+=== Implementation Checklist
+
+- [ ] Add `ed25519-dalek = "2.1"` to `Cargo.toml`
+- [ ] Add `blake3 = "1.5"` to `Cargo.toml`
+- [ ] Add `rand = { version = "0.8", features = ["std_rng"] }` to `Cargo.toml`
+- [ ] Implement `generate_participant_key()` in `src/domain/identity.rs`
+- [ ] Create `ParticipantIdentity` value object
+- [ ] Add session storage helpers in `src/infrastructure/storage.rs`
+- [ ] Update `JoinLobbyCommand` to include public key
+- [ ] Add signature verification to `P2PMessageHandler`
+- [ ] Implement reconnection logic with key-based identity proof
+- [ ] Add UI for optional password entry
+- [ ] Write tests for deterministic key generation
+- [ ] Document key recovery UX in user guide
+
+=== Future Enhancements
+
+* **Key export/import** - allow manual backup via QR code or file
+* **Hardware key support** - integrate WebAuthn for high-security scenarios
+* **Key rotation** - periodic re-keying with migration messages
+* **Threshold signatures** - multi-sig for shared host authority (v2.0+)
+
+== References
+
+=== Cryptography
+
+* **Ed25519** – https://ed25519.cr.yp.to/
+* **BLAKE3** – https://github.com/BLAKE3-team/BLAKE3
+* **RFC 8032** – Edwards-Curve Digital Signature Algorithm (EdDSA)
+
+=== Libraries
+
+* **ed25519-dalek** – https://github.com/dalek-cryptography/curve25519-dalek
+* **blake3** – https://docs.rs/blake3/
+* **rand** – https://docs.rs/rand/
+
+=== Related ADRs
+
+* xref:0001-use-rust-for-implementation.adoc[ADR-0001] – Rust enables `ed25519-dalek` in WASM
+* xref:0002-use-yew-for-frontend.adoc[ADR-0002] – Yew provides storage API wrappers

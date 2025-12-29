@@ -235,6 +235,10 @@ Rel(activity, status, "has")
 |Rust-native WebRTC, minimal infrastructure, game-specific API, reliable/unreliable channels.
 |**xref:adr/0003-use-matchbox-for-signaling.adoc[ADR-0003]**
 
+|**Client-side Ed25519 keys**
+|Deterministic identity from name+password, enables reconnection, prevents impersonation.
+|**xref:adr/0004-use-client-side-key-generation-for-identity.adoc[ADR-0004]**
+
 |Client-side state
 |Enables instant UI updates, reduces server load, supports offline mode.
 |xref:01-understand.adoc[Understand]
