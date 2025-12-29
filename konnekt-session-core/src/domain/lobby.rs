@@ -35,6 +35,9 @@ pub enum LobbyError {
     #[error("Lobby is empty, cannot delegate host")]
     EmptyLobby,
 
+    #[error("Cannot remove host without delegation")]
+    CannotRemoveHost,
+
     #[error("Participant error: {0}")]
     ParticipantError(#[from] ParticipantError),
 }
@@ -95,16 +98,30 @@ impl Lobby {
     }
 
     /// Remove a participant by ID
-    pub fn remove_participant(&mut self, participant_id: Uuid) -> Result<(), LobbyError> {
+    /// For host timeout scenarios, use participants_mut().remove() directly
+    pub fn remove_participant(&mut self, participant_id: Uuid) -> Result<bool, LobbyError> {
+        // Don't allow removing the current host via this method
+        // For timeout scenarios, caller should use participants_mut().remove()
         if participant_id == self.host_id {
-            return Err(LobbyError::NoHost);
+            return Err(LobbyError::CannotRemoveHost);
         }
+
+        let was_host = self
+            .participants
+            .get(&participant_id)
+            .map(|p| p.is_host())
+            .unwrap_or(false);
 
         self.participants
             .remove(&participant_id)
             .ok_or(LobbyError::ParticipantNotFound(participant_id))?;
 
-        Ok(())
+        Ok(was_host)
+    }
+
+    /// Get mutable access to participants (for removing timed out peers)
+    pub fn participants_mut(&mut self) -> &mut HashMap<Uuid, Participant> {
+        &mut self.participants
     }
 
     /// Manually delegate host role to a guest
@@ -122,9 +139,12 @@ impl Lobby {
         // Promote new host
         new_host.promote_to_host();
 
-        // Demote old host
+        // Demote old host (if they still exist in the map)
+        // This handles the case where the old host timed out and was removed
         if let Some(old_host) = self.participants.get_mut(&self.host_id) {
-            old_host.demote_to_guest();
+            if old_host.id() != new_host_id {
+                old_host.demote_to_guest();
+            }
         }
 
         // Update host ID
@@ -136,18 +156,24 @@ impl Lobby {
     /// Automatically delegate host to the oldest guest (deterministic election)
     pub fn auto_delegate_host(&mut self) -> Result<Uuid, LobbyError> {
         // Find oldest guest (earliest join timestamp)
+        // Important: Filter out the current host_id in case they're still in the map
         let oldest_guest = self
             .participants
             .values()
-            .filter(|p| !p.is_host())
-            .min_by_key(|p| p.joined_at())
-            .ok_or(LobbyError::EmptyLobby)?;
+            .filter(|p| !p.is_host() && p.id() != self.host_id)
+            .min_by_key(|p| p.joined_at());
 
-        let new_host_id = oldest_guest.id();
-
-        self.delegate_host(new_host_id)?;
-
-        Ok(new_host_id)
+        match oldest_guest {
+            Some(guest) => {
+                let new_host_id = guest.id();
+                self.delegate_host(new_host_id)?;
+                Ok(new_host_id)
+            }
+            None => {
+                // No guests available - lobby is empty except for (maybe) host
+                Err(LobbyError::EmptyLobby)
+            }
+        }
     }
 
     /// Check if there are any guests in the lobby
@@ -225,7 +251,7 @@ mod tests {
 
         let result = lobby.remove_participant(host_id);
 
-        assert_eq!(result, Err(LobbyError::NoHost));
+        assert_eq!(result, Err(LobbyError::CannotRemoveHost));
     }
 
     #[test]
@@ -350,5 +376,153 @@ mod tests {
         let new_host_id = lobby.auto_delegate_host().unwrap();
 
         assert_eq!(new_host_id, alice_id);
+    }
+
+    #[test]
+    fn test_auto_delegate_after_host_removed() {
+        // Reproduce the bug: host is removed from participants map,
+        // then auto_delegate tries to find them
+
+        let host = Participant::with_timestamp(
+            "Host".to_string(),
+            LobbyRole::Host,
+            Timestamp::from_millis(100),
+        )
+        .unwrap();
+        let host_id = host.id();
+
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        // Add two guests
+        let alice = Participant::with_timestamp(
+            "Alice".to_string(),
+            LobbyRole::Guest,
+            Timestamp::from_millis(200),
+        )
+        .unwrap();
+        let alice_id = alice.id();
+
+        let bob = Participant::with_timestamp(
+            "Bob".to_string(),
+            LobbyRole::Guest,
+            Timestamp::from_millis(300),
+        )
+        .unwrap();
+
+        lobby.add_guest(alice).unwrap();
+        lobby.add_guest(bob).unwrap();
+
+        // Simulate host timeout: remove host from participants
+        // This is what happens in handle_peer_timed_out
+        lobby.participants_mut().remove(&host_id);
+
+        // Now try to auto-delegate
+        // This should work - promote Alice (oldest guest)
+        let result = lobby.auto_delegate_host();
+
+        assert!(
+            result.is_ok(),
+            "auto_delegate should succeed even if host is removed"
+        );
+        let new_host_id = result.unwrap();
+        assert_eq!(new_host_id, alice_id, "Alice should become host");
+
+        // Verify Alice is now host
+        assert!(lobby.participants().get(&alice_id).unwrap().is_host());
+        assert_eq!(lobby.host_id(), alice_id);
+    }
+
+    #[test]
+    fn test_delegate_host_with_removed_old_host() {
+        // Test that delegate_host works when old host is already removed
+
+        let host = Participant::with_timestamp(
+            "Host".to_string(),
+            LobbyRole::Host,
+            Timestamp::from_millis(100),
+        )
+        .unwrap();
+        let host_id = host.id();
+
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let alice = Participant::with_timestamp(
+            "Alice".to_string(),
+            LobbyRole::Guest,
+            Timestamp::from_millis(200),
+        )
+        .unwrap();
+        let alice_id = alice.id();
+
+        lobby.add_guest(alice).unwrap();
+
+        // Remove the old host
+        lobby.participants_mut().remove(&host_id);
+
+        // Try to delegate to Alice
+        let result = lobby.delegate_host(alice_id);
+
+        // This SHOULD succeed - we handle missing old host gracefully
+        assert!(
+            result.is_ok(),
+            "Should succeed even when old host is removed"
+        );
+        assert_eq!(lobby.host_id(), alice_id);
+        assert!(lobby.participants().get(&alice_id).unwrap().is_host());
+    }
+
+    #[test]
+    fn test_lobby_state_after_host_timeout() {
+        // Reproduce the exact scenario from the error
+
+        let host = Participant::new_host("OriginalHost".to_string()).unwrap();
+        let host_id = host.id();
+
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let guest1 = Participant::new_guest("Guest1".to_string()).unwrap();
+        let guest1_id = guest1.id();
+
+        let guest2 = Participant::new_guest("Guest2".to_string()).unwrap();
+
+        lobby.add_guest(guest1).unwrap();
+        lobby.add_guest(guest2).unwrap();
+
+        println!("Before timeout:");
+        println!("  Host ID: {}", lobby.host_id());
+        println!("  Participants: {}", lobby.participants().len());
+        println!(
+            "  Host exists in map: {}",
+            lobby.participants().contains_key(&host_id)
+        );
+
+        // Simulate host timeout:
+        // 1. Remove host from participants
+        let removed = lobby.participants_mut().remove(&host_id);
+        assert!(removed.is_some(), "Host should be in participants");
+
+        println!("\nAfter removing host:");
+        println!("  Host ID (still): {}", lobby.host_id());
+        println!("  Participants: {}", lobby.participants().len());
+        println!(
+            "  Host exists in map: {}",
+            lobby.participants().contains_key(&host_id)
+        );
+
+        // 2. Try to delegate
+        let result = lobby.auto_delegate_host();
+
+        println!("\nDelegation result: {:?}", result);
+
+        if let Ok(new_host_id) = result {
+            println!("New host ID: {}", new_host_id);
+            println!("New host is Guest1: {}", new_host_id == guest1_id);
+
+            // Verify state
+            assert_eq!(lobby.host_id(), new_host_id);
+            assert!(lobby.participants().get(&new_host_id).unwrap().is_host());
+        } else {
+            panic!("Delegation should succeed");
+        }
     }
 }
