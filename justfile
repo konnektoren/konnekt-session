@@ -8,7 +8,7 @@ default:
 
 # Run all tests across workspace
 test:
-    cargo test -p konnekt-session-core
+    cargo test -p konnekt-session-core -p konnekt-session-p2p
 
 # Run tests with output
 test-verbose:
