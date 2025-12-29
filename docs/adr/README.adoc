@@ -105,6 +105,21 @@ Each ADR in this directory follows the **Michael Nygard format**:
 |Use garde for Domain Validation
 |✅ Accepted
 |2025-12-29
+
+|xref:0013-use-instant-for-cross-platform-time.adoc[ADR-0013]
+|Use instant for Cross-Platform Time
+|✅ Accepted
+|2025-12-29
+
+|xref:0014-use-localstorage-for-session-persistence.adoc[ADR-0014]
+|Use localStorage for Session Persistence
+|✅ Accepted
+|2025-12-29
+
+|xref:0015-use-feature-gated-event-cache.adoc[ADR-0015]
+|Use Feature-Gated Event Cache
+|✅ Accepted
+|2025-12-29
 |===
 
 == Guidelines for Writing ADRs

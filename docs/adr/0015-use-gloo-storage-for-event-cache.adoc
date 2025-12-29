@@ -1,0 +1,282 @@
+= ADR-0015: Use gloo-storage for Event Cache
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+Event Sourcing (ADR-0010) keeps a **bounded event log** (max 100 events, ~10KB). We need to cache events for:
+
+* **Fast reconnection** - don't re-fetch events from host
+* **Offline resume** - replay recent events locally
+* **Debugging** - export recent history
+
+Initially considered IndexedDB, but:
+* **Too complex** - transactions, cursors, async ceremony
+* **Overkill** - we only store ~10KB (100 events × ~100 bytes each)
+* **Dual APIs** - different code for browser vs tests
+
+== Decision
+
+Use **`gloo-storage`** with **`localStorage`** (browser) and **in-memory HashMap** (tests) via a simple trait.
+
+=== Dependencies
+
+[source,toml]
+----
+[dependencies]
+gloo-storage = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+----
+
+=== Architecture
+
+[source,rust]
+----
+use serde::{Deserialize, Serialize};
+
+pub trait EventCache {
+    fn save_events(&self, lobby_id: &LobbyId, events: &[LobbyEvent]) -> Result<()>;
+    fn load_events(&self, lobby_id: &LobbyId) -> Result<Vec<LobbyEvent>>;
+    fn clear(&self, lobby_id: &LobbyId) -> Result<()>;
+}
+
+// Browser implementation (gloo-storage → localStorage)
+#[cfg(target_arch = "wasm32")]
+pub struct BrowserEventCache;
+
+#[cfg(target_arch = "wasm32")]
+impl EventCache for BrowserEventCache {
+    fn save_events(&self, lobby_id: &LobbyId, events: &[LobbyEvent]) -> Result<()> {
+        use gloo_storage::{LocalStorage, Storage};
+        let key = format!("events:{}", lobby_id);
+        LocalStorage::set(&key, events)
+            .map_err(|e| StorageError::WriteFailed(e.to_string()))
+    }
+
+    fn load_events(&self, lobby_id: &LobbyId) -> Result<Vec<LobbyEvent>> {
+        use gloo_storage::{LocalStorage, Storage};
+        let key = format!("events:{}", lobby_id);
+        LocalStorage::get(&key)
+            .unwrap_or(Ok(Vec::new()))
+    }
+
+    fn clear(&self, lobby_id: &LobbyId) -> Result<()> {
+        use gloo_storage::{LocalStorage, Storage};
+        let key = format!("events:{}", lobby_id);
+        LocalStorage::delete(&key);
+        Ok(())
+    }
+}
+
+// Test implementation (in-memory HashMap)
+#[cfg(not(target_arch = "wasm32"))]
+pub struct InMemoryEventCache {
+    store: Arc<Mutex<HashMap<LobbyId, Vec<LobbyEvent>>>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl EventCache for InMemoryEventCache {
+    fn save_events(&self, lobby_id: &LobbyId, events: &[LobbyEvent]) -> Result<()> {
+        let mut store = self.store.lock().unwrap();
+        store.insert(lobby_id.clone(), events.to_vec());
+        Ok(())
+    }
+
+    fn load_events(&self, lobby_id: &LobbyId) -> Result<Vec<LobbyEvent>> {
+        let store = self.store.lock().unwrap();
+        Ok(store.get(lobby_id).cloned().unwrap_or_default())
+    }
+
+    fn clear(&self, lobby_id: &LobbyId) -> Result<()> {
+        let mut store = self.store.lock().unwrap();
+        store.remove(lobby_id);
+        Ok(())
+    }
+}
+----
+
+=== Usage
+
+[source,rust]
+----
+pub struct LobbyService {
+    event_cache: Box<dyn EventCache>,
+}
+
+impl LobbyService {
+    pub fn new() -> Self {
+        #[cfg(target_arch = "wasm32")]
+        let cache = BrowserEventCache;
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let cache = InMemoryEventCache::new();
+
+        Self {
+            event_cache: Box::new(cache),
+        }
+    }
+
+    pub fn apply_and_cache(&mut self, event: LobbyEvent) -> Result<()> {
+        // Apply to state
+        self.lobby.apply_event(event.clone())?;
+
+        // Cache bounded log (last 100 events)
+        let recent_events = self.lobby.event_log
+            .iter()
+            .rev()
+            .take(100)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        self.event_cache.save_events(&self.lobby_id, &recent_events)?;
+        Ok(())
+    }
+
+    pub fn restore_from_cache(&mut self) -> Result<()> {
+        let events = self.event_cache.load_events(&self.lobby_id)?;
+
+        for event in events {
+            self.lobby.apply_event(event)?;
+        }
+
+        Ok(())
+    }
+}
+----
+
+=== Data Size Analysis
+
+[source,rust]
+----
+// Typical event
+{
+  "sequence": 42,
+  "timestamp": 1704067200,
+  "event": {
+    "ParticipantJoined": {
+      "participant": {
+        "id": "abc123",
+        "name": "Alice",
+        "role": "Guest"
+      }
+    }
+  },
+  "signature": "..."  // 64 bytes
+}
+// Size: ~150 bytes
+
+// 100 events = ~15KB
+// Well within localStorage 5MB limit
+----
+
+== Rationale
+
+=== Simpler API
+
+[source,rust]
+----
+// ✅ gloo-storage (synchronous, simple)
+LocalStorage::set("events:123", &events)?;
+let events: Vec<LobbyEvent> = LocalStorage::get("events:123")?;
+
+// ❌ IndexedDB (async, complex)
+let tx = db.transaction(&["events"], IdbTransactionMode::Readwrite)?;
+let store = tx.object_store("events")?;
+let cursor = store.open_cursor()?.await?;
+while let Some(c) = cursor {
+    // ... iterate manually
+}
+----
+
+=== Unified Backend
+
+Both browser and tests use **same data structure** (Vec<LobbyEvent>):
+- Browser: `gloo-storage` serializes to JSON string in localStorage
+- Tests: `HashMap<LobbyId, Vec<LobbyEvent>>` in memory
+
+**Same API**, different storage location.
+
+=== Bounded Size = localStorage Is Fine
+
+From ADR-0010:
+
+[source,rust]
+----
+const MAX_EVENTS_IN_MEMORY: usize = 100;
+
+// We already limit event log size
+if self.event_log.len() > MAX_EVENTS_IN_MEMORY {
+    self.snapshot();
+    self.event_log.truncate(20);  // Keep only recent
+}
+----
+
+So we're caching **at most 15KB** - localStorage's 5MB is plenty.
+
+=== No Async Overhead
+
+[source,rust]
+----
+// Synchronous - no spawn_local, no .await
+pub fn save_events(&self, lobby_id: &LobbyId, events: &[LobbyEvent]) -> Result<()> {
+    LocalStorage::set(&format!("events:{}", lobby_id), events)?;
+    Ok(())
+}
+
+// Can call from anywhere, no async context needed
+----
+
+== Consequences
+
+=== Positive
+
+* **Simple API** - just get/set, no transactions
+* **Synchronous** - no async complexity
+* **Same backend interface** - tests and browser use same trait
+* **Sufficient capacity** - 15KB << 5MB limit
+* **Already a dependency** - gloo-storage used for session (ADR-0014)
+* **Fast** - localStorage is optimized by browsers
+
+=== Negative
+
+* **Synchronous = blocks thread** - but 15KB serialization is <1ms
+* **5MB total quota** - shared with session data (acceptable, session ~1KB)
+* **User can clear** - acceptable, will re-fetch from host
+
+=== Neutral
+
+* **Not queryable** - but we don't need queries (just load all events)
+* **Per-lobby storage** - one key per lobby (simple, works)
+
+== When to Use IndexedDB
+
+If we later need:
+* **Huge event logs** (>1MB per lobby) - unlikely with bounded log
+* **Complex queries** - filtering events by type, time range
+* **Multi-lobby caching** - 100s of lobbies in history
+
+Then migrate to IndexedDB. But for v1.0, localStorage is **simpler and sufficient**.
+
+== Implementation Checklist
+
+- [ ] Define `EventCache` trait
+- [ ] Implement `BrowserEventCache` with gloo-storage
+- [ ] Implement `InMemoryEventCache` for tests
+- [ ] Integrate with `LobbyService`
+- [ ] Handle quota exceeded errors (notify user)
+- [ ] Add cache clearing in UI (settings)
+- [ ] Test event caching in browser
+- [ ] Test event restoration on page reload
+
+== References
+
+* **gloo-storage** – https://docs.rs/gloo-storage/
+* **Web Storage API** – https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage
+
+=== Related ADRs
+
+* xref:0010-use-event-sourcing-for-lobby-state.adoc[ADR-0010] – Bounded event log (max 100)
+* xref:0014-use-localstorage-for-session-persistence.adoc[ADR-0014] – Session data also in localStorage
+* xref:0009-use-json-with-feature-gated-messagepack.adoc[ADR-0009] – Events serialized as JSON

@@ -1,0 +1,126 @@
+= ADR-0014: Use localStorage for Session Persistence
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+Users need to **maintain identity** across page refreshes:
+
+* **Session ID** - seed for key generation (ADR-0004)
+* **Lobby ID** - rejoin current lobby
+* **Preferences** - participation mode, display name
+
+Without persistence, refreshing the page creates a new identity and loses lobby connection.
+
+== Decision
+
+Use **`localStorage`** via `gloo-storage` to persist session data.
+
+=== Dependencies
+
+[source,toml]
+----
+[dependencies]
+gloo-storage = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+----
+
+=== Implementation
+
+[source,rust]
+----
+use gloo_storage::{LocalStorage, Storage};
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
+pub struct SessionData {
+    pub session_id: String,        // For key derivation
+    pub last_lobby_id: Option<String>,
+    pub display_name: Option<String>,
+}
+
+const SESSION_KEY: &str = "konnekt_session";
+
+pub fn save_session(data: &SessionData) -> Result<()> {
+    LocalStorage::set(SESSION_KEY, data)
+        .map_err(|e| StorageError::WriteFailed(e.to_string()))
+}
+
+pub fn load_session() -> Option<SessionData> {
+    LocalStorage::get(SESSION_KEY).ok()
+}
+
+pub fn clear_session() {
+    let _ = LocalStorage::delete(SESSION_KEY);
+}
+----
+
+=== What Gets Stored
+
+**Stored** (survives refresh):
+* Session ID (UUID)
+* Last lobby ID
+* User preferences
+
+**NOT Stored** (security):
+* Private keys (re-derived from session_id + optional password)
+* Passwords (never persisted)
+* Full lobby state (too large, gets from host)
+
+== Rationale
+
+* **Browser-native** - no external dependencies
+* **Persistent** - survives page refresh, browser restart
+* **Small data** - localStorage perfect for <100KB
+* **Synchronous** - no async overhead for simple reads
+* **gloo abstraction** - handles serialization/errors
+
+== Consequences
+
+* ✅ Users keep identity on refresh
+* ✅ "Return to lobby" functionality
+* ✅ Simple API
+* ❌ 5-10MB total limit (shared across domains)
+* ❌ User can clear storage (acceptable - creates new session)
+* ❌ Synchronous API blocks thread (but data is tiny)
+
+== Security Considerations
+
+[source,rust]
+----
+// ✅ Safe to store
+LocalStorage::set("session_id", uuid);
+
+// ❌ NEVER store
+LocalStorage::set("private_key", key);  // DON'T!
+LocalStorage::set("password", pwd);     // DON'T!
+
+// Keys are re-derived on demand
+let keys = generate_participant_key(
+    &name,
+    password.as_deref(),
+    &session_id  // From localStorage
+);
+----
+
+== Implementation Checklist
+
+- [ ] Add `gloo-storage` dependency
+- [ ] Create `SessionData` struct
+- [ ] Implement save/load helpers
+- [ ] Call `save_session()` on lobby join
+- [ ] Call `load_session()` on app init
+- [ ] Add "Clear Session" button in UI (for testing)
+- [ ] Handle localStorage quota errors gracefully
+
+== References
+
+* **gloo-storage** – https://docs.rs/gloo-storage/
+* **Web Storage API** – https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage
+
+=== Related ADRs
+
+* xref:0004-use-client-side-key-generation-for-identity.adoc[ADR-0004] – Session ID used for key derivation
+* xref:0010-use-event-sourcing-for-lobby-state.adoc[ADR-0010] – Events not stored in session (too large)

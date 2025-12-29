@@ -1,0 +1,63 @@
+= ADR-0013: Use instant for Cross-Platform Time
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+Rust's `std::time::Instant` doesn't work in WASM - panics at runtime. We need monotonic time for:
+
+* Measuring durations (e.g., "how long since last heartbeat?")
+* Implementing timeouts
+* Performance profiling
+
+== Decision
+
+Use the **`instant`** crate which provides a compatible API for both native and WASM targets.
+
+=== Dependencies
+
+[source,toml]
+----
+[dependencies]
+instant = { version = "0.1", features = ["wasm-bindgen"] }
+----
+
+=== Usage
+
+[source,rust]
+----
+use instant::{Instant, Duration};
+
+let start = Instant::now();
+// ... operation ...
+let elapsed = start.elapsed();
+
+if elapsed > Duration::from_secs(30) {
+    // Timeout
+}
+----
+
+== Rationale
+
+* **Drop-in replacement** for `std::time::Instant`
+* **WASM-compatible** - uses `performance.now()` in browser
+* **Small overhead** - ~2KB to WASM bundle
+* **Already a dependency** - Matchbox and other crates use it
+
+== Consequences
+
+* ✅ Cross-platform monotonic time
+* ✅ Same API as std
+* ✅ Minimal code changes
+* ❌ Another dependency (but already transitive)
+
+== References
+
+* **instant crate** – https://docs.rs/instant/
+
+=== Related ADRs
+
+* xref:0011-use-std-async-for-wasm-compatibility.adoc[ADR-0011] – Async timers use instant
+* xref:0010-use-event-sourcing-for-lobby-state.adoc[ADR-0010] – Event timestamps use instant
