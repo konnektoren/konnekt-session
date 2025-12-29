@@ -1,0 +1,572 @@
+= Step 4: Strategize – Core Domain Charts
+:icons: font
+:toc: left
+:toclevels: 3
+:sectnums:
+
+== Purpose
+
+Identify which subdomains are **core** (strategic differentiators) vs **supporting** vs **generic**, so we can allocate resources appropriately.
+
+== Core Domain Chart
+
+[plantuml, "core-domain-chart", png]
+----
+@startuml
+!define CORE_COLOR #FF6B6B
+!define SUPPORTING_COLOR #4ECDC4
+!define GENERIC_COLOR #95E1D3
+
+title Konnekt Session – Core Domain Chart (Revised)
+
+' Axes
+!define MAX_COMPLEXITY 100
+!define MAX_DIFFERENTIATION 100
+
+rectangle "Business Differentiation ↑" as y_axis
+rectangle "Domain Complexity →" as x_axis
+
+' Core Domains (high differentiation, high/medium complexity)
+rectangle "Lobby\nManagement" as lobby_mgmt CORE_COLOR
+rectangle "Activity\nLifecycle" as activity_lifecycle CORE_COLOR
+rectangle "Player Role\nManagement" as role_mgmt CORE_COLOR
+
+' Supporting Domains (medium differentiation, medium complexity)
+rectangle "Activity\nCatalog &\nPlugins" as activity_catalog SUPPORTING_COLOR
+rectangle "Authentication\n& Identity" as auth SUPPORTING_COLOR
+rectangle "Game State\nSerialization" as game_state SUPPORTING_COLOR
+
+' Generic Domains (low differentiation, low/medium complexity)
+rectangle "P2P State Sync\n(Round-Robin)" as p2p_sync GENERIC_COLOR
+rectangle "WebRTC\nSignalling" as webrtc GENERIC_COLOR
+rectangle "Message\nSerialization" as serialization GENERIC_COLOR
+rectangle "Local Storage" as storage GENERIC_COLOR
+
+' Positioning
+lobby_mgmt -[hidden]-> activity_lifecycle
+activity_lifecycle -[hidden]-> role_mgmt
+role_mgmt -[hidden]-> activity_catalog
+activity_catalog -[hidden]-> auth
+auth -[hidden]-> game_state
+game_state -[hidden]-> p2p_sync
+p2p_sync -[hidden]-> webrtc
+webrtc -[hidden]-> serialization
+serialization -[hidden]-> storage
+
+note right of lobby_mgmt
+**Core Domain**
+This is what users pay for:
+• Creating & managing game sessions
+• Inviting/kicking players
+• Starting/stopping activities
+• Managing lobby lifecycle
+High differentiation & complexity
+end note
+
+note right of p2p_sync
+**Generic Subdomain**
+Round-robin consensus is well-known
+Use existing patterns (Raft-like, CRDT)
+Low differentiation: infrastructure concern
+Can use library or standard algorithm
+end note
+
+@enduml
+----
+
+== Domain Classification (Revised)
+
+[cols="2,1,1,3", options="header"]
+|===
+|Subdomain
+|Type
+|Investment Level
+|Rationale
+
+|**Lobby Management**
+|Core
+|⭐⭐⭐⭐⭐
+|• **Primary business value** – what developers integrate for
+• Managing session lifecycle (create, join, leave, close)
+• Player admission control (passwords, invites, kicks)
+• Lobby configuration (max players, privacy settings)
+• This is what makes the product unique & valuable
+
+|**Activity Lifecycle**
+|Core
+|⭐⭐⭐⭐⭐
+|• **Core user workflow** – starting/stopping games
+• Activity state machine (planned → in-progress → finished)
+• Results collection & aggregation
+• Activity ordering & queue management
+• Critical to user experience
+
+|**Player Role Management**
+|Core
+|⭐⭐⭐⭐
+|• **Domain-specific logic** – Admin/Player/Observer roles
+• Role transitions & permissions
+• Admin delegation (appointing new admin)
+• Observer promotion to player
+• Business rules about who can do what
+
+|**Activity Catalog & Plugins**
+|Supporting
+|⭐⭐⭐
+|• Enables extensibility (important for adoption)
+• Activity registration & discovery
+• Plugin versioning & compatibility
+• Moderate complexity (trait system)
+• Not differentiating (many libs have plugins)
+
+|**Authentication & Identity**
+|Supporting
+|⭐⭐⭐
+|• Essential for security, not differentiating
+• Key generation & storage (Ed25519) or Signature verification
+• Identity persistence (LocalStorage)
+• Use standard crypto libraries
+
+|**Game State Serialization**
+|Supporting
+|⭐⭐
+|• Necessary for P2P sync
+• Activity-specific data schemas
+• Versioning for backwards compatibility
+• Use serde + custom codecs if needed
+
+|**P2P State Sync (Round-Robin)**
+|Generic
+|⭐⭐
+|• **Infrastructure concern**, not business logic
+• Well-known distributed consensus patterns
+• Round-robin leader election is textbook CS
+• Use existing algorithms (Raft-like, CRDT)
+• Low differentiation (commodity)
+
+|**WebRTC Signalling**
+|Generic
+|⭐
+|• Solved problem (Matchbox library)
+• Zero differentiation
+• Use Matchbox as-is
+
+|**Message Serialization**
+|Generic
+|⭐
+|• Solved problem (serde, bincode)
+• No differentiation
+
+|**Local Storage**
+|Generic
+|⭐
+|• Browser API wrapper
+• Trivial complexity
+|===
+
+== Revised Architecture: Separation of Concerns
+
+=== Layered Architecture
+
+[source]
+----
+┌─────────────────────────────────────────────────────────┐
+│         Core Domain: Lobby Management                    │
+│  (Business Logic: Activities, Roles, Permissions)        │
+└─────────────────────────────────────────────────────────┘
+                          ↓ uses
+┌─────────────────────────────────────────────────────────┐
+│      Supporting: Authentication & Identity               │
+│        (Keys, Signatures, Identity Proofs)               │
+└─────────────────────────────────────────────────────────┘
+                          ↓ uses
+┌─────────────────────────────────────────────────────────┐
+│   Generic Infrastructure: P2P State Sync Layer          │
+│  (Round-Robin Consensus, Message Ordering, Replication) │
+└─────────────────────────────────────────────────────────┘
+                          ↓ uses
+┌─────────────────────────────────────────────────────────┐
+│    Generic Infrastructure: WebRTC Transport              │
+│         (Matchbox, Data Channels, Signalling)            │
+└─────────────────────────────────────────────────────────┘
+----
+
+=== Key Insight
+
+**Admin role is domain logic, not sync infrastructure:**
+
+* **Domain Layer**: Admin is a `Role` enum value on a `Player` entity
+  - Business rules: "Only admin can start activities"
+  - Domain events: `AdminChanged`, `PlayerPromotedToAdmin`
+  - Aggregate invariants: "Lobby must have exactly one admin"
+
+* **Infrastructure Layer**: Round-robin leader election for state sync
+  - Technical concern: "Who broadcasts the next state update?"
+  - Could be ANY peer (not necessarily the domain admin)
+  - Could rotate every N seconds or every M messages
+  - Completely decoupled from domain concept of "admin"
+
+=== Example Scenario
+
+[source]
+----
+Lobby has 4 players:
+  - Alice (Admin role in domain)
+  - Bob (Player role)
+  - Carol (Player role)
+  - Dave (Observer role)
+
+P2P Sync uses round-robin:
+  - Cycle 1: Alice broadcasts
+  - Cycle 2: Bob broadcasts
+  - Cycle 3: Carol broadcasts
+  - Cycle 4: Alice broadcasts again
+  (Dave doesn't broadcast - not in rotation)
+
+Alice (domain admin) can:
+  - Kick players (domain logic)
+  - Start activities (domain logic)
+
+Bob/Carol broadcast state but can't:
+  - Execute admin commands (domain forbids it)
+  - Their broadcasts just replicate Alice's commands
+----
+
+== Complexity Assessment (Revised)
+
+[cols="2,1,4", options="header"]
+|===
+|Subdomain
+|Complexity Score (1-10)
+|Complexity Drivers
+
+|**Lobby Management**
+|8
+|• Complex state machine (lobby states)
+|• Multi-actor concurrency (simultaneous joins)
+|• Invariant enforcement (max players, unique names)
+|• Password protection & invite codes
+|• Lobby closure & cleanup logic
+|• Edge cases: admin leaves, last player leaves
+
+|**Activity Lifecycle**
+|7
+|• Activity state transitions (planned → running → done)
+|• Result collection from multiple players
+|• Timeout handling (max activity duration)
+|• Activity cancellation & restart logic
+|• Scoring & leaderboard calculations
+|• Edge cases: activity running when admin disconnects
+
+|**Player Role Management**
+|6
+|• Role transition rules (Observer ↔ Player, Admin delegation)
+|• Permission enforcement (who can do what)
+|• Admin succession (when admin leaves)
+|• Multi-admin scenarios (co-admins?)
+|• Edge cases: all admins leave simultaneously
+
+|**Activity Catalog & Plugins**
+|5
+|• Plugin registration & lifecycle
+|• Versioning & compatibility checks
+|• Activity-specific data schemas
+|• Hot-reload considerations
+
+|**Authentication & Identity**
+|4
+|• Key generation (Ed25519)
+|• Signature verification
+|• Key persistence & recovery
+|• Clock skew handling (timestamp verification)
+
+|**Game State Serialization**
+|3
+|• Schema evolution (backwards compatibility)
+|• Compression for large states
+|• Partial updates (deltas)
+
+|**P2P State Sync (Round-Robin)**
+|4
+|• **Well-studied problem** (use existing algorithms)
+|• Leader election (round-robin with timeouts)
+|• Message ordering (sequence numbers)
+|• Conflict resolution (last-write-wins)
+|• Use Raft, CRDT, or simple round-robin
+
+|**WebRTC Signalling**
+|2
+|• Matchbox handles complexity
+
+|**Message Serialization**
+|2
+|• Serde derive macros
+
+|**Local Storage**
+|1
+|• Browser API wrapper
+|===
+
+== Differentiation Assessment (Revised)
+
+[cols="2,1,4", options="header"]
+|===
+|Subdomain
+|Differentiation Score (1-10)
+|Differentiation Drivers
+
+|**Lobby Management**
+|10
+|• **Primary value proposition** for developers
+|• Unique UX: seamless lobby flows
+|• Superior DX: simple API for complex workflows
+|• Competitive advantage: easier than building from scratch
+|• This is what developers evaluate when choosing the library
+
+|**Activity Lifecycle**
+|9
+|• **Core user experience** – starting/stopping games
+|• Unique approach to activity queuing & results
+|• Differentiation in how activities integrate
+|• Better than generic "game session" libraries
+
+|**Player Role Management**
+|8
+|• **Flexible role system** (not just "host" vs "player")
+|• Smooth role transitions (Observer ↔ Player)
+|• Admin delegation without full reconnect
+|• More sophisticated than most lobby libs
+
+|**Activity Catalog & Plugins**
+|5
+|• Good plugin system improves DX
+|• Moderate differentiation (ease of adding games)
+|• Table stakes for a game library
+
+|**Authentication & Identity**
+|3
+|• Everyone needs auth, not unique
+|• Slight differentiation in UX (key recovery)
+
+|**Game State Serialization**
+|2
+|• Standard problem, standard solution
+
+|**P2P State Sync (Round-Robin)**
+|2
+|• **Infrastructure, not differentiator**
+|• Users don't care HOW state syncs, just that it works
+|• Round-robin is well-known (not novel)
+|• Could swap for Raft/CRDT without users noticing
+
+|**WebRTC Signalling**
+|1
+|• Commodity (Matchbox)
+
+|**Message Serialization**
+|1
+|• Completely generic
+
+|**Local Storage**
+|1
+|• Browser standard
+|===
+
+== Investment Strategy (Revised)
+
+[cols="2,3,3", options="header"]
+|===
+|Domain Type
+|Investment Approach
+|Example Actions
+
+|**Core**
+(Lobby, Activity Lifecycle, Role Mgmt)
+|• **Build in-house** with highest quality
+|• Deep domain modeling (DDD tactical patterns)
+|• Extensive testing (domain scenarios)
+|• Rich documentation & examples
+|• Continuous UX improvement
+|• This is where we innovate
+|• Write domain models (aggregates, entities)
+|• EventStorming sessions with users
+|• Property-based testing for invariants
+|• Tutorial videos & interactive docs
+|• Blog posts about domain patterns
+
+|**Supporting**
+(Activity Catalog, Auth, Serialization)
+|• **Build competently** using best practices
+|• Leverage standard patterns
+|• Good test coverage
+|• Clear API documentation
+|• Use Rust trait system for plugins
+|• Standard crypto libraries (ring, ed25519-dalek)
+|• Serde for serialization
+|• API reference docs
+
+|**Generic**
+(P2P Sync, WebRTC, Storage)
+|• **Buy, use libraries, or use textbook algorithms**
+|• Minimal custom code
+|• Thin wrappers only if needed
+|• Outsource to community/libraries
+|• **Use existing round-robin/Raft/CRDT library**
+|• Use Matchbox for WebRTC
+|• Use web-sys for LocalStorage
+|• Copy standard algorithms from papers/books
+|===
+
+== P2P State Sync: Round-Robin Approach
+
+Since P2P state sync is **generic infrastructure**, we can use a simple, well-known algorithm:
+
+=== Round-Robin Leader Election
+
+```rust
+// Simple round-robin: each peer gets a turn to broadcast
+struct RoundRobinSync {
+    peers: Vec<PeerId>,
+    current_leader_index: usize,
+    rotation_interval: Duration, // e.g., 5 seconds
+}
+
+impl RoundRobinSync {
+    fn current_leader(&self) -> PeerId {
+        self.peers[self.current_leader_index % self.peers.len()]
+    }
+
+    fn rotate_leader(&mut self) {
+        self.current_leader_index += 1;
+    }
+
+    fn am_i_leader(&self, my_id: PeerId) -> bool {
+        self.current_leader() == my_id
+    }
+}
+```
+
+=== Decoupling from Domain
+
+```rust
+// Domain layer: Admin role is business logic
+pub enum Role {
+    Admin,    // Can execute admin commands
+    Player,   // Can participate in activities
+    Observer, // Read-only
+}
+
+// Infrastructure layer: Sync leader is technical concern
+pub struct SyncLeader {
+    current_broadcaster: PeerId, // Who sends next state update
+    rotation_schedule: Vec<PeerId>,
+}
+
+// These are INDEPENDENT:
+// - Domain admin can be different from sync leader
+// - Sync leader just replicates commands, doesn't authorize them
+// - Domain layer validates "is this user allowed to kick players?"
+// - Sync layer just ensures "did this message reach everyone?"
+```
+
+=== Benefits of Separation
+
+1. **Simpler domain model** – no mixing of business logic and sync logic
+2. **Testable in isolation** – test lobby rules without P2P complexity
+3. **Swappable sync layer** – can upgrade from round-robin to Raft without touching domain code
+4. **Clear responsibilities** – domain = "what", infrastructure = "how"
+
+== Alternative Sync Approaches (Future)
+
+Since sync is **generic**, we have options:
+
+[cols="2,3,3,2", options="header"]
+|===
+|Approach
+|Pros
+|Cons
+|When to Use
+
+|**Round-Robin**
+|• Simple to implement
+|• Fair distribution of broadcast load
+|• Predictable
+|• Single point of failure (current leader)
+|• Latency (wait for your turn)
+|v1.0 (simple)
+
+|**Admin-Only Broadcast**
+|• Clear authority (domain admin = sync leader)
+|• Lowest latency (no rotation)
+|• Admin is bottleneck
+|• Admin disconnect breaks sync
+|v1.0 alternative
+
+|**CRDT (Conflict-Free)**
+|• No leader needed
+|• High availability
+|• Complexity
+|• Larger message sizes
+|v2.0 (research)
+
+|**Raft Consensus**
+|• Battle-tested
+|• Leader election built-in
+|• Heavyweight for browser
+|• Overkill for game lobbies
+|Future (if needed)
+|===
+
+== Risk Analysis (Revised)
+
+[cols="2,3,2,2", options="header"]
+|===
+|Subdomain
+|Risk
+|Mitigation
+|Priority
+
+|**Lobby Management**
+|Complex state machine bugs (edge cases)
+|Property-based testing, formal state machine modeling
+|🔴 Critical
+
+|**Activity Lifecycle**
+|Race conditions (simultaneous activity starts)
+|Domain invariants, command validation
+|🔴 Critical
+
+|**Role Management**
+|Orphaned lobby (all admins leave)
+|Auto-promote oldest player to admin
+|🟡 Medium
+
+|**P2P Sync**
+|Sync leader disconnect
+|Timeout + re-election (standard algorithm)
+|🟡 Medium
+
+|**Authentication**
+|Key loss (user can't rejoin as admin)
+|Key export/backup UX
+|🟡 Medium
+|===
+
+== Next Steps
+
+1. **Focus 80% effort on Core Domains**:
+   - Deep domain modeling for Lobby Management
+   - Activity lifecycle state machine design
+   - Role management business rules
+
+2. **Use off-the-shelf for Generic**:
+   - Research existing Rust CRDT/Raft libraries
+   - Implement simple round-robin as v1.0 sync
+   - Document sync layer as swappable component
+
+3. **Validate with users**:
+   - EventStorm lobby management flows
+   - Prototype activity lifecycle with real games
+   - Test role transition UX
+
+4. Move to **Step 2: Discover** to model the core domain collaboratively

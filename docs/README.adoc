@@ -6,6 +6,21 @@
 :sectnums:
 :xrefstyle: full
 
+== DDD Modeling Process
+
+This project follows the **Domain-Driven Design Starter Modelling Process**. The architecture documentation is organized into steps:
+
+1. **xref:01-understand.adoc[Understand]** – Business model & strategic goals
+2. **Discover** – Domain discovery (EventStorming) _(coming soon)_
+3. **Decompose** – Subdomain boundaries _(coming soon)_
+4. **xref:04-strategize.adoc[Strategize]** – Core Domain Charts
+5. **Connect** – Domain message flows _(coming soon)_
+6. **Organize** – Team topology _(coming soon)_
+7. **Define** – Bounded context details _(coming soon)_
+8. **Code** – Implementation patterns _(coming soon)_
+
+Start with **Step 1: Understand** to see the business context, then **Step 4: Strategize** to see our core domain investment strategy.
+
 == 1. Overview
 
 Konnekt Session is a **Rust-based, decentralized multiplayer-lobby library**.

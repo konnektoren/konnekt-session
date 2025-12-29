@@ -1,0 +1,222 @@
+= Step 1: Understand – Business Model & Strategy
+:icons: font
+:toc: left
+:toclevels: 3
+:sectnums:
+
+== Purpose
+
+Align our architectural decisions with the business goals and user needs of Konnekt Session.
+
+== Business Model Canvas
+
+[cols="1,2", options="header"]
+|===
+|Element
+|Description
+
+|**Key Partners**
+|• Matchbox signalling service providers (match.konnektoren.help)
+• Game developers building on top of Konnekt Session
+• Open source community contributors
+
+|**Key Activities**
+|• P2P lobby management
+• WebRTC connection orchestration
+• Admin election & authentication
+• Real-time state synchronization
+
+|**Key Resources**
+|• Rust/WASM expertise
+• WebRTC/Matchbox integration
+• Domain knowledge in multiplayer game sessions
+• Open source library code
+
+|**Value Propositions**
+|• **Zero server costs** – no game server infrastructure needed
+• **Low latency** – direct P2P connections between players
+• **Easy integration** – Rust library for Yew applications
+• **Decentralized** – resilient to server failures
+• **Extensible** – modular activity system
+
+|**Customer Relationships**
+|• Documentation & examples
+• GitHub issues & discussions
+• Community support
+
+|**Channels**
+|• GitHub repository
+• crates.io distribution
+• Technical blog posts
+• Example applications
+
+|**Customer Segments**
+|• Indie game developers
+• Educational platforms (multiplayer learning games)
+• Party game developers
+• Prototyping/hackathon projects
+
+|**Cost Structure**
+|• Development time (open source)
+• CI/CD infrastructure
+• Documentation maintenance
+• Matchbox signalling costs (minimal)
+
+|**Revenue Streams**
+|• Not applicable (open source library)
+• Potential future: hosted signalling service, premium support
+|===
+
+== Strategic Goals
+
+=== Short-term
+* Deliver a **stable v1.0** with core lobby management features
+* Implement **admin election & reclaim** protocol
+* Establish **documentation** with architecture diagrams
+
+=== Medium-term
+* Add **activity catalog** extensibility
+* Implement **offline mode** with state reconciliation
+
+=== Long-term
+* Enable **cross-platform** support (native + WASM)
+* Add **matchmaking** capabilities
+
+== User Needs
+
+=== Primary Users: Game Developers
+
+[cols="1,2,2", options="header"]
+|===
+|Need
+|Current Pain Point
+|How Konnekt Session Addresses It
+
+|Simple multiplayer setup
+|Complex server infrastructure, WebSocket management
+|Single library with Matchbox integration
+
+|Low hosting costs
+|Game servers are expensive to run and scale
+|No game server needed – only signalling
+
+|Quick prototyping
+|Too much boilerplate for multiplayer
+|Pre-built lobby & activity components
+
+|Flexible game types
+|Rigid frameworks lock you into specific patterns
+|Modular activity system, extensible via traits
+|===
+
+=== Secondary Users: Players
+
+[cols="1,2,2", options="header"]
+|===
+|Need
+|Current Pain Point
+|How Konnekt Session Addresses It
+
+|Fast game start
+|Long matchmaking queues, server lag
+|Direct P2P connections, instant lobby creation
+
+|Reliable sessions
+|Disconnects kill entire game
+|Admin election keeps lobby alive
+
+|Privacy
+|Game state stored on untrusted servers
+|All state stays on client devices
+|===
+
+== Impact Mapping
+
+[plantuml, "impact-map", png]
+----
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Impact Map – Konnekt Session
+
+rectangle "Goal:\nEnable zero-cost\nmultiplayer games" as goal
+
+rectangle "Indie Game\nDevelopers" as dev
+rectangle "Educational\nPlatforms" as edu
+rectangle "Party Game\nCreators" as party
+
+rectangle "Reduce\ninfrastructure\ncosts" as impact1
+rectangle "Speed up\nprototyping" as impact2
+rectangle "Enable\nreal-time\nlearning" as impact3
+
+rectangle "P2P architecture\n(no game server)" as deliverable1
+rectangle "Pre-built Yew\ncomponents" as deliverable2
+rectangle "Activity\ncatalog system" as deliverable3
+
+goal --> dev
+goal --> edu
+goal --> party
+
+dev --> impact1
+dev --> impact2
+edu --> impact3
+party --> impact2
+
+impact1 --> deliverable1
+impact2 --> deliverable2
+impact3 --> deliverable3
+
+@enduml
+----
+
+== Key Constraints
+
+[cols="1,3", options="header"]
+|===
+|Constraint
+|Implication
+
+|**No central game server**
+|All state management must be client-side; server only for signalling
+
+|**Browser-based**
+|Must compile to WASM; limited storage (LocalStorage); WebRTC dependencies
+
+|**Open source**
+|Must be maintainable by community; clear abstractions; good documentation
+
+|**Matchbox dependency**
+|Limited by Matchbox's capabilities; must work within WebRTC constraints
+
+|**Rust ecosystem**
+|Limited Yew component ecosystem; may need to build UI primitives ourselves
+|===
+
+== Success Metrics
+
+[cols="1,2,1", options="header"]
+|===
+|Metric
+|Description
+|Target (v1.0)
+
+|**Developer Experience**
+|Time to first working lobby
+|< 3 minutes
+
+|**Performance**
+|Connection establishment time
+|< 2 seconds
+
+|**Reliability**
+|Admin election success rate
+|> 95%
+
+|**Scalability**
+|Max concurrent players per lobby
+|10 players
+
+|**Documentation**
+|Coverage of core features
+|100%
+|===
