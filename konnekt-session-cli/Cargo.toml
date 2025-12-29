@@ -14,6 +14,11 @@ path = "src/lib.rs"
 name = "konnekt-cli"
 path = "src/main.rs"
 
+[[bin]]
+name = "konnekt-tui"
+path = "src/bin/tui.rs"
+required-features = ["tui"]
+
 [dependencies]
 konnekt-session-core = { path = "../konnekt-session-core" }
 konnekt-session-p2p = { path = "../konnekt-session-p2p" }
@@ -30,5 +35,14 @@ tokio = { version = "1.37", features = ["macros", "rt-multi-thread", "signal"] }
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+
+# TUI (optional, only for interactive mode)
+ratatui = { version = "0.28", optional = true }
+crossterm = { version = "0.28", optional = true }
+
+[features]
+default = []
+tui = ["ratatui", "crossterm"]
 
 [dev-dependencies]

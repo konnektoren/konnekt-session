@@ -20,3 +20,11 @@ host-turn NAME TURN_SERVER TURN_USER TURN_PASS:
         --turn-server "{{ TURN_SERVER }}" \
         --turn-username "{{ TURN_USER }}" \
         --turn-credential "{{ TURN_PASS }}"
+
+# Create a host session (TUI)
+host-tui NAME="TestHost":
+    cargo run --bin konnekt-tui --features tui -- create-host --name "{{ NAME }}"
+
+# Join a session (TUI)
+join-tui SESSION_ID NAME="TestGuest":
+    cargo run --bin konnekt-tui --features tui -- join --session-id "{{ SESSION_ID }}" --name "{{ NAME }}"
