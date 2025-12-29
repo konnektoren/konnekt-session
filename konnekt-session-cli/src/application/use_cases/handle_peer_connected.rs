@@ -17,6 +17,7 @@ pub async fn handle_peer_connected(
         "name": participant.name(),
         "role": format!("{}", participant.lobby_role()),
         "mode": format!("{}", participant.participation_mode()),
+        "joined_at": participant.joined_at().as_millis(),  // Add timestamp!
     });
 
     let data =

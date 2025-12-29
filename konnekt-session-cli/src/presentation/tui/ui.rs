@@ -1,7 +1,7 @@
 use super::app::{App, Tab};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Tabs},
@@ -55,7 +55,7 @@ fn render_content(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_session(f: &mut Frame, area: Rect, app: &App) {
-    let text = vec![
+    let mut text = vec![
         Line::from(""),
         Line::from(vec![Span::styled(
             "Session ID:",
@@ -72,11 +72,24 @@ fn render_session(f: &mut Frame, area: Rect, app: &App) {
         )]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("💡 ", Style::default().fg(Color::Yellow)),
-            Span::raw("You can select and copy this ID from your terminal"),
+            Span::raw("Press "),
+            Span::styled(
+                "y",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" to copy Session ID to clipboard"),
         ]),
         Line::from(""),
-        Line::from("Share this command with guests:"),
+        Line::from("─".repeat(50)),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "Share Command:",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
         Line::from(vec![Span::styled(
             format!("konnekt-tui join --session-id {}", app.session_id),
@@ -85,25 +98,52 @@ fn render_session(f: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(""),
-        Line::from(""),
-        if let Some(peer_id) = &app.local_peer_id {
-            Line::from(vec![
-                Span::styled("Local Peer ID: ", Style::default().fg(Color::Cyan)),
-                Span::raw(peer_id),
-            ])
-        } else {
-            Line::from(vec![
-                Span::styled("Status: ", Style::default().fg(Color::Cyan)),
-                Span::raw("Connecting..."),
-            ])
-        },
+        Line::from(vec![
+            Span::raw("Press "),
+            Span::styled(
+                "c",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" to copy join command to clipboard"),
+        ]),
     ];
 
-    let paragraph = Paragraph::new(text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Session Information"),
-    );
+    // Show clipboard message if active
+    if let Some(msg) = &app.clipboard_message {
+        text.push(Line::from(""));
+        text.push(Line::from(""));
+        text.push(Line::from(vec![Span::styled(
+            msg,
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )]));
+    }
+
+    text.push(Line::from(""));
+    text.push(Line::from(""));
+
+    if let Some(peer_id) = &app.local_peer_id {
+        text.push(Line::from(vec![
+            Span::styled("Local Peer ID: ", Style::default().fg(Color::Cyan)),
+            Span::raw(peer_id),
+        ]));
+    } else {
+        text.push(Line::from(vec![
+            Span::styled("Status: ", Style::default().fg(Color::Cyan)),
+            Span::raw("Connecting..."),
+        ]));
+    }
+
+    let paragraph = Paragraph::new(text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Session Information"),
+        )
+        .alignment(Alignment::Left);
 
     f.render_widget(paragraph, area);
 }
@@ -202,33 +242,48 @@ fn render_participants(f: &mut Frame, area: Rect, app: &App) {
 fn render_help(f: &mut Frame, area: Rect) {
     let text = vec![
         Line::from(""),
+        Line::from(vec![Span::styled(
+            "Session Tab:",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(vec![
-            Span::styled("Tab / →", Style::default().fg(Color::Yellow)),
+            Span::styled("  y", Style::default().fg(Color::Yellow)),
+            Span::raw("  Copy Session ID to clipboard"),
+        ]),
+        Line::from(vec![
+            Span::styled("  c", Style::default().fg(Color::Yellow)),
+            Span::raw("  Copy join command to clipboard"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "Navigation:",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![
+            Span::styled("  Tab / →", Style::default().fg(Color::Yellow)),
             Span::raw("  Next tab"),
         ]),
         Line::from(vec![
-            Span::styled("Shift+Tab / ←", Style::default().fg(Color::Yellow)),
+            Span::styled("  Shift+Tab / ←", Style::default().fg(Color::Yellow)),
             Span::raw("  Previous tab"),
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("j / ↓", Style::default().fg(Color::Yellow)),
+            Span::styled("  j / ↓", Style::default().fg(Color::Yellow)),
             Span::raw("  Scroll down"),
         ]),
         Line::from(vec![
-            Span::styled("k / ↑", Style::default().fg(Color::Yellow)),
+            Span::styled("  k / ↑", Style::default().fg(Color::Yellow)),
             Span::raw("  Scroll up"),
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("q / Esc", Style::default().fg(Color::Yellow)),
+            Span::styled("  q / Esc", Style::default().fg(Color::Yellow)),
             Span::raw("  Quit"),
-        ]),
-        Line::from(""),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("💡 Tip: ", Style::default().fg(Color::Yellow)),
-            Span::raw("You can select text in the terminal to copy the Session ID"),
         ]),
     ];
 
@@ -243,13 +298,16 @@ fn render_help(f: &mut Frame, area: Rect) {
 
 fn render_footer(f: &mut Frame, area: Rect) {
     let text = Line::from(vec![
-        Span::raw("Press "),
-        Span::styled("q", Style::default().fg(Color::Yellow)),
-        Span::raw(" to quit | "),
+        Span::styled("y", Style::default().fg(Color::Green)),
+        Span::raw(" copy ID | "),
+        Span::styled("c", Style::default().fg(Color::Green)),
+        Span::raw(" copy command | "),
         Span::styled("Tab", Style::default().fg(Color::Yellow)),
-        Span::raw(" to switch tabs | "),
+        Span::raw(" switch | "),
         Span::styled("j/k", Style::default().fg(Color::Yellow)),
-        Span::raw(" to scroll | Mouse selection enabled"),
+        Span::raw(" scroll | "),
+        Span::styled("q", Style::default().fg(Color::Yellow)),
+        Span::raw(" quit"),
     ]);
 
     let paragraph = Paragraph::new(text)

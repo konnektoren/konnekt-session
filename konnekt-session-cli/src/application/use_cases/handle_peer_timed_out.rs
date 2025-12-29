@@ -18,6 +18,16 @@ pub async fn handle_peer_timed_out(
             .lobby_mut()
             .ok_or_else(|| CliError::InvalidConfig("No lobby".to_string()))?;
 
+        // First, remove the timed-out host from participants (if they have a participant ID)
+        if let Some(pid) = participant_id {
+            if lobby.participants_mut().remove(&pid).is_none() {
+                tracing::debug!("Participant {} was already removed", pid);
+            } else {
+                tracing::debug!("Removed timed-out host participant {}", pid);
+            }
+        }
+
+        // Now try to auto-delegate to remaining guests
         match lobby.auto_delegate_host() {
             Ok(new_host_id) => {
                 if new_host_id == state.participant().id() {
@@ -49,6 +59,17 @@ pub async fn handle_peer_timed_out(
             }
             Err(e) => {
                 tracing::warn!("❌ Failed to delegate host: {:?}", e);
+                // If delegation fails (no guests left), just log it
+                // The lobby is effectively dead at this point
+            }
+        }
+    } else if let Some(pid) = participant_id {
+        // Regular guest timed out - just remove them from lobby
+        if let Some(lobby) = state.lobby_mut() {
+            if lobby.participants_mut().remove(&pid).is_none() {
+                tracing::debug!("Participant {} was already removed", pid);
+            } else {
+                tracing::debug!("Removed timed-out guest participant {}", pid);
             }
         }
     }

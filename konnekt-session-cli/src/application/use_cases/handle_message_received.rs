@@ -74,23 +74,58 @@ fn handle_participant_info(
     // Register in P2P session's peer registry
     session.register_peer_participant(peer_id, participant_id, name.to_string(), is_host);
 
-    // If we're a guest and this is the host, create/join the lobby
-    if !state.is_host() && is_host {
-        if state.lobby().is_none() {
-            // Create a temporary lobby with the host
-            let host = Participant::new_host(name.to_string())
-                .map_err(|e| CliError::ParticipantCreation(e.to_string()))?;
+    // Update lobby state
+    if state.is_host() {
+        // We are the host - add this guest to our lobby
+        if !is_host {
+            if let Some(lobby) = state.lobby_mut() {
+                // Check if we already have this participant
+                if !lobby.participants().contains_key(&participant_id) {
+                    let guest = Participant::new_guest(name.to_string())
+                        .map_err(|e| CliError::ParticipantCreation(e.to_string()))?;
 
-            let mut lobby = Lobby::new("CLI Lobby".to_string(), host)
-                .map_err(|e| CliError::InvalidConfig(e.to_string()))?;
+                    lobby
+                        .add_guest(guest)
+                        .map_err(|e| CliError::InvalidConfig(e.to_string()))?;
 
-            // Add ourselves as a guest
-            lobby
-                .add_guest(state.participant().clone())
-                .map_err(|e| CliError::InvalidConfig(e.to_string()))?;
+                    tracing::info!("✓ Added guest '{}' to lobby", name);
+                }
+            }
+        }
+    } else {
+        // We are a guest
+        if is_host {
+            // This is the host - create/join lobby if we haven't
+            if state.lobby().is_none() {
+                let host = Participant::new_host(name.to_string())
+                    .map_err(|e| CliError::ParticipantCreation(e.to_string()))?;
 
-            state.set_lobby(lobby);
-            tracing::info!("✓ Joined lobby with host '{}'", name);
+                let mut lobby = Lobby::new("CLI Lobby".to_string(), host)
+                    .map_err(|e| CliError::InvalidConfig(e.to_string()))?;
+
+                // Add ourselves as a guest
+                lobby
+                    .add_guest(state.participant().clone())
+                    .map_err(|e| CliError::InvalidConfig(e.to_string()))?;
+
+                state.set_lobby(lobby);
+                tracing::info!("✓ Joined lobby with host '{}'", name);
+            }
+        } else {
+            // This is another guest - add them to our lobby
+            if let Some(lobby) = state.lobby_mut() {
+                // Check if we already have this participant
+                if !lobby.participants().contains_key(&participant_id) {
+                    let guest = Participant::new_guest(name.to_string())
+                        .map_err(|e| CliError::ParticipantCreation(e.to_string()))?;
+
+                    lobby
+                        .add_guest(guest)
+                        .map_err(|e| CliError::InvalidConfig(e.to_string()))?;
+
+                    tracing::info!("✓ Added guest '{}' to lobby", name);
+                }
+            }
         }
     }
 

@@ -207,6 +207,7 @@ async fn run_tui(session: &mut P2PSession, state: SessionState) -> Result<()> {
 
     result
 }
+
 async fn run_app_loop(
     terminal: &mut tui::TuiTerminal,
     app: &mut App,
@@ -218,11 +219,15 @@ async fn run_app_loop(
         match tui::event::read_events().await {
             Ok(AppEvent::Key(key)) => {
                 app.handle_key(key);
+
                 if app.should_quit {
                     break;
                 }
             }
             Ok(AppEvent::Tick) => {
+                // Tick the app (for clipboard message timer)
+                app.tick();
+
                 // Poll P2P events
                 let events = session.poll_events();
 

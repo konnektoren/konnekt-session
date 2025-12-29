@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
-    Session, // New: Show session ID prominently
+    Session,
     Lobby,
     Events,
     Participants,
@@ -52,6 +52,8 @@ pub struct App {
     pub event_log: VecDeque<String>,
     pub scroll_offset: usize,
     pub should_quit: bool,
+    pub clipboard_message: Option<String>,
+    pub clipboard_message_timer: usize,
     pub max_events: usize,
 }
 
@@ -61,10 +63,12 @@ impl App {
             session_state,
             session_id,
             local_peer_id: None,
-            current_tab: Tab::Session, // Start on Session tab to show ID
+            current_tab: Tab::Session,
             event_log: VecDeque::new(),
             scroll_offset: 0,
             should_quit: false,
+            clipboard_message: None,
+            clipboard_message_timer: 0,
             max_events: 100,
         }
     }
@@ -73,10 +77,100 @@ impl App {
         self.local_peer_id = Some(peer_id);
     }
 
+    pub fn tick(&mut self) {
+        if self.clipboard_message_timer > 0 {
+            self.clipboard_message_timer -= 1;
+            if self.clipboard_message_timer == 0 {
+                self.clipboard_message = None;
+            }
+        }
+    }
+
+    pub fn show_clipboard_message(&mut self, message: String) {
+        self.clipboard_message = Some(message);
+        self.clipboard_message_timer = 30; // Show for 3 seconds (30 * 100ms ticks)
+    }
+
+    pub fn copy_session_id(&mut self) -> Result<(), String> {
+        #[cfg(feature = "tui")]
+        {
+            use arboard::Clipboard;
+
+            match Clipboard::new() {
+                Ok(mut clipboard) => match clipboard.set_text(&self.session_id) {
+                    Ok(_) => {
+                        self.show_clipboard_message(
+                            "✓ Session ID copied to clipboard!".to_string(),
+                        );
+                        Ok(())
+                    }
+                    Err(e) => {
+                        let msg = format!("✗ Failed to copy: {}", e);
+                        self.show_clipboard_message(msg.clone());
+                        Err(msg)
+                    }
+                },
+                Err(e) => {
+                    let msg = format!("✗ Clipboard not available: {}", e);
+                    self.show_clipboard_message(msg.clone());
+                    Err(msg)
+                }
+            }
+        }
+
+        #[cfg(not(feature = "tui"))]
+        {
+            Err("Clipboard not available".to_string())
+        }
+    }
+
+    pub fn copy_join_command(&mut self) -> Result<(), String> {
+        #[cfg(feature = "tui")]
+        {
+            use arboard::Clipboard;
+
+            let command = format!("konnekt-tui join --session-id {}", self.session_id);
+
+            match Clipboard::new() {
+                Ok(mut clipboard) => match clipboard.set_text(&command) {
+                    Ok(_) => {
+                        self.show_clipboard_message(
+                            "✓ Join command copied to clipboard!".to_string(),
+                        );
+                        Ok(())
+                    }
+                    Err(e) => {
+                        let msg = format!("✗ Failed to copy: {}", e);
+                        self.show_clipboard_message(msg.clone());
+                        Err(msg)
+                    }
+                },
+                Err(e) => {
+                    let msg = format!("✗ Clipboard not available: {}", e);
+                    self.show_clipboard_message(msg.clone());
+                    Err(msg)
+                }
+            }
+        }
+
+        #[cfg(not(feature = "tui"))]
+        {
+            Err("Clipboard not available".to_string())
+        }
+    }
+
     pub fn handle_key(&mut self, key: KeyCode) {
         match key {
             KeyCode::Char('q') | KeyCode::Esc => {
                 self.should_quit = true;
+            }
+            KeyCode::Char('y') if self.current_tab == Tab::Session => {
+                // Copy session ID
+                let _ = self.copy_session_id();
+            }
+            KeyCode::Char('c') if self.current_tab == Tab::Session => {
+                // Copy join command
+                let _ = self.copy_join_command();
             }
             KeyCode::Tab | KeyCode::Right => {
                 self.current_tab = self.current_tab.next();
