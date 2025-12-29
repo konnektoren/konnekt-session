@@ -1,0 +1,130 @@
+[package]
+name = "konnekt-session"
+version = "0.3.0"
+edition = "2021"
+description = "A session management library"
+
+[[bin]]
+name = "konnekt_session_app"
+path = "src/main.rs"
+
+[[bin]]
+name = "server"
+path = "src/server/main.rs"
+needed-features = ["server"]
+
+[lib]
+name = "konnekt_session"
+path = "src/lib.rs"
+
+[features]
+default = ["yew", "websocket", "webrtc", "matchbox"]
+websocket = ["gloo-net/websocket"]
+webrtc = [
+    "web-sys/RtcPeerConnection",
+    "web-sys/RtcDataChannel",
+    "web-sys/RtcConfiguration",
+    "web-sys/RtcDataChannelInit",
+    "web-sys/RtcSessionDescriptionInit",
+    "web-sys/RtcSdpType",
+    "web-sys/RtcIceCandidate",
+    "web-sys/RtcIceCandidateInit",
+    "web-sys/RtcPeerConnectionIceEvent",
+    "web-sys/RtcDataChannelState",
+    "web-sys/RtcPeerConnectionState",
+    "web-sys/RtcIceGatheringState",
+    "web-sys/RtcSessionDescription",
+    "web-sys/RtcDataChannelEvent",
+    "web-sys/RtcOfferOptions",
+    "web-sys/RtcAnswerOptions",
+    "web-sys/WebSocket",
+    "web-sys/MessageEvent",
+    "gloo-net/http",
+]
+matchbox = ["matchbox_socket"]
+yew = [
+    "dep:yew",
+    "dep:yew-hooks",
+    "web-sys",
+    "wasm-bindgen-futures",
+    "gloo",
+    "gloo-net",
+    "getrandom/js",
+    "wasm-logger",
+    "instant/wasm-bindgen",
+    "futures-timer",
+]
+server = [
+    "axum",
+    "hyper",
+    "opentelemetry",
+    "opentelemetry-jaeger",
+    "tokio",
+    "tracing",
+    "tracing-subscriber",
+    "tracing-opentelemetry",
+    "tokio-tungstenite",
+    "crossbeam-channel",
+]
+futures-timer = ["dep:futures-timer"]
+
+[dependencies]
+async-trait = "0.1.51"
+colorid = "0.0.6"
+instant = "0.1"
+log = { version = "0.4" }
+uuid = { version = "1.0.0", features = [
+    "v4",
+    "fast-rng",
+    "macro-diagnostics",
+    "serde",
+] }
+futures-util = { version = "0.3" }
+futures = { version = "0.3" }
+getrandom = { version = "0.2" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+# Client Dependencies
+gloo = { version = "0.11", features = ["timers", "net"], optional = true }
+gloo-net = { version = "0.6.0", optional = true, features = ["websocket"] }
+gloo-timers = { version = "0.3", features = ["futures"] }
+web-sys = { version = "0.3", optional = true, features = [
+    "HtmlSelectElement",
+    "MessageEvent",
+    "WebSocket",
+] }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+yew = { version = "0.21", features = ["csr"], optional = true }
+yew-hooks = { version = "0.3.2", optional = true }
+wasm-logger = { version = "0.2.0", optional = true }
+# Server Dependencies
+axum = { version = "0.7", optional = true, features = ["ws"] }
+hyper = { version = "1.5.0", optional = true, features = ["server"] }
+opentelemetry = { version = "0.20", features = [
+    "rt-tokio",
+    "trace",
+], optional = true }
+opentelemetry-jaeger = { version = "0.19", features = [
+    "rt-tokio",
+    "collector_client",
+    "isahc_collector_client",
+], optional = true }
+thiserror = "2.0.2"
+tokio = { version = "1", features = ["full"], optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3.18", features = [
+    "env-filter",
+    "json",
+], optional = true }
+tracing-opentelemetry = { version = "0.21", optional = true }
+js-sys = "0.3.45"
+matchbox_socket = { git = "https://github.com/johanhelsing/matchbox", optional = true }
+tokio-tungstenite = { version = "0.25.0", optional = true }
+crossbeam-channel = { version = "0.5.14", optional = true }
+futures-timer = { version = "3.0.3", features = [
+    "gloo-timers",
+], optional = true }
+
+[dev-dependencies]
+wasm-bindgen-test = { version = "0.3" }
+console_error_panic_hook = "0.1"
