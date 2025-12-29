@@ -97,92 +97,103 @@ end note
 |**Lobby Management**
 |Core
 |⭐⭐⭐⭐⭐
-|• **Primary business value** – what developers integrate for
-• Managing session lifecycle (create, join, leave, close)
-• Guest admission control (passwords, invites, kicks)
-• Lobby configuration (max guests, privacy settings)
-• This is what makes the product unique & valuable
+a|
+* **Primary business value** – what developers integrate for
+* Managing session lifecycle (create, join, leave, close)
+* Guest admission control (passwords, invites, kicks)
+* Lobby configuration (max guests, privacy settings)
+* This is what makes the product unique & valuable
 
 |**Activity Lifecycle**
 |Core
 |⭐⭐⭐⭐⭐
-|• **Core user workflow** – starting/stopping games
-• Activity state machine (planned → in-progress → finished)
-• Results collection from active guests
-• Activity ordering & queue management
-• Critical to user experience
+a|
+* **Core user workflow** – starting/stopping games
+* Activity state machine (planned → in-progress → finished)
+* Results collection from active guests
+* Activity ordering & queue management
+* Critical to user experience
 
 |**Host/Guest Management**
 |Core
 |⭐⭐⭐⭐⭐
-|• **Domain-specific logic** – Host/Guest model
-• Host delegation (transferring control)
-• Guest permissions & restrictions
-• Business rules about who can do what
-• Differentiates from generic "player" models
+a|
+* **Domain-specific logic** – Host/Guest model
+* Host delegation (transferring control)
+* Guest permissions & restrictions
+* Business rules about who can do what
+* Differentiates from generic "player" models
 
 |**Participation Mode (Spectator)**
 |Supporting
 |⭐⭐⭐
-|• Enables flexibility (important for UX)
-• Active ↔ Spectating mode transitions
-• Result submission restrictions
-• Moderate complexity (state + validation)
-• Not highly differentiating (many systems have observers)
+a|
+* Enables flexibility (important for UX)
+* Active ↔ Spectating mode transitions
+* Result submission restrictions
+* Moderate complexity (state + validation)
+* Not highly differentiating (many systems have observers)
 
 |**Activity Catalog & Plugins**
 |Supporting
 |⭐⭐⭐
-|• Enables extensibility (important for adoption)
-• Activity registration & discovery
-• Plugin versioning & compatibility
-• Moderate complexity (trait system)
-• Not differentiating (many libs have plugins)
+a|
+* Enables extensibility (important for adoption)
+* Activity registration & discovery
+* Plugin versioning & compatibility
+* Moderate complexity (trait system)
+* Not differentiating (many libs have plugins)
 
 |**Authentication & Identity**
 |Supporting
 |⭐⭐⭐
-|• Essential for security, not differentiating
-• Key generation & storage (Ed25519)
-• Signature verification
-• Identity persistence (LocalStorage)
-• Use standard crypto libraries
+a|
+* Essential for security, not differentiating
+* Key generation & storage (Ed25519)
+* Signature verification
+* Identity persistence (LocalStorage)
+* Use standard crypto libraries
 
 |**Game State Serialization**
 |Supporting
 |⭐⭐
-|• Necessary for P2P sync
-• Activity-specific data schemas
-• Versioning for backwards compatibility
-• Use serde + custom codecs if needed
+a|
+* Necessary for P2P sync
+* Activity-specific data schemas
+* Versioning for backwards compatibility
+* Use serde + custom codecs if needed
 
 |**P2P State Sync (Round-Robin)**
 |Generic
 |⭐⭐
-|• **Infrastructure concern**, not business logic
-• Well-known distributed consensus patterns
-• Round-robin leader election is textbook CS
-• Use existing algorithms (Raft-like, CRDT)
-• Low differentiation (commodity)
+a|
+* **Infrastructure concern**, not business logic
+* Well-known distributed consensus patterns
+* Round-robin leader election is textbook CS
+* Use existing algorithms (Raft-like, CRDT)
+* Low differentiation (commodity)
 
 |**WebRTC Signalling**
 |Generic
 |⭐
-|• Solved problem (Matchbox library)
-• Zero differentiation
-• Use Matchbox as-is
+a|
+* Solved problem (Matchbox library)
+* Zero differentiation
+* Use Matchbox as-is
 
 |**Message Serialization**
 |Generic
 |⭐
-|• Solved problem (serde, bincode)
-• No differentiation
+a|
+* Solved problem (serde, bincode)
+* No differentiation
 
 |**Local Storage**
 |Generic
 |⭐
-|• Browser API wrapper
-• Trivial complexity
+a|
+* Browser API wrapper
+* Trivial complexity
 |===
 
 == Revised Architecture: Separation of Concerns
@@ -286,77 +297,87 @@ All guests cannot:
 
 |**Lobby Management**
 |8
-|• Complex state machine (lobby states)
-|• Multi-actor concurrency (simultaneous joins)
-|• Invariant enforcement (max guests, unique names)
-|• Password protection & invite codes
-|• Lobby closure & cleanup logic
-|• Edge cases: host leaves, last guest leaves
+a|
+* Complex state machine (lobby states)
+* Multi-actor concurrency (simultaneous joins)
+* Invariant enforcement (max guests, unique names)
+* Password protection & invite codes
+* Lobby closure & cleanup logic
+* Edge cases: host leaves, last guest leaves
 
 |**Activity Lifecycle**
 |7
-|• Activity state transitions (planned → running → done)
-|• Result collection from active guests only
-|• Timeout handling (max activity duration)
-|• Activity cancellation & restart logic
-|• Scoring & leaderboard calculations (excluding spectators)
-|• Edge cases: activity running when host disconnects
+a|
+* Activity state transitions (planned → running → done)
+* Result collection from active guests only
+* Timeout handling (max activity duration)
+* Activity cancellation & restart logic
+* Scoring & leaderboard calculations (excluding spectators)
+* Edge cases: activity running when host disconnects
 
 |**Host/Guest Management**
 |7
-|• Host delegation rules (when, to whom)
-|• Auto-promotion when host leaves
-|• Permission enforcement (who can do what)
-|• Guest kick logic & notifications
-|• Edge cases: all guests leave, host delegates mid-activity
+a|
+* Host delegation rules (when, to whom)
+* Auto-promotion when host disconnects (30s timeout)
+* Deterministic election (oldest guest by timestamp)
+* Permission enforcement (who can do what)
+* Guest kick logic & notifications
+* Reconnection handling (grace period vs permanent loss)
+* Edge cases: all guests leave, identical timestamps, single guest
 
 |**Participation Mode (Spectator)**
 |5
-|• Mode transition rules (Active ↔ Spectating)
-|• When mode changes are allowed (not during activity)
-|• Result submission validation (only Active guests)
-|• Forced mode changes by host (optional)
-|• Activity completion logic (only count Active guests)
+a|
+* Mode transition rules (Active ↔ Spectating)
+* When mode changes are allowed (not during activity)
+* Result submission validation (only Active guests)
+* Forced mode changes by host (optional)
+* Activity completion logic (only count Active guests)
 
 |**Activity Catalog & Plugins**
 |5
-|• Plugin registration & lifecycle
-|• Versioning & compatibility checks
-|• Activity-specific data schemas
-|• Hot-reload considerations
+a|
+* Plugin registration & lifecycle
+* Versioning & compatibility checks
+* Activity-specific data schemas
+* Hot-reload considerations
 
 |**Authentication & Identity**
 |4
-|• Key generation (Ed25519)
-|• Signature verification
-|• Key persistence & recovery
-|• Clock skew handling (timestamp verification)
+a|
+* Key generation (Ed25519)
+* Signature verification
+* Key persistence & recovery
+* Clock skew handling (timestamp verification)
 
 |**Game State Serialization**
 |3
-|• Schema evolution (backwards compatibility)
-|• Compression for large states
-|• Partial updates (deltas)
+a|
+* Schema evolution (backwards compatibility)
+* Compression for large states
+* Partial updates (deltas)
 
 |**P2P State Sync (Round-Robin)**
 |4
-|• **Well-studied problem** (use existing algorithms)
-|• Leader election (round-robin with timeouts)
-|• Message ordering (sequence numbers)
-|• Conflict resolution (last-write-wins)
-|• Use Raft, CRDT, or simple round-robin
+a|
+* **Well-studied problem** (use existing algorithms)
+* Leader election (round-robin with timeouts)
+* Message ordering (sequence numbers)
+* Conflict resolution (last-write-wins)
+* Use Raft, CRDT, or simple round-robin
 
 |**WebRTC Signalling**
 |2
-|• Matchbox handles complexity
+|Matchbox handles complexity
 
 |**Message Serialization**
 |2
-|• Serde derive macros
+|Serde derive macros
 
 |**Local Storage**
 |1
-|• Browser API wrapper
+|Browser API wrapper
 |===
 
 == Differentiation Assessment (Revised)
@@ -369,67 +390,74 @@ All guests cannot:
 
 |**Lobby Management**
 |10
-|• **Primary value proposition** for developers
-|• Unique UX: seamless lobby flows
-|• Superior DX: simple API for complex workflows
-|• Competitive advantage: easier than building from scratch
-|• This is what developers evaluate when choosing the library
+a|
+* **Primary value proposition** for developers
+* Unique UX: seamless lobby flows
+* Superior DX: simple API for complex workflows
+* Competitive advantage: easier than building from scratch
+* This is what developers evaluate when choosing the library
 
 |**Activity Lifecycle**
 |9
-|• **Core user experience** – starting/stopping games
-|• Unique approach to activity queuing & results
-|• Differentiation in how activities integrate
-|• Better than generic "game session" libraries
+a|
+* **Core user experience** – starting/stopping games
+* Unique approach to activity queuing & results
+* Differentiation in how activities integrate
+* Better than generic "game session" libraries
 
 |**Host/Guest Management**
 |9
-|• **Unique model** (not just "admin" vs "player")
-|• Host delegation without full reconnect
-|• Smooth host transitions
-|• More sophisticated than most lobby libs
-|• Natural language ("host invites guests")
+a|
+* **Unique model** (not just "admin" vs "player")
+* Host delegation without full reconnect
+* Smooth host transitions
+* More sophisticated than most lobby libs
+* Natural language ("host invites guests")
 
 |**Participation Mode (Spectator)**
 |4
-|• Nice-to-have feature for UX
-|• Not highly differentiating (many systems have "observer mode")
-|• Smooth toggling is a plus
-|• Not a primary decision factor for developers
+a|
+* Nice-to-have feature for UX
+* Not highly differentiating (many systems have "observer mode")
+* Smooth toggling is a plus
+* Not a primary decision factor for developers
 
 |**Activity Catalog & Plugins**
 |5
-|• Good plugin system improves DX
-|• Moderate differentiation (ease of adding games)
-|• Table stakes for a game library
+a|
+* Good plugin system improves DX
+* Moderate differentiation (ease of adding games)
+* Table stakes for a game library
 
 |**Authentication & Identity**
 |3
-|• Everyone needs auth, not unique
-|• Slight differentiation in UX (key recovery)
+a|
+* Everyone needs auth, not unique
+* Slight differentiation in UX (key recovery)
 
 |**Game State Serialization**
 |2
-|• Standard problem, standard solution
+|Standard problem, standard solution
 
 |**P2P State Sync (Round-Robin)**
 |2
-|• **Infrastructure, not differentiator**
-|• Users don't care HOW state syncs, just that it works
-|• Round-robin is well-known (not novel)
-|• Could swap for Raft/CRDT without users noticing
+a|
+* **Infrastructure, not differentiator**
+* Users don't care HOW state syncs, just that it works
+* Round-robin is well-known (not novel)
+* Could swap for Raft/CRDT without users noticing
 
 |**WebRTC Signalling**
 |1
-|• Commodity (Matchbox)
+|Commodity (Matchbox)
 
 |**Message Serialization**
 |1
-|• Completely generic
+|Completely generic
 
 |**Local Storage**
 |1
-|• Browser standard
+|Browser standard
 |===
 
 == Investment Strategy (Revised)
@@ -442,46 +470,53 @@ All guests cannot:
 
 |**Core**
 (Lobby, Activity Lifecycle, Host/Guest Mgmt)
-|• **Build in-house** with highest quality
-|• Deep domain modeling (DDD tactical patterns)
-|• Extensive testing (domain scenarios)
-|• Rich documentation & examples
-|• Continuous UX improvement
-|• This is where we innovate
-|• Write domain models (aggregates, entities)
-|• EventStorming sessions with users
-|• Property-based testing for invariants
-|• Tutorial videos & interactive docs
-|• Blog posts about host/guest patterns
+a|
+* **Build in-house** with highest quality
+* Deep domain modeling (DDD tactical patterns)
+* Extensive testing (domain scenarios)
+* Rich documentation & examples
+* Continuous UX improvement
+* This is where we innovate
+a|
+* Write domain models (aggregates, entities)
+* EventStorming sessions with users
+* Property-based testing for invariants
+* Tutorial videos & interactive docs
+* Blog posts about host/guest patterns
 
 |**Supporting**
 (Participation Mode, Activity Catalog, Auth)
-|• **Build competently** using best practices
-|• Leverage standard patterns
-|• Good test coverage
-|• Clear API documentation
-|• State machine for mode transitions
-|• Use Rust trait system for plugins
-|• Standard crypto libraries (ring, ed25519-dalek)
-|• API reference docs
+a|
+* **Build competently** using best practices
+* Leverage standard patterns
+* Good test coverage
+* Clear API documentation
+a|
+* State machine for mode transitions
+* Use Rust trait system for plugins
+* Standard crypto libraries (ring, ed25519-dalek)
+* API reference docs
 
 |**Generic**
 (P2P Sync, WebRTC, Storage)
-|• **Buy, use libraries, or use textbook algorithms**
-|• Minimal custom code
-|• Thin wrappers only if needed
-|• Outsource to community/libraries
-|• **Use existing round-robin/Raft/CRDT library**
-|• Use Matchbox for WebRTC
-|• Use web-sys for LocalStorage
-|• Copy standard algorithms from papers/books
+a|
+* **Buy, use libraries, or use textbook algorithms**
+* Minimal custom code
+* Thin wrappers only if needed
+* Outsource to community/libraries
+a|
+* **Use existing round-robin/Raft/CRDT library**
+* Use Matchbox for WebRTC
+* Use web-sys for LocalStorage
+* Copy standard algorithms from papers/books
 |===
 
 == Domain Model: Host/Guest + Spectator Mode
 
 === Rust Implementation
 
-```rust
+[source,rust]
+----
 // Domain layer: Host/Guest roles
 pub enum LobbyRole {
     Host,   // Can manage lobby, kick guests, start activities
@@ -533,11 +568,12 @@ pub struct SyncLeader {
 // - Domain host (LobbyRole::Host) manages lobby
 // - Participation mode (Active/Spectating) controls activity submission
 // - Sync leader (infrastructure) controls state broadcast rotation
-```
+----
 
 === Business Rules
 
-```rust
+[source,rust]
+----
 impl Lobby {
     pub fn submit_result(&mut self, participant_id: Uuid, result: ActivityResult)
         -> Result<(), DomainError> {
@@ -578,7 +614,7 @@ impl Lobby {
         active_participants == submitted_count
     }
 }
-```
+----
 
 === Benefits of Separation
 
@@ -600,32 +636,40 @@ Since sync is **generic**, we have options:
 |When to Use
 
 |**Round-Robin**
-|• Simple to implement
-|• Fair distribution of broadcast load
-|• Predictable
-|• Single point of failure (current leader)
-|• Latency (wait for your turn)
+a|
+* Simple to implement
+* Fair distribution of broadcast load
+* Predictable
+a|
+* Single point of failure (current leader)
+* Latency (wait for your turn)
 |v1.0 (simple)
 
 |**Host-Only Broadcast**
-|• Clear authority (domain host = sync leader)
-|• Lowest latency (no rotation)
-|• Host is bottleneck
-|• Host disconnect breaks sync
+a|
+* Clear authority (domain host = sync leader)
+* Lowest latency (no rotation)
+a|
+* Host is bottleneck
+* Host disconnect breaks sync
 |v1.0 alternative
 
 |**CRDT (Conflict-Free)**
-|• No leader needed
-|• High availability
-|• Complexity
-|• Larger message sizes
+a|
+* No leader needed
+* High availability
+a|
+* Complexity
+* Larger message sizes
 |v2.0 (research)
 
 |**Raft Consensus**
-|• Battle-tested
-|• Leader election built-in
-|• Heavyweight for browser
-|• Overkill for game lobbies
+a|
+* Battle-tested
+* Leader election built-in
+a|
+* Heavyweight for browser
+* Overkill for game lobbies
 |Future (if needed)
 |===
 

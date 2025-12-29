@@ -16,7 +16,328 @@ Discover the **Lobby Management** domain visually and collaboratively. Build a s
 
 This is the foundation for all design decisions. **We cannot skip discovery.**
 
-[... previous sections remain ...]
+== Discovery Approach
+
+We'll use multiple complementary techniques:
+
+[cols="2,3,2", options="header"]
+|===
+|Technique
+|What We Learn
+|When to Use
+
+|**EventStorming**
+a|
+* Domain events (things that happened)
+* Commands (user intentions)
+* Aggregates (consistency boundaries)
+* Policies (business rules)
+|Primary discovery session
+
+|**Example Mapping**
+a|
+* Concrete scenarios with rules & examples
+* Edge cases and acceptance criteria
+|After EventStorming, to drill into specific features
+
+|**Domain Storytelling**
+a|
+* Step-by-step user workflows
+* Actor interactions
+* Tool/system touchpoints
+|To validate EventStorming with narratives
+
+|**User Journey Mapping**
+a|
+* Emotional journey of users
+* Pain points and opportunities
+|To inform UX decisions
+|===
+
+== EventStorming Session
+
+=== Big Picture EventStorming
+
+We'll start with a **Big Picture EventStorming** to understand the entire lobby lifecycle from creation to closure.
+
+[plantuml, "eventstorming-overview", png]
+----
+@startuml
+
+title Lobby Management - Big Picture EventStorming
+
+' Legend
+rectangle "Domain Event" as legend_event #FFD700
+rectangle "Command" as legend_command #87CEEB
+rectangle "Aggregate" as legend_aggregate #FFA500
+rectangle "Policy" as legend_policy #DA70D6
+rectangle "External System" as legend_external #90EE90
+rectangle "User" as legend_user #FFB6C1
+
+' Timeline flows left to right
+skinparam defaultTextAlignment center
+
+' User creates lobby
+actor "Game Developer" as dev #FFB6C1
+rectangle "CreateLobby" as cmd_create #87CEEB
+rectangle "LobbyCreated" as evt_created #FFD700
+rectangle "Lobby" as agg_lobby #FFA500
+
+dev -> cmd_create
+cmd_create -> agg_lobby
+agg_lobby -> evt_created
+
+' Players join
+actor "Player" as player #FFB6C1
+rectangle "JoinLobby" as cmd_join #87CEEB
+rectangle "PlayerJoined" as evt_joined #FFD700
+rectangle "NotifyAdmin\nPolicy" as policy_notify #DA70D6
+
+evt_created -> cmd_join
+cmd_join -> agg_lobby
+agg_lobby -> evt_joined
+evt_joined -> policy_notify
+
+' Admin starts activity
+rectangle "StartActivity" as cmd_start_activity #87CEEB
+rectangle "ActivityStarted" as evt_activity_started #FFD700
+rectangle "Activity" as agg_activity #FFA500
+
+evt_joined -> cmd_start_activity
+cmd_start_activity -> agg_activity
+agg_activity -> evt_activity_started
+
+' Players play and submit results
+rectangle "SubmitResult" as cmd_submit #87CEEB
+rectangle "ResultSubmitted" as evt_result #FFD700
+
+evt_activity_started -> cmd_submit
+cmd_submit -> agg_activity
+agg_activity -> evt_result
+
+' Activity completes
+rectangle "CompleteActivity" as cmd_complete #87CEEB
+rectangle "ActivityCompleted" as evt_completed #FFD700
+rectangle "CalculateScores\nPolicy" as policy_scores #DA70D6
+
+evt_result -> cmd_complete
+cmd_complete -> agg_activity
+agg_activity -> evt_completed
+evt_completed -> policy_scores
+
+' Admin closes lobby
+rectangle "CloseLobby" as cmd_close #87CEEB
+rectangle "LobbyClosed" as evt_closed #FFD700
+
+evt_completed -> cmd_close
+cmd_close -> agg_lobby
+agg_lobby -> evt_closed
+
+' External system (Matchbox)
+rectangle "Matchbox\nSignalling" as ext_matchbox #90EE90
+
+evt_created -.-> ext_matchbox : P2P setup
+evt_joined -.-> ext_matchbox : Peer connection
+
+@enduml
+----
+
+=== Process-Level EventStorming
+
+Now let's drill into specific processes with more detail.
+
+==== Process: Create and Join Lobby
+
+[plantuml, "eventstorming-create-join", png]
+----
+@startuml
+
+title Process: Create and Join Lobby
+
+' Timeline
+left to right direction
+
+' Admin creates lobby
+actor Admin #FFB6C1
+rectangle "CreateLobby\n(name, password?)" as cmd1 #87CEEB
+rectangle "LobbyCreated\n(id, admin_id)" as evt1 #FFD700
+
+rectangle "Lobby" as agg1 #FFA500 {
+  note right
+    Invariants:
+    • Unique lobby ID
+    • Must have exactly 1 admin
+    • Name 3-50 chars
+    • Optional password
+  end note
+}
+
+Admin -> cmd1
+cmd1 -> agg1 : validate & create
+agg1 -> evt1
+
+' Player attempts to join
+actor Player #FFB6C1
+rectangle "JoinLobby\n(lobby_id, password?)" as cmd2 #87CEEB
+
+rectangle "Password\nRequired?" as policy1 #DA70D6
+rectangle "Lobby\nFull?" as policy2 #DA70D6
+rectangle "Player\nBanned?" as policy3 #DA70D6
+
+evt1 -> cmd2
+cmd2 -> policy1 : check
+policy1 -> policy2 : if valid
+policy2 -> policy3 : if space
+
+' Success path
+rectangle "PlayerJoined\n(player_id, role)" as evt2 #FFD700
+policy3 -> agg1 : all checks pass
+agg1 -> evt2
+
+' Failure paths
+rectangle "JoinRejected\n(reason)" as evt_fail #FF6B6B
+policy1 -[#red]-> evt_fail : wrong password
+policy2 -[#red]-> evt_fail : lobby full
+policy3 -[#red]-> evt_fail : player banned
+
+' P2P sync
+rectangle "Matchbox" as ext1 #90EE90
+evt2 -.-> ext1 : broadcast to peers
+
+@enduml
+----
+
+==== Process: Start and Complete Activity
+
+[plantuml, "eventstorming-activity-lifecycle", png]
+----
+@startuml
+
+title Process: Activity Lifecycle
+
+left to right direction
+
+' Admin plans activity
+actor Admin #FFB6C1
+rectangle "PlanActivity\n(activity_type)" as cmd1 #87CEEB
+rectangle "ActivityPlanned\n(id, type)" as evt1 #FFD700
+
+rectangle "Activity" as agg1 #FFA500 {
+  note right
+    States:
+    • Planned
+    • InProgress
+    • Completed
+
+    Invariants:
+    • Only admin can start
+    • Can't start if another running
+    • All players must have submitted
+  end note
+}
+
+Admin -> cmd1
+cmd1 -> agg1
+agg1 -> evt1
+
+' Admin starts activity
+rectangle "StartActivity\n(activity_id)" as cmd2 #87CEEB
+rectangle "Only One\nActivity Running" as policy1 #DA70D6
+rectangle "ActivityStarted\n(start_time)" as evt2 #FFD700
+
+evt1 -> cmd2
+cmd2 -> policy1
+policy1 -> agg1 : if none running
+agg1 -> evt2
+
+' Players submit results
+actor Player #FFB6C1
+rectangle "SubmitResult\n(activity_id, data)" as cmd3 #87CEEB
+rectangle "ResultSubmitted\n(player_id, score)" as evt3 #FFD700
+
+evt2 -> cmd3
+cmd3 -> agg1
+agg1 -> evt3
+
+' Check if all done
+rectangle "All Players\nSubmitted?" as policy2 #DA70D6
+rectangle "ActivityCompleted\n(results[])" as evt4 #FFD700
+
+evt3 -> policy2
+policy2 -> agg1 : if complete
+agg1 -> evt4
+
+' Update leaderboard
+rectangle "UpdateLeaderboard\nPolicy" as policy3 #DA70D6
+rectangle "LeaderboardUpdated" as evt5 #FFD700
+
+evt4 -> policy3
+policy3 -> evt5
+
+@enduml
+----
+
+==== Process: Role Management
+
+[plantuml, "eventstorming-role-management", png]
+----
+@startuml
+
+title Process: Role Management & Admin Changes
+
+left to right direction
+
+' Observer wants to play
+actor Observer #FFB6C1
+rectangle "RequestPlayerRole" as cmd1 #87CEEB
+rectangle "Lobby\nFull?" as policy1 #DA70D6
+rectangle "RoleChanged\n(player_id, Player)" as evt1 #FFD700
+
+Observer -> cmd1
+cmd1 -> policy1
+policy1 -> evt1 : if space
+
+' Player becomes observer
+actor Player #FFB6C1
+rectangle "BecomeObserver" as cmd2 #87CEEB
+rectangle "Activity\nRunning?" as policy2 #DA70D6
+rectangle "RoleChanged\n(player_id, Observer)" as evt2 #FFD700
+rectangle "ActivityAbandoned\n(player_id)" as evt3 #FFD700
+
+Player -> cmd2
+cmd2 -> policy2
+policy2 -> evt2 : if not playing
+policy2 -> evt3 : if in activity
+
+' Admin leaves
+actor Admin #FFB6C1
+rectangle "LeaveLobby" as cmd3 #87CEEB
+rectangle "PlayerLeft\n(admin_id)" as evt4 #FFD700
+rectangle "Promote\nOldest Player" as policy3 #DA70D6
+rectangle "AdminChanged\n(new_admin_id)" as evt5 #FFD700
+
+Admin -> cmd3
+cmd3 -> evt4
+evt4 -> policy3
+policy3 -> evt5
+
+note right of policy3
+  Business Rule:
+  If admin leaves,
+  promote oldest player
+  to admin role
+end note
+
+' Admin delegates
+rectangle "DelegateAdmin\n(player_id)" as cmd4 #87CEEB
+rectangle "Is Player?" as policy4 #DA70D6
+
+evt5 -> cmd4
+cmd4 -> policy4
+policy4 -> evt5 : if valid
+
+@enduml
+----
 
 == Key Domain Events
 
@@ -129,7 +450,7 @@ This is the foundation for all design decisions. **We cannot skip discovery.**
 
 |**SubmitResult**
 |Submit activity completion data (only if Active)
-|Guest (Active mode only)
+|Guest or Host (Active mode only)
 
 |**CancelActivity**
 |Stop a running activity early
@@ -149,33 +470,39 @@ This is the foundation for all design decisions. **We cannot skip discovery.**
 |Invariants
 
 |**Lobby**
-|• Manage lobby lifecycle
-• Track guests and host
-• Enforce lobby rules
-• Maintain activity queue
-|• Must have exactly 1 host at all times
-• Name must be 3-50 characters
-• Max guest limit enforced
-• Unique guest names within lobby
+a|
+* Manage lobby lifecycle
+* Track guests and host
+* Enforce lobby rules
+* Maintain activity queue
+a|
+* Must have exactly 1 host at all times
+* Name must be 3-50 characters
+* Max guest limit enforced
+* Unique guest names within lobby
 
 |**Activity**
-|• Manage activity state
-• Collect results from active guests
-• Calculate scores
-|• Can't start if state != Planned
-• Can't submit result if state != InProgress
-• Only active guests can submit results
-• Results are immutable after submission
+a|
+* Manage activity state
+* Collect results from active guests
+* Calculate scores
+a|
+* Can't start if state != Planned
+* Can't submit result if state != InProgress
+* Only active guests can submit results
+* Results are immutable after submission
 
 |**Participant**
-|• Track participant identity
-• Manage lobby role (Host/Guest)
-• Manage participation mode (Active/Spectating)
-|• Participant ID is unique within lobby
-• Lobby role is valid (Host or Guest)
-• Participation mode is valid (Active or Spectating)
-• Name is unique within lobby
-• Only guests can be in Spectating mode
+a|
+* Track participant identity
+* Manage lobby role (Host/Guest)
+* Manage participation mode (Active/Spectating)
+a|
+* Participant ID is unique within lobby
+* Lobby role is valid (Host or Guest)
+* Participation mode is valid (Active or Spectating)
+* Name is unique within lobby
+* Only guests can be in Spectating mode
 |===
 
 == Business Rules (Policies)
@@ -186,9 +513,29 @@ This is the foundation for all design decisions. **We cannot skip discovery.**
 |Rule
 |Triggered By
 
-|**Host Auto-Promotion**
-|When host leaves, promote oldest guest to host
-|GuestLeft (if host)
+|**Host Auto-Delegation**
+|When host disconnects for >30s, oldest guest becomes host
+|Host disconnect detected (30s timeout)
+
+|**Grace Period**
+|30-second timeout before delegation to allow reconnection
+|Host heartbeat loss
+
+|**Deterministic Election**
+|Oldest guest (by join timestamp) always becomes host
+|Multiple guests present during timeout
+
+|**No Auto-Reclaim**
+|Original host rejoins as guest, cannot auto-reclaim role
+|Host reconnects after delegation
+
+|**Single Guest Promotion**
+|If only one guest present, immediate promotion (no election)
+|Host disconnect + 1 guest only
+
+|**Empty Lobby Closure**
+|Lobby closes if all guests disconnect
+|Last guest leaves
 
 |**Activity Queue Management**
 |Only one activity can be in-progress at a time
@@ -240,23 +587,23 @@ This is the foundation for all design decisions. **We cannot skip discovery.**
 |Lobbies can have optional password protection
 
 |**Example 1**
-|Host creates lobby "Friday Night Quiz" with password "fun123"
+a|Host creates lobby "Friday Night Quiz" with password "fun123" +
 → LobbyCreated with password set
 
 |**Example 2**
-|Guest joins with correct password "fun123"
+a|Guest joins with correct password "fun123" +
 → GuestJoined (Active mode by default)
 
 |**Example 3**
-|Guest joins with wrong password "fun124"
+a|Guest joins with wrong password "fun124" +
 → JoinRejected(reason: "Invalid password")
 
 |**Example 4**
-|Guest joins without password (when required)
+a|Guest joins without password (when required) +
 → JoinRejected(reason: "Password required")
 
 |**Question**
-|Can host change password after creation?
+a|Can host change password after creation? +
 **Decision**: Yes, via UpdateLobbySettings command
 |===
 
@@ -271,27 +618,27 @@ This is the foundation for all design decisions. **We cannot skip discovery.**
 |When host leaves, oldest guest becomes host
 
 |**Example 1**
-|Lobby has Host (Alice), Guest (Bob joined 10s ago, Active), Guest (Carol joined 5s ago, Active)
-→ Alice leaves
-→ Bob becomes host (oldest guest)
+a|Lobby has Host (Alice), Guest (Bob joined 10s ago, Active), Guest (Carol joined 5s ago, Active) +
+→ Alice leaves +
+→ Bob becomes host (oldest guest) +
 → Bob inherits host privileges, stays in Active mode
 
 |**Example 2**
-|Activity is in-progress when host leaves
-→ New host inherits control
+a|Activity is in-progress when host leaves +
+→ New host inherits control +
 → Activity continues
 
 |**Example 3**
-|Only host and one guest in lobby, host leaves
-→ Guest becomes host
+a|Only host and one guest in lobby, host leaves +
+→ Guest becomes host +
 → Lobby stays open
 
 |**Example 4**
-|Host leaves, but no other guests in lobby
+a|Host leaves, but no other guests in lobby +
 → Lobby closes automatically
 
 |**Question**
-|What if host disconnects temporarily (network issue)?
+a|What if host disconnects temporarily (network issue)? +
 **Decision**: After 30s timeout, treat as "leave" and promote new host. Original host can rejoin as regular guest.
 |===
 
@@ -306,29 +653,83 @@ This is the foundation for all design decisions. **We cannot skip discovery.**
 |Guests can toggle between Active and Spectating modes
 
 |**Example 1**
-|Guest (Carol, Active) toggles to Spectating before activity starts
-→ ParticipationModeChanged(Carol, Spectating)
+a|Guest (Carol, Active) toggles to Spectating before activity starts +
+→ ParticipationModeChanged(Carol, Spectating) +
 → Carol cannot submit results in next activity
 
 |**Example 2**
-|Activity is in progress, Carol tries to toggle
+a|Activity is in progress, Carol tries to toggle +
 → Rejected ("Cannot change mode during activity")
 
 |**Example 3**
-|Spectating guest (Dave) tries to submit result
+a|Spectating guest (Dave) tries to submit result +
 → Rejected ("Spectators cannot submit results")
 
 |**Example 4**
-|Host forces guest to Spectating mode
-→ ParticipationModeChanged(forced=true)
+a|Host forces guest to Spectating mode +
+→ ParticipationModeChanged(forced=true) +
 → Guest notified
 
 |**Question**
-|Can host be in Spectating mode?
+a|Can host be in Spectating mode? +
 **Decision**: Yes - host can spectate and still manage lobby (rare but allowed)
 |===
 
-=== Scenario 4: Activity Completion with Spectators
+=== Scenario 4: Host Disconnect & Automatic Delegation
+
+[cols="1,3", options="header"]
+|===
+|Type
+|Content
+
+|**Rule**
+|When host disconnects for >30s, oldest guest automatically becomes host
+
+|**Example 1**
+a|Host (Alice) disconnects at 10:00:00 +
+Guest 1 (Bob, joined 10s ago) detects at 10:00:10 +
+Guest 2 (Carol, joined 5s ago) detects at 10:00:10 +
+Timeout expires at 10:00:30 +
+Bob becomes host (oldest guest) +
+→ HostDelegated(Bob)
+
+|**Example 2**
+a|Host disconnects mid-activity +
+Guests wait 30s +
+Bob becomes host +
+Activity continues (Alice's result marked "abandoned") +
+→ Activity completes with 2 results instead of 3
+
+|**Example 3**
+a|Host disconnects at 10:00:00 +
+Host reconnects at 10:00:15 (within 30s) +
+→ No delegation, Alice retains host role
+
+|**Example 4**
+a|Host disconnects at 10:00:00 +
+Timeout expires at 10:00:30 (Bob becomes host) +
+Host reconnects at 10:00:45 +
+→ Alice rejoins as guest, Bob remains host
+
+|**Example 5**
+a|Only host + 1 guest in lobby +
+Host disconnects +
+Single guest automatically becomes host (no election needed)
+
+|**Question**
+a|What if both guests disconnect during the 30s timeout? +
+**Decision**: Lobby closes when last guest leaves (no guests = no lobby)
+
+|**Question**
+a|Can original host reclaim role after reconnecting? +
+**Decision**: No auto-reclaim in v1.0. Alice must ask Bob to delegate back (manual process)
+
+|**Question**
+a|What if guests have identical join timestamps? +
+**Decision**: Fallback to deterministic UUID comparison (lowest UUID wins)
+|===
+
+=== Scenario 5: Activity Completion with Spectators
 
 [cols="1,3", options="header"]
 |===
@@ -339,22 +740,22 @@ This is the foundation for all design decisions. **We cannot skip discovery.**
 |Activity completes when all active guests have submitted results (spectators excluded)
 
 |**Example 1**
-|4 guests: Alice (Active), Bob (Active), Carol (Spectating), Dave (Active)
-→ 2 of 3 active guests submitted
+a|4 guests: Alice (Active), Bob (Active), Carol (Spectating), Dave (Active) +
+→ 2 of 3 active guests submitted +
 → Activity state: InProgress, waiting for 1 more
 
 |**Example 2**
-|3rd active guest submits
-→ ActivityCompleted (Carol's non-submission doesn't block)
+a|3rd active guest submits +
+→ ActivityCompleted (Carol's non-submission doesn't block) +
 → Leaderboard updated (Carol not ranked)
 
 |**Example 3**
-|Guest switches to Spectating mid-activity
-→ ActivityAbandoned event
+a|Guest switches to Spectating mid-activity +
+→ ActivityAbandoned event +
 → Activity can complete without them
 
 |**Question**
-|What if all guests switch to Spectating during activity?
+a|What if all guests switch to Spectating during activity? +
 **Decision**: Activity auto-completes with no results (edge case)
 |===
 
@@ -438,6 +839,282 @@ note right: Seamless transition
 
 @enduml
 ----
+
+=== Story 3: Host Disconnect & Automatic Delegation
+
+[plantuml, "domain-story-host-disconnect", png]
+----
+@startuml
+title Domain Story: Automatic Host Delegation on Disconnect
+
+actor "Original Host\n(Alice)" as host
+actor "Guest 1\n(Bob)" as guest1
+actor "Guest 2\n(Carol)" as guest2
+participant "Lobby" as lobby
+participant "P2P Sync" as sync
+participant "Timeout Monitor" as timeout
+
+== Normal Operation ==
+
+host -> lobby : 1. Create lobby
+guest1 -> lobby : 2. Join as Guest (Active)
+guest2 -> lobby : 3. Join as Guest (Active)
+
+host -> lobby : 4. Start activity
+note right: All three participate
+
+== Host Disconnection ==
+
+host -> sync : 5. Connection drops (network failure)
+sync -> timeout : 6. Start timeout counter (30s)
+
+timeout -> guest1 : 7. No heartbeat from Alice (10s)
+timeout -> guest2 : 7. No heartbeat from Alice (10s)
+
+guest1 -> guest1 : 8. Mark Alice as "disconnected"
+guest2 -> guest2 : 8. Mark Alice as "disconnected"
+
+note over guest1,guest2
+  Both guests detect host disconnect
+  independently via P2P heartbeat timeout
+end note
+
+== Timeout Period (30 seconds) ==
+
+timeout -> timeout : 9. Wait for reconnection (20s remaining)
+note right: Grace period for network recovery
+
+timeout -> guest1 : 10. Timeout expired (30s total)
+timeout -> guest2 : 10. Timeout expired (30s total)
+
+== Automatic Host Delegation ==
+
+guest1 -> guest1 : 11. Check: Am I oldest guest?
+guest1 -> guest1 : 12. Compare join timestamps
+
+note over guest1
+  Bob joined at: 10:00:05
+  Carol joined at: 10:00:12
+  Bob is oldest → Becomes host
+end note
+
+guest1 -> lobby : 13. Claim host role
+guest1 -> guest2 : 14. Broadcast: HostDelegated(Bob)
+
+guest2 -> guest2 : 15. Verify: Bob is oldest
+guest2 -> guest1 : 16. ACK (Host delegation accepted)
+
+guest1 -> guest1 : 17. Now has host privileges
+note right
+  Bob can now:
+  • Kick guests
+  • Start/stop activities
+  • Delegate host role
+end note
+
+== Activity Continuation ==
+
+guest1 -> lobby : 18. Current activity still running
+note right: Seamless transition
+
+guest2 -> lobby : 19. Submit result
+guest1 -> lobby : 20. Submit result (as new host)
+
+lobby -> lobby : 21. Complete activity
+note right: Alice's result marked as "abandoned"
+
+== If Original Host Returns ==
+
+host -> sync : 22. Reconnect (after 2 minutes)
+host -> lobby : 23. Rejoin as Guest
+
+note over host
+  Alice rejoins but no longer host
+  (lost role due to disconnect timeout)
+  Can participate as regular guest
+end note
+
+guest1 -> host : 24. Current lobby state sync
+host -> host : 25. Render UI (Bob is now host)
+
+@enduml
+----
+
+== Host Delegation Protocol Details
+
+=== Automatic Delegation Rules
+
+[cols="1,3", options="header"]
+|===
+|Condition
+|Action
+
+|**Host disconnect detected**
+|Start 30-second timeout period
+
+|**Timeout expires (30s)**
+|Trigger automatic host delegation
+
+|**Multiple guests present**
+|Oldest guest (by join timestamp) becomes host
+
+|**Single guest present**
+|That guest automatically becomes host
+
+|**No guests present**
+|Lobby closes automatically
+
+|**Original host reconnects**
+|Rejoins as regular guest (cannot auto-reclaim)
+|===
+
+=== Consensus Mechanism
+
+All guests independently:
+
+1. **Detect disconnect** via P2P heartbeat timeout (10s silence)
+2. **Wait for timeout** (30s total grace period)
+3. **Calculate oldest guest** using deterministic join timestamps
+4. **Oldest guest claims** host role and broadcasts
+5. **Other guests verify** and acknowledge
+
+This avoids split-brain scenarios - all guests agree on who should be host based on objective timestamp.
+
+=== Edge Cases Handled
+
+[cols="2,3,2", options="header"]
+|===
+|Scenario
+|Behavior
+|Rationale
+
+|**Host disconnects mid-activity**
+|New host inherits control, activity continues
+|Better UX than cancelling
+
+|**Host reconnects within 30s**
+|Retains host role, no delegation
+|Grace period for temporary network issues
+
+|**Host reconnects after 30s**
+|Rejoins as guest, new host remains
+|Prevents disruption after delegation
+
+|**Both guests disconnect**
+|Lobby closes when last guest leaves
+|No guests = no lobby
+
+|**Guests have same timestamp**
+|(Extremely rare) Fallback to UUID comparison
+|Deterministic tie-breaker
+
+|**New guest joins during timeout**
+|Not eligible for host (wasn't present at disconnect)
+|Prevents "host sniping"
+|===
+
+== Sequence Diagram: Detailed Protocol
+
+[plantuml, "host-delegation-sequence", png]
+----
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Sequence.puml
+
+title Host Delegation Protocol (Disconnect)
+
+participant "Host\n(Alice)" as host
+participant "Guest 1\n(Bob)" as bob
+participant "Guest 2\n(Carol)" as carol
+participant "P2P Network" as p2p
+participant "Timeout Service" as timeout
+
+== Normal State ==
+host -> p2p : Heartbeat (every 5s)
+bob -> bob : Receive heartbeat
+carol -> carol : Receive heartbeat
+
+== Disconnect Occurs ==
+host -> p2p : ❌ Connection lost
+activate timeout
+
+timeout -> bob : No heartbeat for 10s
+timeout -> carol : No heartbeat for 10s
+
+bob -> bob : Mark Alice as "suspected disconnect"
+carol -> carol : Mark Alice as "suspected disconnect"
+
+timeout -> timeout : Wait 20s more (grace period)
+note right: Total 30s timeout
+
+== Timeout Expires ==
+timeout -> bob : Host disconnect confirmed
+timeout -> carol : Host disconnect confirmed
+deactivate timeout
+
+== Election Phase ==
+bob -> bob : Calculate: Am I oldest?
+carol -> carol : Calculate: Am I oldest?
+
+note over bob
+  Bob's join time: 10:00:05
+  Carol's join time: 10:00:12
+  Oldest = Bob
+end note
+
+bob -> p2p : HostDelegationClaim\n(candidate: Bob, timestamp: 10:00:05)
+activate bob
+
+carol -> carol : Verify claim\n(Bob's timestamp < mine)
+carol -> p2p : HostDelegationAck\n(new_host: Bob)
+
+bob -> bob : Host role confirmed
+deactivate bob
+
+bob -> p2p : LobbyStateUpdate\n(host: Bob)
+carol -> carol : Apply state update
+
+== Original Host Returns ==
+host -> p2p : Reconnect (60s later)
+activate host
+
+p2p -> host : CurrentLobbyState\n(host: Bob)
+host -> host : Update local state\n(I'm now a guest)
+deactivate host
+
+host -> bob : GuestJoined\n(Alice rejoined)
+bob -> bob : Add Alice as guest
+
+@enduml
+----
+
+== Pain Points & Opportunities
+
+[cols="2,3,3", options="header"]
+|===
+|Pain Point
+|Current State
+|Opportunity
+
+|**Lobby Discovery**
+|Players need lobby ID shared manually (chat, email)
+|Add lobby browser/search feature (future)
+
+|**Disconnection Handling**
+|Network drops can be confusing for users
+|Clear UI feedback + auto-reconnect
+
+|**Activity Results**
+|No validation that results are "fair"
+|Add result validation hooks for game developers
+
+|**Leaderboard**
+|Simple score totals only
+|Add time-based scoring, streaks, achievements
+
+|**Lobby Lifecycle**
+|No way to "pause" a lobby (all must stay online)
+|Add lobby persistence (resume later)
+|===
 
 == Questions & Decisions
 

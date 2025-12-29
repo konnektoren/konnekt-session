@@ -16,56 +16,62 @@ Align our architectural decisions with the business goals and user needs of Konn
 |Description
 
 |**Key Partners**
-|• Matchbox signalling service providers (match.konnektoren.help)
-• Game developers building on top of Konnekt Session
-• Open source community contributors
+a|
+* Matchbox signalling service providers (match.konnektoren.help)
+* Game developers building on top of Konnekt Session
+* Open source community contributors
 
 |**Key Activities**
-|• P2P lobby management
-• WebRTC connection orchestration
-• Host delegation & guest management
-• Real-time state synchronization
+a|
+* P2P lobby management
+* WebRTC connection orchestration
+* Host delegation & guest management
+* Real-time state synchronization
 
 |**Key Resources**
-|• Rust/WASM expertise
-• WebRTC/Matchbox integration
-• Domain knowledge in multiplayer game sessions
-• Open source library code
+a|
+* Rust/WASM expertise
+* WebRTC/Matchbox integration
+* Domain knowledge in multiplayer game sessions
+* Open source library code
 
 |**Value Propositions**
-|• **Zero server costs** – no game server infrastructure needed
-• **Low latency** – direct P2P connections between players
-• **Easy integration** – Rust library for Yew applications
-• **Decentralized** – resilient to server failures
-• **Extensible** – modular activity system
-• **Flexible participation** – guests can toggle between active play and spectating
+a|
+* **Zero server costs** – no game server infrastructure needed
+* **Low latency** – direct P2P connections between players
+* **Easy integration** – Rust library for Yew applications
+* **Decentralized** – resilient to server failures
+* **Extensible** – modular activity system
+* **Flexible participation** – guests can toggle between active play and spectating
 
 |**Customer Relationships**
-|• Documentation & examples
-• GitHub issues & discussions
-• Community support
+a|
+* Documentation & examples
+* GitHub issues & discussions
+* Community support
 
 |**Channels**
-|• GitHub repository
-• crates.io distribution
-• Technical blog posts
-• Example applications
+a|
+* GitHub repository
+* Example applications
 
 |**Customer Segments**
-|• Indie game developers
-• Educational platforms (multiplayer learning games)
-• Party game developers
-• Prototyping/hackathon projects
+a|
+* Indie game developers
+* Educational platforms (multiplayer learning games)
+* Party game developers
+* Prototyping/hackathon projects
 
 |**Cost Structure**
-|• Development time (open source)
-• CI/CD infrastructure
-• Documentation maintenance
-• Matchbox signalling costs (minimal)
+a|
+* Development time (open source)
+* CI/CD infrastructure
+* Documentation maintenance
+* Matchbox signalling costs (minimal)
 
 |**Revenue Streams**
-|• Not applicable (open source library)
-• Potential future: hosted signalling service, premium support
+a|
+* Not applicable (open source library)
 |===
 
 == Strategic Goals
