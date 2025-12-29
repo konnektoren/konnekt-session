@@ -90,7 +90,6 @@ impl Timestamp {
     }
 
     /// Create a timestamp from a raw milliseconds value (for testing)
-    #[cfg(test)]
     pub fn from_millis(millis: u64) -> Self {
         Timestamp(millis)
     }

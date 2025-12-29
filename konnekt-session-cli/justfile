@@ -1,0 +1,7 @@
+# Default recipe
+default:
+    @just --list
+
+# Run CLI with custom args
+run *ARGS:
+    cargo run -- {{ ARGS }}
