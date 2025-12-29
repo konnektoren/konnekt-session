@@ -5,7 +5,7 @@ use konnekt_session_p2p::{P2PSession, PeerId};
 use uuid::Uuid;
 
 pub async fn handle_message_received(
-    _session: &mut P2PSession,
+    session: &mut P2PSession,
     state: &mut SessionState,
     from: PeerId,
     data: Vec<u8>,
@@ -16,7 +16,7 @@ pub async fn handle_message_received(
             if let Some(msg_type) = msg.get("type").and_then(|v| v.as_str()) {
                 match msg_type {
                     "participant_info" => {
-                        handle_participant_info(state, from, &msg)?;
+                        handle_participant_info(session, state, from, &msg)?;
                     }
                     "host_delegated" => {
                         handle_host_delegation(state, &msg)?;
@@ -36,6 +36,7 @@ pub async fn handle_message_received(
 }
 
 fn handle_participant_info(
+    session: &mut P2PSession,
     state: &mut SessionState,
     peer_id: PeerId,
     msg: &serde_json::Value,
@@ -63,16 +64,18 @@ fn handle_participant_info(
             CliError::InvalidConfig("Invalid participant_id in participant_info".to_string())
         })?;
 
+    let is_host = role == "Host";
+
     tracing::info!("📥 Received participant info from peer {}:", peer_id);
     tracing::info!("   Name: {}", name);
     tracing::info!("   Role: {}", role);
     tracing::info!("   Mode: {}", mode);
 
-    // Store mapping
-    state.add_peer_mapping(peer_id, participant_id);
+    // Register in P2P session's peer registry
+    session.register_peer_participant(peer_id, participant_id, name.to_string(), is_host);
 
     // If we're a guest and this is the host, create/join the lobby
-    if !state.is_host() && role == "Host" {
+    if !state.is_host() && is_host {
         if state.lobby().is_none() {
             // Create a temporary lobby with the host
             let host = Participant::new_host(name.to_string())

@@ -31,10 +31,12 @@ pub async fn handle_peer_connected(
     tracing::info!("Connected peers: {}", session.connected_peers().len());
 
     // Clear host disconnect timer if host reconnected
-    if !state.is_host() && state.is_host_connected() {
-        if state.host_disconnect_elapsed().is_some() {
-            tracing::info!("✓ Host reconnected within grace period");
-            state.clear_host_disconnect_timer();
+    if !state.is_host() {
+        if let Some(host_peer) = session.find_host_peer() {
+            if host_peer == peer_id && state.host_disconnect_elapsed().is_some() {
+                tracing::info!("✓ Host reconnected within grace period");
+                state.clear_host_disconnect_timer();
+            }
         }
     }
 

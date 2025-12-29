@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use konnekt_session_cli::{
     application::use_cases::{
         check_host_grace_period, handle_message_received, handle_peer_connected,
-        handle_peer_disconnected,
+        handle_peer_disconnected, handle_peer_timed_out,
     },
     domain::SessionState,
     infrastructure::{CliError, Result},
@@ -229,13 +229,14 @@ async fn run_event_loop(session: &mut P2PSession, state: &mut SessionState) -> R
                         ConnectionEvent::PeerDisconnected(peer_id) => {
                             handle_peer_disconnected(session, state, peer_id).await?;
                         }
+                        ConnectionEvent::PeerTimedOut { peer_id, participant_id, was_host } => {
+                            handle_peer_timed_out(session, state, participant_id, was_host).await?;
+                        }
                         ConnectionEvent::MessageReceived { from, data } => {
                             handle_message_received(session, state, from, data).await?;
                         }
                     }
                 }
-
-                check_host_grace_period(session, state).await?;
             }
             _ = tokio::signal::ctrl_c() => {
                 info!("Shutting down...");
