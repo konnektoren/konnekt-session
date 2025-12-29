@@ -1,0 +1,35 @@
+[package]
+name = "konnekt-session-p2p"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+# Core domain
+konnekt-session-core = { path = "../konnekt-session-core" }
+
+# P2P networking
+matchbox_socket = "0.10"
+
+# Async runtime
+tokio = { version = "1.37", features = ["sync", "time"] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Utilities
+uuid = { version = "1.0", features = ["v4", "serde"] }
+thiserror = "1.0"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1.37", features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = "0.3"
