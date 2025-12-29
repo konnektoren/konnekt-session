@@ -1,0 +1,308 @@
+= ADR-0008: Use thiserror for Domain Errors
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+Konnekt Session requires **type-safe error handling** across multiple layers:
+
+* **Domain layer** - business rule violations (lobby full, invalid state transitions)
+* **Infrastructure layer** - P2P failures, serialization errors, signature verification
+* **Presentation layer** - user-facing error messages
+
+=== Requirements
+
+* **Type-safe errors** - compile-time guarantees about error variants
+* **Pattern matching** - handle specific errors differently in UI
+* **Serializable** - errors must cross P2P boundary (rejection reasons)
+* **WASM compatible** - work in browser environment
+* **Minimal boilerplate** - focus on domain logic
+* **Clear layer boundaries** - domain errors independent of infrastructure
+
+=== Alternatives Considered
+
+==== Plain Result<T, String>
+
+[source,rust]
+----
+fn join_lobby(&mut self, participant: Participant) -> Result<(), String> {
+    if self.is_full() {
+        return Err("Lobby is full".to_string());
+    }
+    Ok(())
+}
+----
+
+* ✅ Simple, no dependencies
+* ❌ **Not type-safe** - stringly-typed errors
+* ❌ **Not pattern-matchable** - can't handle specific cases
+* ❌ **No structured data** - can't access error context
+
+==== anyhow
+
+[source,rust]
+----
+use anyhow::{Context, Result};
+
+fn verify_signature(&self, msg: &SignedMessage) -> Result<()> {
+    key.verify(&msg.signature, &msg.payload)
+        .context("Signature verification failed")?;
+    Ok(())
+}
+----
+
+* ✅ Ergonomic context API
+* ✅ Great for application layer
+* ❌ **Opaque error type** - can't pattern match
+* ❌ **Wrong for libraries** - users can't handle specific errors
+* ❌ **Loses semantic meaning** - all errors become `anyhow::Error`
+
+==== Custom enum with manual Display
+
+[source,rust]
+----
+#[derive(Debug)]
+enum LobbyError {
+    Full { capacity: usize },
+    DuplicateName { name: String },
+}
+
+impl std::fmt::Display for LobbyError { /* ... */ }
+impl std::error::Error for LobbyError {}
+----
+
+* ✅ Type-safe and pattern-matchable
+* ❌ **Lots of boilerplate** - manual `Display`, `Error`, `From` implementations
+* ❌ **Repetitive** across all aggregates
+* ❌ **Error-prone** - easy to forget traits
+
+== Decision
+
+We will use **`thiserror`** for all error types across domain and infrastructure layers.
+
+=== Dependencies
+
+[source,toml]
+----
+[dependencies]
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+----
+
+=== Usage Pattern
+
+**Domain Errors**:
+
+[source,rust]
+----
+use thiserror::Error;
+use serde::{Serialize, Deserialize};
+
+#[derive(Debug, Error, Clone, PartialEq, Serialize, Deserialize)]
+pub enum LobbyError {
+    #[error("Lobby is full (capacity: {capacity})")]
+    Full { capacity: usize },
+
+    #[error("Participant name '{name}' already taken")]
+    DuplicateName { name: String },
+
+    #[error("Only host can perform this action")]
+    UnauthorizedAction,
+}
+----
+
+**Infrastructure Errors**:
+
+[source,rust]
+----
+#[derive(Debug, Error)]
+pub enum P2PError {
+    #[error("Signature verification failed")]
+    InvalidSignature,
+
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] SerializationError),
+
+    #[error("Peer {peer_id} disconnected")]
+    PeerDisconnected { peer_id: PeerId },
+}
+----
+
+**Error Chaining with `#[from]`**:
+
+[source,rust]
+----
+#[derive(Debug, Error)]
+pub enum SerializationError {
+    #[error("JSON serialization failed: {0}")]
+    Json(#[from] serde_json::Error),
+
+    #[cfg(feature = "messagepack")]
+    #[error("MessagePack serialization failed: {0}")]
+    MessagePack(#[from] rmp_serde::encode::Error),
+}
+
+// Automatic conversion via ?
+fn send_message(&self, msg: &Message) -> Result<(), P2PError> {
+    let bytes = serialize(msg)?;  // SerializationError -> P2PError (automatic)
+    self.socket.send(bytes)?;
+    Ok(())
+}
+----
+
+=== Rationale
+
+==== Type Safety with Pattern Matching
+
+[source,rust]
+----
+match lobby.add_participant(participant) {
+    Ok(_) => show_success(),
+    Err(LobbyError::Full { capacity }) => {
+        show_error(&format!("Room full ({} max)", capacity));
+    },
+    Err(LobbyError::DuplicateName { name }) => {
+        show_error(&format!("Name '{}' taken, try another", name));
+    },
+    Err(LobbyError::UnauthorizedAction) => {
+        show_error("Only the host can do that");
+    },
+}
+// Compiler enforces exhaustive matching
+----
+
+==== Minimal Boilerplate
+
+[source,rust]
+----
+// Just derive - Display and Error traits auto-implemented
+#[derive(Debug, Error)]
+#[error("Lobby is full (capacity: {capacity})")]
+Full { capacity: usize },
+----
+
+==== Serialization for P2P
+
+[source,rust]
+----
+// Send errors across network
+#[derive(Serialize, Deserialize)]
+pub enum P2PMessage {
+    JoinRequest { name: String },
+    JoinRejected { reason: LobbyError },  // Typed error
+    JoinAccepted,
+}
+----
+
+==== Error Context Without Losing Type
+
+[source,rust]
+----
+// Chain errors while preserving types
+#[derive(Debug, Error)]
+pub enum ApplicationError {
+    #[error("Domain error: {0}")]
+    Domain(#[from] LobbyError),
+
+    #[error("Infrastructure error: {0}")]
+    Infrastructure(#[from] P2PError),
+}
+
+// Still pattern-matchable at application boundary
+match app_error {
+    ApplicationError::Domain(LobbyError::Full { .. }) => { /* specific handling */ },
+    _ => { /* generic handling */ }
+}
+----
+
+=== Error Organization by Layer
+
+**Domain Layer** (`konnekt-session-core`):
+- `LobbyError`
+- `ParticipantError`
+- `ActivityError`
+
+**Infrastructure Layer** (`konnekt-session-p2p`):
+- `P2PError`
+- `SerializationError`
+- `SignatureError`
+
+**Application Layer** (`konnekt-session-yew`):
+- Wraps domain/infrastructure errors
+- Converts to user-friendly messages
+
+=== UI Error Mapping
+
+[source,rust]
+----
+pub fn user_message(error: &LobbyError) -> &'static str {
+    match error {
+        LobbyError::Full { .. } => "This lobby is full. Try creating a new one!",
+        LobbyError::DuplicateName { .. } => "That name is taken. Please choose another.",
+        LobbyError::UnauthorizedAction => "You don't have permission to do that.",
+    }
+}
+----
+
+== Consequences
+
+=== Positive
+
+* **Type safety** - compiler enforces exhaustive error handling
+* **Zero boilerplate** - derive macro generates implementations
+* **Pattern matching** - handle specific errors in UI
+* **Serializable** - send typed errors to peers
+* **Clear boundaries** - domain errors independent of infrastructure
+* **Debuggable** - excellent error messages via `Display`
+* **Chainable** - automatic `From` conversions via `#[from]`
+
+=== Negative
+
+* **Binary size** - adds ~20KB to WASM bundle
+* **Compile time** - derive macros add slight overhead
+* **Learning curve** - team needs to understand `#[error]` and `#[from]` syntax
+
+=== Guidelines
+
+==== Use thiserror for:
+
+* ✅ All domain errors (business rule violations)
+* ✅ All infrastructure errors (P2P, storage, crypto)
+* ✅ Errors that cross crate boundaries
+* ✅ Errors sent over network
+
+==== Always:
+
+* ✅ Derive `Clone` and `PartialEq` for domain errors (testability)
+* ✅ Derive `Serialize`/`Deserialize` for P2P errors
+* ✅ Use `#[from]` for automatic error conversion
+* ✅ Include relevant context in error variants (IDs, names, counts)
+
+==== Never:
+
+* ❌ Use `panic!()` for recoverable errors
+* ❌ Use `unwrap()` in production code (only tests)
+* ❌ Use plain `String` errors in domain layer
+* ❌ Mix anyhow with domain layer
+
+== Implementation Checklist
+
+- [ ] Add `thiserror` to all crates
+- [ ] Define error enums per aggregate (Lobby, Participant, Activity)
+- [ ] Add `Serialize`/`Deserialize` to domain errors
+- [ ] Replace existing `Result<T, String>` with typed errors
+- [ ] Write pattern-matching tests for each error variant
+
+== References
+
+* **thiserror** – https://docs.rs/thiserror/
+* **Error Handling in Rust** – https://doc.rust-lang.org/book/ch09-00-error-handling.html
+* **Rust Error Handling Survey** – https://blog.yoshuawuyts.com/error-handling-survey/
+
+=== Related ADRs
+
+* xref:0001-use-rust-for-implementation.adoc[ADR-0001] – Rust enables type-safe errors
+* xref:0006-use-cargo-workspace-for-modular-architecture.adoc[ADR-0006] – Error boundaries align with crate boundaries
+* xref:0009-use-json-with-feature-gated-messagepack.adoc[ADR-0009] – Errors are serialized for P2P transmission

@@ -71,13 +71,23 @@ Each ADR in this directory follows the **Michael Nygard format**:
 |✅ Accepted
 |2025-12-29
 
-|xref:0006-use-workspace-structure-for-modular-architecture.adoc[ADR-0006]
+|xref:0006-use-cargo-workspace-for-modular-architecture.adoc[ADR-0006]
 |Use Cargo Workspace for Modular Architecture
 |✅ Accepted
 |2025-12-29
 
 |xref:0007-use-cucumber-for-behavior-driven-testing.adoc[ADR-0007]
 |Use Cucumber for Behavior-Driven Testing
+|✅ Accepted
+|2025-12-29
+
+|xref:0008-use-thiserror-for-domain-errors.adoc[ADR-0008]
+|Use thiserror for Domain Errors
+|✅ Accepted
+|2025-12-29
+
+|xref:0009-use-json-with-feature-gated-messagepack.adoc[ADR-0009]
+|Use JSON with Feature-Gated MessagePack
 |✅ Accepted
 |2025-12-29
 |===
