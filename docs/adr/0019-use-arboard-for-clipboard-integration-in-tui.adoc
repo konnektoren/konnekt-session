@@ -1,0 +1,136 @@
+= ADR-0019: Use Arboard for Clipboard Integration in TUI
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+The TUI (xref:0018-use-ratatui-for-interactive-cli-development.adoc[ADR-0018]) displays session IDs that users need to share with others. Manual text selection in terminal emulators is inconsistent and cumbersome:
+
+* **Terminal-dependent** - selection behavior varies (Fish, tmux, screen)
+* **Raw mode interference** - Ratatui's raw mode can block mouse selection
+* **Poor UX** - multi-step process (select, copy, paste)
+* **Error-prone** - easy to select partial UUIDs
+
+Users need a **one-key copy** to clipboard for seamless session sharing.
+
+=== Requirements
+
+* **Single keypress** - copy session ID with one action
+* **Cross-platform** - works on macOS, Linux (X11/Wayland), Windows
+* **No external deps** - pure Rust, no system utilities
+* **Lightweight** - minimal binary size increase
+* **Immediate feedback** - confirm copy success/failure
+
+=== Alternatives Considered
+
+==== Manual text selection (current)
+* ❌ Inconsistent across terminals
+* ❌ Requires raw mode disable/enable
+* ❌ Multi-step process
+
+==== Shell out to `pbcopy`/`xclip`
+[source,rust]
+----
+std::process::Command::new("pbcopy")
+    .stdin(Stdio::piped())
+    .spawn()?;
+----
+
+* ❌ Platform-specific commands
+* ❌ Requires external binaries
+* ❌ Fails on headless systems
+* ✅ Simple implementation
+
+==== `copypasta` crate
+* ❌ Less maintained (last update 2021)
+* ❌ Larger dependency tree
+* ✅ Cross-platform
+
+== Decision
+
+Use **arboard** for clipboard access in the TUI.
+
+=== Implementation
+
+[source,toml]
+----
+[dependencies]
+arboard = { version = "3.4", optional = true }
+
+[features]
+tui = ["ratatui", "crossterm", "arboard"]
+----
+
+[source,rust]
+----
+use arboard::Clipboard;
+
+pub fn copy_session_id(&mut self) -> Result<(), String> {
+    let mut clipboard = Clipboard::new()?;
+    clipboard.set_text(&self.session_id)?;
+    Ok(())
+}
+----
+
+**Keyboard shortcuts**:
+* `y` - Copy session ID
+* `c` - Copy full join command
+
+**User feedback**:
+* "✓ Session ID copied to clipboard!" (3 seconds)
+* "✗ Clipboard not available: <error>" (on failure)
+
+=== Rationale
+
+==== Cross-Platform
+* **macOS** - Uses `NSPasteboard`
+* **Linux X11** - Uses `x11-clipboard`
+* **Linux Wayland** - Uses `wl-clipboard-rs`
+* **Windows** - Uses Win32 clipboard API
+
+==== Actively Maintained
+* Regular releases (latest: 3.4.0)
+* Good Wayland support
+* Security-focused (handles clipboard ownership)
+
+==== Lightweight
+* ~30KB binary size increase
+* Minimal dependencies
+* No unsafe code in public API
+
+==== Developer Experience
+* Simple API (`Clipboard::new()`, `set_text()`)
+* Good error handling
+* Well-documented
+
+== Consequences
+
+=== Positive
+
+* ✅ **One-key copy** - instant session sharing
+* ✅ **Consistent UX** - works same on all platforms
+* ✅ **No external deps** - pure Rust solution
+* ✅ **Graceful degradation** - shows error if clipboard unavailable (headless)
+
+=== Negative
+
+* ❌ **Binary size** - adds ~30KB
+* ❌ **Headless limitation** - requires display server (expected for TUI)
+* ❌ **Platform permissions** - may require clipboard access on some systems
+
+=== Neutral
+
+* **TUI-only** - not needed for CLI mode (feature-gated)
+* **Optional feature** - users building without TUI don't include it
+
+== References
+
+* **arboard** – https://crates.io/crates/arboard
+* **Repository** – https://github.com/1Password/arboard
+
+=== Related ADRs
+
+* xref:0018-use-ratatui-for-interactive-cli-development.adoc[ADR-0018] – Ratatui TUI foundation
+* xref:0016-use-clap-for-cli-tooling.adoc[ADR-0016] – CLI tooling basics
