@@ -1,7 +1,7 @@
 use crate::application::ConnectionEvent;
-use crate::domain::PeerId;
+use crate::domain::{IceServer, PeerId};
 use crate::infrastructure::error::{P2PError, Result};
-use matchbox_socket::WebRtcSocket;
+use matchbox_socket::{RtcIceServerConfig, WebRtcSocket, WebRtcSocketBuilder};
 use std::sync::{Arc, Mutex};
 
 /// Infrastructure adapter: Manages WebRTC connection via Matchbox signalling
@@ -11,11 +11,35 @@ pub struct MatchboxConnection {
 }
 
 impl MatchboxConnection {
-    /// Connect to Matchbox signalling server
-    pub async fn connect(signalling_url: &str) -> Result<Self> {
-        tracing::info!("Connecting to signalling server: {}", signalling_url);
+    /// Connect to Matchbox signalling server (default config)
+    pub async fn connect_default(signalling_url: &str) -> Result<Self> {
+        Self::connect(signalling_url, IceServer::default_stun_servers()).await
+    }
 
-        let (mut socket, loop_fut) = WebRtcSocket::new_reliable(signalling_url);
+    /// Connect to Matchbox signalling server with custom ICE servers
+    pub async fn connect(signalling_url: &str, ice_servers: Vec<IceServer>) -> Result<Self> {
+        tracing::info!("Connecting to signalling server: {}", signalling_url);
+        tracing::info!("Configured with {} ICE servers", ice_servers.len());
+
+        // Log ICE server details
+        for (i, server) in ice_servers.iter().enumerate() {
+            if server.username.is_some() {
+                tracing::info!(
+                    "  ICE Server {}: {} (with auth)",
+                    i + 1,
+                    server.urls.join(", ")
+                );
+            } else {
+                tracing::info!("  ICE Server {}: {}", i + 1, server.urls.join(", "));
+            }
+        }
+
+        let ice_server_config = build_ice_server_config(&ice_servers);
+
+        let (mut socket, loop_fut) = WebRtcSocketBuilder::new(signalling_url)
+            .ice_server(ice_server_config)
+            .add_channel(matchbox_socket::ChannelConfig::reliable())
+            .build();
 
         // Spawn the loop future to drive the socket
         tokio::spawn(async move {
@@ -101,6 +125,23 @@ impl MatchboxConnection {
     }
 }
 
+/// Build ICE server configuration for Matchbox
+fn build_ice_server_config(ice_servers: &[IceServer]) -> RtcIceServerConfig {
+    if ice_servers.is_empty() {
+        // Use default if none provided
+        return RtcIceServerConfig::default();
+    }
+
+    // Convert first server (Matchbox only supports one ICE server config currently)
+    let first_server = &ice_servers[0];
+
+    RtcIceServerConfig {
+        urls: first_server.urls.clone(),
+        username: first_server.username.clone(),
+        credential: first_server.credential.clone(),
+    }
+}
+
 /// Wait for the socket to receive a peer ID from the signalling server
 async fn wait_for_peer_id(socket: &mut WebRtcSocket) -> Result<PeerId> {
     use tokio::time::{Duration, timeout};
@@ -122,4 +163,56 @@ async fn wait_for_peer_id(socket: &mut WebRtcSocket) -> Result<PeerId> {
     })
     .await
     .map_err(|_| P2PError::ConnectionFailed("Timeout waiting for peer ID".to_string()))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_ice_server_config_stun_only() {
+        let servers = vec![IceServer::stun("stun:stun.l.google.com:19302".to_string())];
+
+        let config = build_ice_server_config(&servers);
+        assert_eq!(config.urls, vec!["stun:stun.l.google.com:19302"]);
+        assert!(config.username.is_none());
+        assert!(config.credential.is_none());
+    }
+
+    #[test]
+    fn test_build_ice_server_config_with_turn() {
+        let servers = vec![IceServer::turn(
+            "turn:turn.example.com:3478".to_string(),
+            "user".to_string(),
+            "pass".to_string(),
+        )];
+
+        let config = build_ice_server_config(&servers);
+        assert_eq!(config.urls, vec!["turn:turn.example.com:3478"]);
+        assert_eq!(config.username, Some("user".to_string()));
+        assert_eq!(config.credential, Some("pass".to_string()));
+    }
+
+    #[test]
+    fn test_build_ice_server_config_multiple_urls() {
+        let servers = vec![IceServer::from_urls(vec![
+            "stun:stun1.example.com:3478".to_string(),
+            "stun:stun2.example.com:3478".to_string(),
+        ])];
+
+        let config = build_ice_server_config(&servers);
+        assert_eq!(
+            config.urls,
+            vec!["stun:stun1.example.com:3478", "stun:stun2.example.com:3478"]
+        );
+    }
+
+    #[test]
+    fn test_build_ice_server_config_empty() {
+        let servers = vec![];
+        let config = build_ice_server_config(&servers);
+
+        // Should return default config
+        assert!(!config.urls.is_empty());
+    }
 }

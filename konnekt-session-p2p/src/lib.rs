@@ -9,5 +9,5 @@ pub mod infrastructure;
 
 // Re-exports for convenience
 pub use application::{ConnectionEvent, P2PSession, SessionConfig};
-pub use domain::{PeerId, SessionId};
+pub use domain::{IceServer, PeerId, SessionId};
 pub use infrastructure::error::{P2PError, Result};

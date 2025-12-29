@@ -1,5 +1,3 @@
-use std::fmt;
-
 /// Infrastructure layer errors
 #[derive(Debug, thiserror::Error)]
 pub enum P2PError {

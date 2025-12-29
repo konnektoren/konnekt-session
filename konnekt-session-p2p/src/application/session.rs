@@ -1,9 +1,6 @@
-use crate::application::ConnectionEvent;
+use crate::application::{ConnectionEvent, SessionConfig};
 use crate::domain::{PeerId, SessionId};
-use crate::infrastructure::{
-    connection::MatchboxConnection,
-    error::{P2PError, Result},
-};
+use crate::infrastructure::{connection::MatchboxConnection, error::Result};
 
 /// Application service: High-level P2P session management
 pub struct P2PSession {
@@ -12,19 +9,32 @@ pub struct P2PSession {
 }
 
 impl P2PSession {
-    /// Create a new P2P session (as host)
+    /// Create a new P2P session (as host) with default config
     pub async fn create_host(signalling_server: &str) -> Result<Self> {
-        let session_id = SessionId::new();
-        Self::join(signalling_server, session_id).await
+        let config = SessionConfig::new(signalling_server.to_string());
+        Self::create_host_with_config(config).await
     }
 
-    /// Join an existing P2P session (as guest)
+    /// Create a new P2P session (as host) with custom config
+    pub async fn create_host_with_config(config: SessionConfig) -> Result<Self> {
+        let session_id = SessionId::new();
+        Self::join_with_config(config, session_id).await
+    }
+
+    /// Join an existing P2P session (as guest) with default config
     pub async fn join(signalling_server: &str, session_id: SessionId) -> Result<Self> {
-        let room_url = format!("{}/{}", signalling_server, session_id.as_str());
+        let config = SessionConfig::new(signalling_server.to_string());
+        Self::join_with_config(config, session_id).await
+    }
+
+    /// Join an existing P2P session (as guest) with custom config
+    pub async fn join_with_config(config: SessionConfig, session_id: SessionId) -> Result<Self> {
+        let room_url = format!("{}/{}", config.signalling_server, session_id.as_str());
 
         tracing::info!("Joining session {} at {}", session_id, room_url);
+        tracing::debug!("Using {} ICE servers", config.ice_servers.len());
 
-        let connection = MatchboxConnection::connect(&room_url).await?;
+        let connection = MatchboxConnection::connect(&room_url, config.ice_servers).await?;
 
         Ok(P2PSession {
             session_id,
