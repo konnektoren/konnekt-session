@@ -17,7 +17,7 @@ pub async fn handle_peer_connected(
         "name": participant.name(),
         "role": format!("{}", participant.lobby_role()),
         "mode": format!("{}", participant.participation_mode()),
-        "joined_at": participant.joined_at().as_millis(),  // Add timestamp!
+        "joined_at": participant.joined_at().as_millis(),
     });
 
     let data =
@@ -28,6 +28,31 @@ pub async fn handle_peer_connected(
         .map_err(|e| CliError::MessageSend(e.to_string()))?;
 
     tracing::info!("📤 Sent participant info to peer {}", peer_id);
+
+    // NEW: Also send full lobby state if we have one
+    if let Some(lobby) = state.lobby() {
+        tracing::info!("📤 Sending full lobby state to new peer {}", peer_id);
+
+        // Send state for all participants in our lobby
+        for p in lobby.participants().values() {
+            let participant_state_msg = serde_json::json!({
+                "type": "participant_state_sync",
+                "participant_id": p.id().to_string(),
+                "name": p.name(),
+                "role": format!("{}", p.lobby_role()),
+                "mode": format!("{}", p.participation_mode()),
+                "joined_at": p.joined_at().as_millis(),
+            });
+
+            let sync_data = serde_json::to_vec(&participant_state_msg)
+                .map_err(|e| CliError::Serialization(e.to_string()))?;
+
+            session
+                .send_to(peer_id, sync_data)
+                .map_err(|e| CliError::MessageSend(e.to_string()))?;
+        }
+    }
+
     tracing::info!("");
     tracing::info!("Connected peers: {}", session.connected_peers().len());
 

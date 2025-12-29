@@ -1,4 +1,5 @@
 use super::app::{App, Tab};
+use konnekt_session_core::ParticipationMode;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -180,10 +181,25 @@ fn render_lobby(f: &mut Frame, area: Rect, app: &App) {
             ]),
             Line::from(vec![
                 Span::styled("Your Mode: ", Style::default().fg(Color::Cyan)),
-                Span::raw(format!(
-                    "{}",
-                    app.session_state.participant().participation_mode()
-                )),
+                Span::styled(
+                    format!("{}", app.session_state.participant().participation_mode()),
+                    if app.session_state.participant().can_submit_results() {
+                        Style::default().fg(Color::Green)
+                    } else {
+                        Style::default().fg(Color::Yellow)
+                    },
+                ),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("Press "),
+                Span::styled(
+                    "t",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" to toggle between Active/Spectating"),
             ]),
         ]
     } else {
@@ -221,20 +237,74 @@ fn render_events(f: &mut Frame, area: Rect, app: &App) {
 
 fn render_participants(f: &mut Frame, area: Rect, app: &App) {
     let items: Vec<ListItem> = if let Some(lobby) = app.session_state.lobby() {
-        lobby
-            .participants()
-            .values()
+        let mut participants: Vec<_> = lobby.participants().values().collect();
+
+        // Sort: Host first, then by name
+        participants.sort_by(|a, b| match (a.is_host(), b.is_host()) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name().cmp(b.name()),
+        });
+
+        participants
+            .iter()
             .map(|p| {
                 let role_icon = if p.is_host() { "👑" } else { "👤" };
-                let mode = format!("{}", p.participation_mode());
-                ListItem::new(format!("{} {} - {}", role_icon, p.name(), mode))
+
+                // Color code the mode
+                let mode_span = match p.participation_mode() {
+                    ParticipationMode::Active => Span::styled(
+                        "Active",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    ParticipationMode::Spectating => Span::styled(
+                        "Spectating",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                };
+
+                // Highlight ourselves with cyan
+                let name_span = if p.id() == app.session_state.participant().id() {
+                    Span::styled(
+                        format!("{} (you)", p.name()),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::styled(p.name(), Style::default().fg(Color::White))
+                };
+
+                ListItem::new(Line::from(vec![
+                    Span::raw(format!("{} ", role_icon)),
+                    name_span,
+                    Span::raw(" - "),
+                    mode_span,
+                ]))
             })
             .collect()
     } else {
         vec![ListItem::new("No participants")]
     };
 
-    let list = List::new(items).block(Block::default().borders(Borders::ALL).title("Participants"));
+    let title = if let Some(lobby) = app.session_state.lobby() {
+        let active_count = lobby.active_participants().len();
+        let spectating_count = lobby.spectating_participants().len();
+        format!(
+            "Participants ({} active, {} spectating)",
+            active_count, spectating_count
+        )
+    } else {
+        "Participants".to_string()
+    };
+
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .style(Style::default().fg(Color::White));
 
     f.render_widget(list, area);
 }
@@ -255,6 +325,17 @@ fn render_help(f: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("  c", Style::default().fg(Color::Yellow)),
             Span::raw("  Copy join command to clipboard"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "Lobby Tab:",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![
+            Span::styled("  t", Style::default().fg(Color::Yellow)),
+            Span::raw("  Toggle Active/Spectating mode"),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
@@ -302,10 +383,10 @@ fn render_footer(f: &mut Frame, area: Rect) {
         Span::raw(" copy ID | "),
         Span::styled("c", Style::default().fg(Color::Green)),
         Span::raw(" copy command | "),
+        Span::styled("t", Style::default().fg(Color::Yellow)),
+        Span::raw(" toggle mode | "),
         Span::styled("Tab", Style::default().fg(Color::Yellow)),
         Span::raw(" switch | "),
-        Span::styled("j/k", Style::default().fg(Color::Yellow)),
-        Span::raw(" scroll | "),
         Span::styled("q", Style::default().fg(Color::Yellow)),
         Span::raw(" quit"),
     ]);

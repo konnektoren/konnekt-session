@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use konnekt_session_cli::{
     application::use_cases::{
         handle_message_received, handle_peer_connected, handle_peer_disconnected,
-        handle_peer_timed_out,
+        handle_peer_timed_out, toggle_participation_mode,
     },
     domain::SessionState,
     infrastructure::{CliError, Result},
@@ -222,6 +222,20 @@ async fn run_app_loop(
 
                 if app.should_quit {
                     break;
+                }
+
+                // Check if toggle was requested
+                if app.take_toggle_request() {
+                    match toggle_participation_mode(session, &mut app.session_state).await {
+                        Ok(new_mode) => {
+                            app.add_event(format!("✓ Toggled mode to: {}", new_mode));
+                            app.show_clipboard_message(format!("✓ You are now {}", new_mode));
+                        }
+                        Err(e) => {
+                            app.add_event(format!("✗ Failed to toggle mode: {}", e));
+                            app.show_clipboard_message(format!("✗ Cannot toggle: {}", e));
+                        }
+                    }
                 }
             }
             Ok(AppEvent::Tick) => {

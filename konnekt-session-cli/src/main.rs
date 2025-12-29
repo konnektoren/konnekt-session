@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use konnekt_session_cli::{
     application::use_cases::{
         check_host_grace_period, handle_message_received, handle_peer_connected,
-        handle_peer_disconnected, handle_peer_timed_out,
+        handle_peer_disconnected, handle_peer_timed_out, toggle_participation_mode,
     },
     domain::SessionState,
     infrastructure::{CliError, Result},
@@ -215,6 +215,17 @@ async fn wait_for_peer_id(session: &mut P2PSession) -> Result<()> {
 
 async fn run_event_loop(session: &mut P2PSession, state: &mut SessionState) -> Result<()> {
     let mut interval = tokio::time::interval(Duration::from_millis(100));
+
+    info!("");
+    info!("=== Interactive Commands ===");
+    info!("  (In a separate terminal, you can test commands)");
+    info!("  Press Ctrl+C to quit");
+    info!("");
+    info!(
+        "💡 Tip: Your participation mode is: {}",
+        state.participant().participation_mode()
+    );
+    info!("");
 
     loop {
         tokio::select! {
