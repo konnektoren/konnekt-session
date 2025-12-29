@@ -1,5 +1,8 @@
+use crate::application::sync_manager::{
+    EventSyncManager, LobbySnapshot, SyncMessage, SyncResponse,
+};
 use crate::application::{ConnectionEvent, SessionConfig};
-use crate::domain::{PeerId, PeerRegistry, SessionId};
+use crate::domain::{DomainEvent, LobbyEvent, PeerId, PeerRegistry, SessionId};
 use crate::infrastructure::{connection::MatchboxConnection, error::Result};
 use instant::Duration;
 use uuid::Uuid;
@@ -10,6 +13,8 @@ pub struct P2PSession {
     connection: MatchboxConnection,
     /// Registry tracking all connected peers and their state
     peer_registry: PeerRegistry,
+    /// Event synchronization manager
+    event_sync: Option<EventSyncManager>,
 }
 
 impl P2PSession {
@@ -44,7 +49,66 @@ impl P2PSession {
             session_id,
             connection,
             peer_registry: PeerRegistry::with_grace_period(Duration::from_secs(30)),
+            event_sync: None, // Initialize as None - will be set via init_sync_*
         })
+    }
+
+    /// Initialize event sync as host
+    pub fn init_sync_as_host(&mut self, lobby_id: Uuid) {
+        self.event_sync = Some(EventSyncManager::new_host(lobby_id));
+        tracing::info!("Initialized event sync as host for lobby {}", lobby_id);
+    }
+
+    /// Initialize event sync as guest
+    pub fn init_sync_as_guest(&mut self, lobby_id: Uuid) {
+        self.event_sync = Some(EventSyncManager::new_guest(lobby_id));
+        tracing::info!("Initialized event sync as guest for lobby {}", lobby_id);
+    }
+
+    /// Create a domain event (host only)
+    pub fn create_event(&mut self, event: DomainEvent) -> Result<()> {
+        let sync = self.event_sync.as_mut().ok_or_else(|| {
+            crate::infrastructure::error::P2PError::ConnectionFailed(
+                "Event sync not initialized".to_string(),
+            )
+        })?;
+
+        match sync.create_event(event) {
+            Ok(SyncMessage::EventBroadcast { event }) => {
+                // Serialize and broadcast
+                let data = serde_json::to_vec(&SyncMessage::EventBroadcast { event })
+                    .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
+
+                self.connection.broadcast(data)?;
+                Ok(())
+            }
+            Ok(_) => Ok(()),
+            Err(e) => Err(crate::infrastructure::error::P2PError::ConnectionFailed(
+                format!("Failed to create event: {:?}", e),
+            )),
+        }
+    }
+
+    /// Send full sync to a peer (host only)
+    pub fn send_full_sync(&mut self, to_peer: PeerId, snapshot: LobbySnapshot) -> Result<()> {
+        let sync = self.event_sync.as_ref().ok_or_else(|| {
+            crate::infrastructure::error::P2PError::ConnectionFailed(
+                "Event sync not initialized".to_string(),
+            )
+        })?;
+
+        match sync.create_full_sync_response(0, snapshot) {
+            Ok(message) => {
+                let data = serde_json::to_vec(&message)
+                    .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
+
+                self.connection.send_to(to_peer, data)?;
+                Ok(())
+            }
+            Err(e) => Err(crate::infrastructure::error::P2PError::ConnectionFailed(
+                format!("Failed to create full sync: {:?}", e),
+            )),
+        }
     }
 
     /// Get the session ID
@@ -109,6 +173,7 @@ impl P2PSession {
     /// Poll for connection events
     pub fn poll_events(&mut self) -> Vec<ConnectionEvent> {
         let mut events = self.connection.poll_events();
+        let mut sync_events_to_apply = Vec::new();
 
         // Update peer registry based on connection events
         for event in &events {
@@ -117,8 +182,65 @@ impl P2PSession {
                     self.peer_registry.add_peer(*peer);
                     tracing::debug!("Added peer {} to registry", peer);
                 }
-                ConnectionEvent::MessageReceived { from, .. } => {
+                ConnectionEvent::MessageReceived { from, data } => {
                     self.peer_registry.update_last_seen(from);
+
+                    // Try to parse as SyncMessage
+                    if let Some(sync) = &mut self.event_sync {
+                        if let Ok(msg) = serde_json::from_slice::<SyncMessage>(data) {
+                            tracing::debug!("Received sync message from {}", from);
+
+                            match sync.handle_message(*from, msg) {
+                                Ok(SyncResponse::ApplyEvents {
+                                    events: lobby_events,
+                                }) => {
+                                    tracing::info!(
+                                        "Applying {} events from sync",
+                                        lobby_events.len()
+                                    );
+                                    sync_events_to_apply.extend(lobby_events);
+                                }
+                                Ok(SyncResponse::SendMessage { to, message }) => {
+                                    // Send response
+                                    if let Ok(data) = serde_json::to_vec(&message) {
+                                        if let Some(peer) = to {
+                                            let _ = self.connection.send_to(peer, data);
+                                        } else {
+                                            let _ = self.connection.broadcast(data);
+                                        }
+                                    }
+                                }
+                                Ok(SyncResponse::ApplySnapshot {
+                                    snapshot: _,
+                                    events: lobby_events,
+                                }) => {
+                                    tracing::info!(
+                                        "Applying snapshot + {} events",
+                                        lobby_events.len()
+                                    );
+                                    // For now, just apply the events
+                                    sync_events_to_apply.extend(lobby_events);
+                                }
+                                Ok(SyncResponse::NeedSnapshot {
+                                    for_peer,
+                                    since_sequence,
+                                }) => {
+                                    tracing::info!(
+                                        "Peer {} needs snapshot from sequence {}",
+                                        for_peer,
+                                        since_sequence
+                                    );
+                                    // Application layer will need to provide snapshot
+                                }
+                                Ok(SyncResponse::None) => {
+                                    // No action needed
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Failed to handle sync message: {:?}", e);
+                                }
+                            }
+                        }
+                    }
                 }
                 ConnectionEvent::PeerDisconnected(peer) => {
                     // Don't remove immediately - start grace period
@@ -129,6 +251,21 @@ impl P2PSession {
                     );
                 }
                 _ => {}
+            }
+        }
+
+        // Expose sync events as special ConnectionEvent messages
+        if !sync_events_to_apply.is_empty() {
+            for lobby_event in sync_events_to_apply {
+                // Serialize the LobbyEvent back to JSON
+                if let Ok(data) = serde_json::to_vec(&lobby_event) {
+                    events.push(ConnectionEvent::MessageReceived {
+                        from: self.local_peer_id().unwrap_or_else(|| {
+                            PeerId::new(matchbox_socket::PeerId(Uuid::new_v4()))
+                        }),
+                        data,
+                    });
+                }
             }
         }
 
