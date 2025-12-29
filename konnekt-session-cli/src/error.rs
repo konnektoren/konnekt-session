@@ -31,6 +31,9 @@ pub enum CliError {
 
     #[error("Serialization failed: {0}")]
     Serialization(String),
+
+    #[error("Invalid configuration: {0}")]
+    InvalidConfig(String),
 }
 
 impl CliError {

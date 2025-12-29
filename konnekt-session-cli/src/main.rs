@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use konnekt_session_cli::{CliError, Result};
 use konnekt_session_core::Participant;
-use konnekt_session_p2p::{ConnectionEvent, P2PSession, SessionId, application::SessionConfig};
+use konnekt_session_p2p::{ConnectionEvent, P2PSession, SessionConfig, SessionId};
 use std::time::Duration;
 use tracing::{info, warn};
 
@@ -27,6 +27,18 @@ enum Commands {
         /// Host display name
         #[arg(short = 'n', long, default_value = "Host")]
         name: String,
+
+        /// TURN server URL (optional, format: turn:host:port)
+        #[arg(long)]
+        turn_server: Option<String>,
+
+        /// TURN username (required if turn-server is set)
+        #[arg(long)]
+        turn_username: Option<String>,
+
+        /// TURN credential (required if turn-server is set)
+        #[arg(long)]
+        turn_credential: Option<String>,
     },
 
     /// Join an existing session as guest
@@ -42,6 +54,18 @@ enum Commands {
         /// Guest display name
         #[arg(short = 'n', long, default_value = "Guest")]
         name: String,
+
+        /// TURN server URL (optional, format: turn:host:port)
+        #[arg(long)]
+        turn_server: Option<String>,
+
+        /// TURN username (required if turn-server is set)
+        #[arg(long)]
+        turn_username: Option<String>,
+
+        /// TURN credential (required if turn-server is set)
+        #[arg(long)]
+        turn_credential: Option<String>,
     },
 }
 
@@ -58,24 +82,63 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::CreateHost { server, name } => {
-            create_host(&server, &name).await?;
+        Commands::CreateHost {
+            server,
+            name,
+            turn_server,
+            turn_username,
+            turn_credential,
+        } => {
+            let config = build_config(&server, turn_server, turn_username, turn_credential)?;
+            create_host(config, &name).await?;
         }
         Commands::Join {
             server,
             session_id,
             name,
+            turn_server,
+            turn_username,
+            turn_credential,
         } => {
-            join_session(&server, &session_id, &name).await?;
+            let config = build_config(&server, turn_server, turn_username, turn_credential)?;
+            join_session(config, &session_id, &name).await?;
         }
     }
 
     Ok(())
 }
 
-async fn create_host(server: &str, name: &str) -> Result<()> {
+fn build_config(
+    server: &str,
+    turn_server: Option<String>,
+    turn_username: Option<String>,
+    turn_credential: Option<String>,
+) -> Result<SessionConfig> {
+    let mut config = SessionConfig::new(server.to_string());
+
+    if let Some(turn_url) = turn_server {
+        match (turn_username, turn_credential) {
+            (Some(username), Some(credential)) => {
+                info!("Using TURN server: {}", turn_url);
+                config = config.with_turn_server(turn_url, username, credential);
+            }
+            _ => {
+                return Err(CliError::InvalidConfig(
+                    "TURN server requires both username and credential".to_string(),
+                ));
+            }
+        }
+    }
+
+    Ok(config)
+}
+
+async fn create_host(config: SessionConfig, name: &str) -> Result<()> {
     info!("Creating new session as host '{}'", name);
-    info!("Connecting to signalling server: {}", server);
+    info!(
+        "Connecting to signalling server: {}",
+        config.signalling_server
+    );
 
     // Create participant
     let host = Participant::new_host(name.to_string())
@@ -88,7 +151,7 @@ async fn create_host(server: &str, name: &str) -> Result<()> {
     );
 
     // Create P2P session
-    let mut session = P2PSession::create_host(server)
+    let mut session = P2PSession::create_host_with_config(config)
         .await
         .map_err(|e| CliError::P2PConnection(e.to_string()))?;
 
@@ -103,7 +166,7 @@ async fn create_host(server: &str, name: &str) -> Result<()> {
     info!("Share this command with guests to join:");
     info!(
         "  konnekt-cli join --server {} --session-id {}",
-        server,
+        "wss://match.konnektoren.help",
         session.session_id()
     );
     info!("");
@@ -117,10 +180,13 @@ async fn create_host(server: &str, name: &str) -> Result<()> {
     Ok(())
 }
 
-async fn join_session(server: &str, session_id_str: &str, name: &str) -> Result<()> {
+async fn join_session(config: SessionConfig, session_id_str: &str, name: &str) -> Result<()> {
     info!("Joining session as guest '{}'", name);
     info!("Session ID: {}", session_id_str);
-    info!("Connecting to signalling server: {}", server);
+    info!(
+        "Connecting to signalling server: {}",
+        config.signalling_server
+    );
 
     // Create participant
     let guest = Participant::new_guest(name.to_string())
@@ -137,7 +203,7 @@ async fn join_session(server: &str, session_id_str: &str, name: &str) -> Result<
         SessionId::parse(session_id_str).map_err(|e| CliError::InvalidSessionId(e.to_string()))?;
 
     // Join P2P session
-    let mut session = P2PSession::join(server, session_id)
+    let mut session = P2PSession::join_with_config(config, session_id)
         .await
         .map_err(|e| CliError::P2PConnection(e.to_string()))?;
 

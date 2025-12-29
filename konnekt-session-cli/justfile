@@ -13,3 +13,10 @@ host NAME="TestHost":
 # Join a session (example - requires session ID)
 join SESSION_ID NAME="TestGuest":
     cargo run -- join --session-id "{{ SESSION_ID }}" --name "{{ NAME }}"
+
+# Create a host with TURN server
+host-turn NAME TURN_SERVER TURN_USER TURN_PASS:
+    cargo run -- create-host --name "{{ NAME }}" \
+        --turn-server "{{ TURN_SERVER }}" \
+        --turn-username "{{ TURN_USER }}" \
+        --turn-credential "{{ TURN_PASS }}"
