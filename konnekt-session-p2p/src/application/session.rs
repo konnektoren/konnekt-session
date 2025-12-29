@@ -1,17 +1,15 @@
 use crate::application::{ConnectionEvent, SessionConfig};
-use crate::domain::{PeerId, SessionId};
+use crate::domain::{PeerId, PeerRegistry, SessionId};
 use crate::infrastructure::{connection::MatchboxConnection, error::Result};
-use instant::{Duration, Instant};
-use std::collections::HashMap;
+use instant::Duration;
+use uuid::Uuid;
 
 /// Application service: High-level P2P session management
 pub struct P2PSession {
     session_id: SessionId,
     connection: MatchboxConnection,
-    /// Track last heartbeat from each peer
-    peer_heartbeats: HashMap<PeerId, Instant>,
-    /// Grace period before considering a peer disconnected (30 seconds)
-    disconnect_timeout: Duration,
+    /// Registry tracking all connected peers and their state
+    peer_registry: PeerRegistry,
 }
 
 impl P2PSession {
@@ -45,8 +43,7 @@ impl P2PSession {
         Ok(P2PSession {
             session_id,
             connection,
-            peer_heartbeats: HashMap::new(),
-            disconnect_timeout: Duration::from_secs(30),
+            peer_registry: PeerRegistry::with_grace_period(Duration::from_secs(30)),
         })
     }
 
@@ -75,52 +72,88 @@ impl P2PSession {
         self.connection.broadcast(data)
     }
 
-    /// Update heartbeat for a peer
-    pub fn update_peer_heartbeat(&mut self, peer: PeerId) {
-        self.peer_heartbeats.insert(peer, Instant::now());
-    }
-
-    /// Check if a peer has timed out (no heartbeat for 30 seconds)
-    pub fn has_peer_timed_out(&self, peer: PeerId) -> bool {
-        if let Some(last_heartbeat) = self.peer_heartbeats.get(&peer) {
-            let elapsed: Duration = last_heartbeat.elapsed();
-            elapsed > self.disconnect_timeout
-        } else {
-            false
+    /// Register participant information for a peer
+    pub fn register_peer_participant(
+        &mut self,
+        peer_id: PeerId,
+        participant_id: Uuid,
+        name: String,
+        is_host: bool,
+    ) {
+        if let Some(peer_state) = self.peer_registry.get_peer_mut(&peer_id) {
+            peer_state.set_participant_info(participant_id, name, is_host);
+            tracing::debug!(
+                "Registered participant {} for peer {} (host: {})",
+                participant_id,
+                peer_id,
+                is_host
+            );
         }
     }
 
-    /// Get all timed-out peers
-    pub fn timed_out_peers(&self) -> Vec<PeerId> {
-        self.peer_heartbeats
-            .iter()
-            .filter_map(|(peer, last_heartbeat): (&PeerId, &Instant)| {
-                let elapsed: Duration = last_heartbeat.elapsed();
-                if elapsed > self.disconnect_timeout {
-                    Some(*peer)
-                } else {
-                    None
-                }
-            })
-            .collect()
+    /// Find peer ID by participant UUID
+    pub fn find_peer_by_participant(&self, participant_id: Uuid) -> Option<PeerId> {
+        self.peer_registry.find_by_participant_id(participant_id)
+    }
+
+    /// Check if a peer is the host
+    pub fn is_peer_host(&self, peer_id: &PeerId) -> bool {
+        self.peer_registry.is_peer_host(peer_id)
+    }
+
+    /// Find the host peer
+    pub fn find_host_peer(&self) -> Option<PeerId> {
+        self.peer_registry.find_host().map(|(peer_id, _)| peer_id)
     }
 
     /// Poll for connection events
     pub fn poll_events(&mut self) -> Vec<ConnectionEvent> {
-        let events = self.connection.poll_events();
+        let mut events = self.connection.poll_events();
 
-        // Update heartbeats for connected peers
+        // Update peer registry based on connection events
         for event in &events {
             match event {
                 ConnectionEvent::PeerConnected(peer) => {
-                    self.update_peer_heartbeat(*peer);
+                    self.peer_registry.add_peer(*peer);
+                    tracing::debug!("Added peer {} to registry", peer);
                 }
                 ConnectionEvent::MessageReceived { from, .. } => {
-                    self.update_peer_heartbeat(*from);
+                    self.peer_registry.update_last_seen(from);
                 }
                 ConnectionEvent::PeerDisconnected(peer) => {
-                    self.peer_heartbeats.remove(peer);
+                    // Don't remove immediately - start grace period
+                    self.peer_registry.mark_peer_disconnected(peer);
+                    tracing::debug!(
+                        "Marked peer {} as disconnected (grace period started)",
+                        peer
+                    );
                 }
+                _ => {}
+            }
+        }
+
+        // Check for grace period timeouts
+        let timed_out_peers = self.peer_registry.check_grace_periods();
+
+        for peer_id in timed_out_peers {
+            if let Some(peer_state) = self.peer_registry.get_peer(&peer_id) {
+                let participant_id = peer_state.participant_id;
+                let was_host = peer_state.is_host;
+
+                tracing::warn!(
+                    "Peer {} timed out after grace period (was_host: {})",
+                    peer_id,
+                    was_host
+                );
+
+                events.push(ConnectionEvent::PeerTimedOut {
+                    peer_id,
+                    participant_id,
+                    was_host,
+                });
+
+                // Now remove from registry
+                self.peer_registry.remove_peer(&peer_id);
             }
         }
 
