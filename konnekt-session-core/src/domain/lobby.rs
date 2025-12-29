@@ -38,6 +38,9 @@ pub enum LobbyError {
     #[error("Cannot remove host without delegation")]
     CannotRemoveHost,
 
+    #[error("Permission denied")]
+    PermissionDenied,
+
     #[error("Participant error: {0}")]
     ParticipantError(#[from] ParticipantError),
 }
@@ -207,6 +210,71 @@ impl Lobby {
             .participants
             .get_mut(&guest_id)
             .ok_or(LobbyError::ParticipantNotFound(guest_id))?;
+
+        participant.force_participation_mode(mode);
+        Ok(())
+    }
+
+    /// Toggle participation mode for a participant
+    /// Returns the new mode if successful
+    pub fn toggle_participation_mode(
+        &mut self,
+        participant_id: Uuid,
+        requester_id: Uuid,
+        activity_in_progress: bool,
+    ) -> Result<ParticipationMode, LobbyError> {
+        // First, check permissions (immutable borrow)
+        let requester = self
+            .participants
+            .get(&requester_id)
+            .ok_or(LobbyError::ParticipantNotFound(requester_id))?;
+
+        let is_self = participant_id == requester_id;
+        let is_host = requester.is_host();
+
+        if !is_self && !is_host {
+            return Err(LobbyError::PermissionDenied);
+        }
+
+        // Drop immutable borrow before getting mutable borrow
+        // (requester goes out of scope here)
+
+        // Now get the participant to modify (mutable borrow)
+        let participant = self
+            .participants
+            .get_mut(&participant_id)
+            .ok_or(LobbyError::ParticipantNotFound(participant_id))?;
+
+        // Toggle the mode
+        participant
+            .toggle_participation_mode(activity_in_progress)
+            .map_err(LobbyError::from)
+    }
+
+    /// Force set participation mode (host only)
+    pub fn force_participation_mode(
+        &mut self,
+        participant_id: Uuid,
+        host_id: Uuid,
+        mode: ParticipationMode,
+    ) -> Result<(), LobbyError> {
+        // First, verify requester is host (immutable borrow)
+        let requester = self
+            .participants
+            .get(&host_id)
+            .ok_or(LobbyError::ParticipantNotFound(host_id))?;
+
+        if !requester.is_host() {
+            return Err(LobbyError::PermissionDenied);
+        }
+
+        // Drop immutable borrow before getting mutable borrow
+
+        // Now get the participant to modify (mutable borrow)
+        let participant = self
+            .participants
+            .get_mut(&participant_id)
+            .ok_or(LobbyError::ParticipantNotFound(participant_id))?;
 
         participant.force_participation_mode(mode);
         Ok(())

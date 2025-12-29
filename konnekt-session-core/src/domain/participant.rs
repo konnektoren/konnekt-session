@@ -207,6 +207,47 @@ impl Participant {
         })
     }
 
+    /// Create a participant with a specific ID (for deserialization/sync)
+    pub fn with_id(
+        id: Uuid,
+        name: String,
+        lobby_role: LobbyRole,
+        participation_mode: ParticipationMode,
+        joined_at: Timestamp,
+    ) -> Result<Self, ParticipantError> {
+        Self::validate_name(&name)?;
+
+        Ok(Participant {
+            id,
+            name,
+            lobby_role,
+            participation_mode,
+            joined_at,
+        })
+    }
+
+    /// Create a host participant with a specific ID
+    pub fn host_with_id(id: Uuid, name: String) -> Result<Self, ParticipantError> {
+        Self::with_id(
+            id,
+            name,
+            LobbyRole::Host,
+            ParticipationMode::Active,
+            Timestamp::now(),
+        )
+    }
+
+    /// Create a guest participant with a specific ID
+    pub fn guest_with_id(id: Uuid, name: String) -> Result<Self, ParticipantError> {
+        Self::with_id(
+            id,
+            name,
+            LobbyRole::Guest,
+            ParticipationMode::default(),
+            Timestamp::now(),
+        )
+    }
+
     /// Create a participant with an explicit timestamp (for testing or deserialization)
     pub fn with_timestamp(
         name: String,
