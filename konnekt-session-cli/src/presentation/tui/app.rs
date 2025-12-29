@@ -55,7 +55,7 @@ pub struct App {
     pub clipboard_message: Option<String>,
     pub clipboard_message_timer: usize,
     pub max_events: usize,
-    pub toggle_mode_requested: bool,
+    pub toggle_spectator_requested: bool,
 }
 
 impl App {
@@ -71,7 +71,7 @@ impl App {
             clipboard_message: None,
             clipboard_message_timer: 0,
             max_events: 100,
-            toggle_mode_requested: false,
+            toggle_spectator_requested: false,
         }
     }
 
@@ -175,8 +175,8 @@ impl App {
                 let _ = self.copy_join_command();
             }
             KeyCode::Char('t') => {
-                // Toggle participation mode (NEW)
-                self.toggle_mode_requested = true;
+                // Toggle participation mode (works on any tab)
+                self.toggle_spectator_requested = true;
             }
             KeyCode::Tab | KeyCode::Right => {
                 self.current_tab = self.current_tab.next();
@@ -194,12 +194,6 @@ impl App {
             }
             _ => {}
         }
-    }
-
-    pub fn take_toggle_request(&mut self) -> bool {
-        let requested = self.toggle_mode_requested;
-        self.toggle_mode_requested = false;
-        requested
     }
 
     pub fn add_event(&mut self, event: String) {

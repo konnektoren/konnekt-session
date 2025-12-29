@@ -138,12 +138,16 @@ async fn create_host(config: SessionConfig, name: &str) -> Result<()> {
     let lobby = Lobby::new("CLI Lobby".to_string(), host.clone())
         .map_err(|e| CliError::InvalidConfig(e.to_string()))?;
 
+    let lobby_id = lobby.id();
     let mut state = SessionState::new(host);
     state.set_lobby(lobby);
 
     let mut session = P2PSession::create_host_with_config(config)
         .await
         .map_err(|e| CliError::P2PConnection(e.to_string()))?;
+
+    // Initialize event sync as host
+    session.init_sync_as_host(lobby_id);
 
     wait_for_peer_id(&mut session).await?;
 
@@ -164,6 +168,10 @@ async fn join_session(config: SessionConfig, session_id_str: &str, name: &str) -
         .map_err(|e| CliError::P2PConnection(e.to_string()))?;
 
     wait_for_peer_id(&mut session).await?;
+
+    // Initialize event sync as guest (lobby_id will be learned from host)
+    let placeholder_lobby_id = uuid::Uuid::new_v4();
+    session.init_sync_as_guest(placeholder_lobby_id);
 
     run_tui(&mut session, state).await
 }
@@ -224,16 +232,25 @@ async fn run_app_loop(
                     break;
                 }
 
-                // Check if toggle was requested
-                if app.take_toggle_request() {
-                    match toggle_participation_mode(session, &mut app.session_state).await {
-                        Ok(new_mode) => {
-                            app.add_event(format!("✓ Toggled mode to: {}", new_mode));
-                            app.show_clipboard_message(format!("✓ You are now {}", new_mode));
+                // Handle spectator toggle request
+                if app.toggle_spectator_requested {
+                    app.toggle_spectator_requested = false;
+
+                    // TODO: Track activity_in_progress properly
+                    let activity_in_progress = false;
+
+                    match toggle_participation_mode(
+                        session,
+                        &mut app.session_state,
+                        activity_in_progress,
+                    )
+                    .await
+                    {
+                        Ok(_) => {
+                            app.add_event("✓ Toggled participation mode".to_string());
                         }
                         Err(e) => {
                             app.add_event(format!("✗ Failed to toggle mode: {}", e));
-                            app.show_clipboard_message(format!("✗ Cannot toggle: {}", e));
                         }
                     }
                 }

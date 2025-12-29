@@ -237,74 +237,49 @@ fn render_events(f: &mut Frame, area: Rect, app: &App) {
 
 fn render_participants(f: &mut Frame, area: Rect, app: &App) {
     let items: Vec<ListItem> = if let Some(lobby) = app.session_state.lobby() {
-        let mut participants: Vec<_> = lobby.participants().values().collect();
-
-        // Sort: Host first, then by name
-        participants.sort_by(|a, b| match (a.is_host(), b.is_host()) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name().cmp(b.name()),
-        });
-
-        participants
-            .iter()
+        lobby
+            .participants()
+            .values()
             .map(|p| {
                 let role_icon = if p.is_host() { "👑" } else { "👤" };
 
-                // Color code the mode
-                let mode_span = match p.participation_mode() {
-                    ParticipationMode::Active => Span::styled(
-                        "Active",
-                        Style::default()
-                            .fg(Color::Green)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    ParticipationMode::Spectating => Span::styled(
-                        "Spectating",
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    ),
+                // Color based on participation mode
+                let (mode_text, mode_style) = match p.participation_mode() {
+                    konnekt_session_core::ParticipationMode::Active => {
+                        ("🎮 Active", Style::default().fg(Color::Green))
+                    }
+                    konnekt_session_core::ParticipationMode::Spectating => {
+                        ("👁️  Spectating", Style::default().fg(Color::Yellow))
+                    }
                 };
 
-                // Highlight ourselves with cyan
-                let name_span = if p.id() == app.session_state.participant().id() {
-                    Span::styled(
-                        format!("{} (you)", p.name()),
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    )
-                } else {
-                    Span::styled(p.name(), Style::default().fg(Color::White))
-                };
-
-                ListItem::new(Line::from(vec![
+                // Format: "👑 Alice - 🎮 Active"
+                let text = vec![
                     Span::raw(format!("{} ", role_icon)),
-                    name_span,
+                    Span::styled(
+                        p.name(),
+                        if p.is_host() {
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(Color::White)
+                        },
+                    ),
                     Span::raw(" - "),
-                    mode_span,
-                ]))
+                    Span::styled(mode_text, mode_style),
+                ];
+
+                ListItem::new(Line::from(text))
             })
             .collect()
     } else {
         vec![ListItem::new("No participants")]
     };
 
-    let title = if let Some(lobby) = app.session_state.lobby() {
-        let active_count = lobby.active_participants().len();
-        let spectating_count = lobby.spectating_participants().len();
-        format!(
-            "Participants ({} active, {} spectating)",
-            active_count, spectating_count
-        )
-    } else {
-        "Participants".to_string()
-    };
-
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(title))
-        .style(Style::default().fg(Color::White));
+        .block(Block::default().borders(Borders::ALL).title("Participants"))
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
 
     f.render_widget(list, area);
 }
@@ -333,9 +308,16 @@ fn render_help(f: &mut Frame, area: Rect) {
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         )]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "Participants Tab:",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(vec![
-            Span::styled("  t", Style::default().fg(Color::Yellow)),
-            Span::raw("  Toggle Active/Spectating mode"),
+            Span::styled("  s", Style::default().fg(Color::Yellow)),
+            Span::raw("  Toggle Active ↔ Spectating mode"),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
