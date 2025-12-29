@@ -1,0 +1,411 @@
+= ADR-0012: Use garde for Domain Validation
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+Domain entities require **validation** to enforce business rules:
+
+* **Participant names** - length limits, allowed characters, no duplicates
+* **Lobby capacity** - max participant count
+* **Activity data** - type-specific constraints
+* **Commands** - validate before processing
+
+=== Requirements
+
+* **Declarative** - validation rules close to domain types
+* **Type-safe** - compile-time checks where possible
+* **Composable** - reuse validators across aggregates
+* **Error messages** - clear, user-friendly feedback
+* **WASM compatible** - no regex engines that bloat bundle
+* **Derive-based** - minimal boilerplate
+
+=== Alternatives Considered
+
+==== Manual Validation
+
+[source,rust]
+----
+impl Participant {
+    pub fn new(name: String) -> Result<Self, ParticipantError> {
+        if name.is_empty() {
+            return Err(ParticipantError::InvalidName {
+                reason: "Name cannot be empty".into()
+            });
+        }
+        if name.len() > 50 {
+            return Err(ParticipantError::InvalidName {
+                reason: "Name too long (max 50)".into()
+            });
+        }
+        Ok(Self { name, /* ... */ })
+    }
+}
+----
+
+* ✅ Full control
+* ✅ No dependencies
+* ❌ **Repetitive** - same patterns everywhere
+* ❌ **Scattered** - validation logic mixed with constructors
+* ❌ **Hard to test** - must test each constructor
+
+==== validator crate
+
+[source,rust]
+----
+use validator::Validate;
+
+#[derive(Validate)]
+struct Participant {
+    #[validate(length(min = 1, max = 50))]
+    name: String,
+}
+----
+
+* ✅ Popular crate
+* ✅ Derive-based
+* ❌ **Heavy regex dependency** - fancy_regex adds ~100KB to WASM
+* ❌ **Runtime only** - no compile-time checks
+* ❌ Less ergonomic error handling
+
+==== Custom validation trait
+
+[source,rust]
+----
+trait Validate {
+    type Error;
+    fn validate(&self) -> Result<(), Self::Error>;
+}
+----
+
+* ✅ Flexible
+* ❌ **Reinventing the wheel** - maintenance burden
+* ❌ **No derive** - must implement manually
+
+== Decision
+
+We will use **`garde`** for declarative domain validation with derive macros.
+
+=== Dependencies
+
+[source,toml]
+----
+[dependencies]
+garde = { version = "0.20", features = ["serde"] }
+----
+
+=== Usage
+
+**Basic Validation**:
+
+[source,rust]
+----
+use garde::Validate;
+
+#[derive(Debug, Validate)]
+pub struct Participant {
+    #[garde(length(min = 1, max = 50))]
+    pub name: String,
+
+    #[garde(email)]
+    pub email: Option<String>,
+}
+
+// Validate
+let participant = Participant {
+    name: "".to_string(),
+    email: None,
+};
+
+if let Err(e) = participant.validate() {
+    println!("Validation failed: {}", e);
+    // "name: length is lower than 1"
+}
+----
+
+**Custom Validators**:
+
+[source,rust]
+----
+#[derive(Debug, Validate)]
+pub struct LobbyConfig {
+    #[garde(range(min = 2, max = 50))]
+    pub max_participants: usize,
+
+    #[garde(custom(validate_lobby_name))]
+    pub name: String,
+}
+
+fn validate_lobby_name(name: &str, _ctx: &()) -> garde::Result {
+    if name.contains("admin") {
+        return Err(garde::Error::new("name cannot contain 'admin'"));
+    }
+    Ok(())
+}
+----
+
+**Nested Validation**:
+
+[source,rust]
+----
+#[derive(Debug, Validate)]
+pub struct Lobby {
+    #[garde(length(min = 1, max = 50))]
+    pub participants: Vec<Participant>,
+
+    #[garde(dive)]  // Validate each participant
+    pub activities: Vec<Activity>,
+}
+----
+
+**Integration with thiserror**:
+
+[source,rust]
+----
+use garde::Validate;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum ParticipantError {
+    #[error("Validation failed: {0}")]
+    Validation(#[from] garde::Report),
+
+    #[error("Participant not found")]
+    NotFound,
+}
+
+impl Participant {
+    pub fn new(name: String) -> Result<Self, ParticipantError> {
+        let participant = Self { name };
+        participant.validate()?;  // garde::Report -> ParticipantError
+        Ok(participant)
+    }
+}
+----
+
+=== Rationale
+
+==== Declarative Domain Rules
+
+[source,rust]
+----
+#[derive(Validate)]
+pub struct Activity {
+    #[garde(length(min = 1, max = 100))]
+    pub title: String,
+
+    #[garde(range(min = 1, max = 3600))]  // Max 1 hour
+    pub duration_seconds: u32,
+
+    #[garde(custom(validate_difficulty))]
+    pub difficulty: Difficulty,
+}
+----
+
+Validation rules are **documentation** - immediately clear what's allowed.
+
+==== WASM-Friendly
+
+[source,toml]
+----
+# garde without regex features - small bundle
+garde = { version = "0.20", default-features = false }
+
+# Binary size: ~15KB vs validator's ~100KB
+----
+
+No heavy regex engine - uses simple checks.
+
+==== Type-Safe Validators
+
+[source,rust]
+----
+#[garde(range(min = 1, max = 50))]
+pub max_participants: usize,
+
+// Compiler error if wrong type:
+#[garde(email)]  // Error: email validator requires String
+pub max_participants: usize,
+----
+
+==== Error Reporting
+
+[source,rust]
+----
+let report = lobby.validate().unwrap_err();
+
+for (path, errors) in report.iter() {
+    println!("{}: {}", path, errors);
+}
+
+// Output:
+// participants[0].name: length is lower than 1
+// participants[2].email: invalid email format
+----
+
+Clear, structured error messages for UI.
+
+==== Composable Validators
+
+[source,rust]
+----
+// Reusable validator
+fn validate_unique_names(participants: &[Participant]) -> garde::Result {
+    let names: HashSet<_> = participants.iter().map(|p| &p.name).collect();
+    if names.len() != participants.len() {
+        return Err(garde::Error::new("duplicate names found"));
+    }
+    Ok(())
+}
+
+#[derive(Validate)]
+pub struct Lobby {
+    #[garde(custom(validate_unique_names))]
+    pub participants: Vec<Participant>,
+}
+----
+
+=== Integration with Commands
+
+[source,rust]
+----
+use garde::Validate;
+
+#[derive(Debug, Validate, Deserialize)]
+pub struct JoinLobbyCommand {
+    #[garde(length(min = 1, max = 50))]
+    pub name: String,
+
+    #[garde(custom(validate_lobby_id))]
+    pub lobby_id: LobbyId,
+}
+
+// In command handler
+pub fn handle_join_lobby(&mut self, cmd: JoinLobbyCommand) -> Result<()> {
+    // Validate command first
+    cmd.validate()
+        .map_err(|e| LobbyError::InvalidCommand { reason: e.to_string() })?;
+
+    // Then process
+    self.lobby.add_participant(cmd.name)?;
+    Ok(())
+}
+----
+
+=== UI Error Display
+
+[source,rust]
+----
+pub fn format_validation_error(report: &garde::Report) -> Vec<String> {
+    report
+        .iter()
+        .map(|(path, errors)| {
+            format!("{}: {}", path, errors.iter().next().unwrap())
+        })
+        .collect()
+}
+
+// In Yew component
+match participant.validate() {
+    Ok(_) => { /* proceed */ },
+    Err(report) => {
+        for error in format_validation_error(&report) {
+            show_error_toast(&error);
+        }
+    }
+}
+----
+
+== Consequences
+
+=== Positive
+
+* **Declarative** - validation rules part of type definition
+* **Minimal boilerplate** - derive macro handles implementation
+* **WASM-friendly** - small binary impact (~15KB)
+* **Type-safe** - compile-time checks on validator types
+* **Clear errors** - structured error reports
+* **Composable** - custom validators reusable
+* **Testable** - easy to test validation in isolation
+
+=== Negative
+
+* **Runtime validation** - not compile-time (impossible for most rules)
+* **Learning curve** - team must learn garde API
+* **Less mature** than validator crate
+
+=== Neutral
+
+* **Another dependency** - but lightweight
+* **Custom validators** need manual implementation
+
+=== Guidelines
+
+==== Validate at Boundaries
+
+[source,rust]
+----
+// ✅ Validate commands
+#[derive(Validate)]
+pub struct CreateLobbyCommand { /* ... */ }
+
+// ✅ Validate value objects
+#[derive(Validate)]
+pub struct ParticipantName(String);
+
+// ❌ Don't over-validate internal state
+// (already validated when constructed)
+----
+
+==== Combine with thiserror
+
+[source,rust]
+----
+#[derive(Debug, Error)]
+pub enum DomainError {
+    #[error("Validation error: {0}")]
+    Validation(#[from] garde::Report),
+
+    // Other errors...
+}
+----
+
+==== Test Validation Rules
+
+[source,rust]
+----
+#[test]
+fn test_participant_name_validation() {
+    let valid = Participant { name: "Alice".into() };
+    assert!(valid.validate().is_ok());
+
+    let too_long = Participant { name: "A".repeat(51) };
+    assert!(too_long.validate().is_err());
+
+    let empty = Participant { name: "".into() };
+    assert!(empty.validate().is_err());
+}
+----
+
+== Implementation Checklist
+
+- [ ] Add `garde` dependency
+- [ ] Add `#[derive(Validate)]` to domain entities
+- [ ] Add validation to commands
+- [ ] Create custom validators for business rules
+- [ ] Integrate with error types (thiserror)
+- [ ] Add validation tests for each entity
+- [ ] Document validation rules in rustdoc
+- [ ] Create UI error formatting helpers
+
+== References
+
+* **garde** – https://docs.rs/garde/
+* **garde GitHub** – https://github.com/jprochazk/garde
+
+=== Related ADRs
+
+* xref:0008-use-thiserror-for-domain-errors.adoc[ADR-0008] – Validation errors use thiserror
+* xref:0002-use-yew-for-frontend.adoc[ADR-0002] – Validation errors displayed in UI

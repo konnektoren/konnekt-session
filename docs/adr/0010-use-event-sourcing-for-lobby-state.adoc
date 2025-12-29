@@ -1,0 +1,471 @@
+= ADR-0010: Use Event Sourcing for Lobby State
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+Konnekt Session is a **decentralized P2P system** where multiple peers must maintain **consistent lobby state** without a central authority. Each peer needs to:
+
+* **Reconstruct state** from events received over unreliable networks
+* **Resolve conflicts** when peers have different views
+* **Replay history** for late joiners or reconnecting participants
+* **Audit changes** for debugging state divergence
+* **Support host delegation** - new host must understand how lobby reached current state
+
+=== Requirements
+
+* **State consistency** across peers despite network partitions
+* **Deterministic replay** - same events = same state
+* **Conflict resolution** - handle concurrent updates
+* **Audit trail** - understand why state is what it is
+* **Late join support** - new peers catch up quickly
+* **Minimal memory** - can't store infinite history in WASM
+* **Host authority** - host's event stream is source of truth
+
+=== Challenges
+
+* **P2P constraints** - no central event store
+* **Network unreliability** - messages may arrive out of order
+* **WASM memory limits** - can't keep full event history
+* **Snapshot strategy** - when to compact events
+* **Event versioning** - schema evolution as domain changes
+
+=== Alternatives Considered
+
+==== Direct State Mutation (CRUD)
+
+[source,rust]
+----
+pub fn add_participant(&mut self, participant: Participant) -> Result<()> {
+    self.participants.push(participant);
+    Ok(())
+}
+----
+
+* ✅ Simple implementation
+* ✅ Low memory overhead
+* ❌ **No history** - can't replay or audit
+* ❌ **Hard to sync** - must send full state each time
+* ❌ **No conflict resolution** - last write wins
+* ❌ **Can't debug divergence** - no trail of what happened
+
+==== State Snapshots with Delta Updates
+
+[source,rust]
+----
+pub enum StateUpdate {
+    FullSnapshot(LobbyState),
+    Delta { changes: Vec<Change> },
+}
+----
+
+* ✅ Bandwidth efficient (deltas small)
+* ✅ Can reconstruct from snapshot + deltas
+* ❌ **Complex delta logic** - need to compute diffs
+* ❌ **Still no true history** - deltas may be lossy
+* ❌ **Hard to reason about** - what if delta missed?
+
+==== CRDT (Conflict-Free Replicated Data Types)
+
+[source,rust]
+----
+// Use Yrs or Automerge for automatic conflict resolution
+----
+
+* ✅ **Automatic conflict resolution** - mathematically proven
+* ✅ **Eventually consistent** - all peers converge
+* ✅ **No coordination needed**
+* ❌ **No host authority** - can't enforce business rules
+* ❌ **Complex integration** - steep learning curve
+* ❌ **Large WASM bundles** - Yrs/Automerge add significant size
+* ❌ **Doesn't fit domain** - we WANT host authority, not peer equality
+
+==== Operational Transformation (OT)
+
+[source,rust]
+----
+// Transform concurrent operations to resolve conflicts
+----
+
+* ✅ Used in collaborative editing (Google Docs)
+* ✅ Can preserve intent
+* ❌ **Very complex** - hard to implement correctly
+* ❌ **Overkill** - we have simpler authority model (host)
+* ❌ **Not WASM-friendly** - most libraries are JS-based
+
+== Decision
+
+We will use **Event Sourcing** with **host-authoritative event stream** and **periodic snapshots** for memory efficiency.
+
+=== Architecture
+
+**Event Stream** (source of truth):
+
+[source,rust]
+----
+pub struct LobbyEvent {
+    pub sequence: u64,           // Monotonic event number
+    pub timestamp: u64,          // For ordering
+    pub event: DomainEvent,      // The actual event
+    pub signature: Signature,    // Host's signature
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DomainEvent {
+    LobbyCreated {
+        lobby_id: LobbyId,
+        host: ParticipantId,
+    },
+    ParticipantJoined {
+        participant: Participant,
+    },
+    ParticipantLeft {
+        participant_id: ParticipantId,
+    },
+    ActivityStarted {
+        activity_id: ActivityId,
+    },
+    HostDelegated {
+        from: ParticipantId,
+        to: ParticipantId,
+    },
+    // ... other events from Event Storming
+}
+----
+
+**State Reconstruction**:
+
+[source,rust]
+----
+pub struct Lobby {
+    current_state: LobbyState,
+    event_log: VecDeque<LobbyEvent>,  // Bounded size
+    sequence: u64,
+}
+
+impl Lobby {
+    pub fn apply_event(&mut self, event: LobbyEvent) -> Result<()> {
+        // Verify signature
+        self.verify_host_signature(&event)?;
+
+        // Apply to state
+        match event.event {
+            DomainEvent::ParticipantJoined { participant } => {
+                self.current_state.participants.push(participant);
+            },
+            DomainEvent::ParticipantLeft { participant_id } => {
+                self.current_state.participants.retain(|p| p.id != participant_id);
+            },
+            // ... handle all event types
+        }
+
+        // Store event
+        self.event_log.push_back(event);
+        self.sequence += 1;
+
+        Ok(())
+    }
+
+    pub fn replay_from_snapshot(
+        snapshot: LobbyState,
+        events: Vec<LobbyEvent>,
+    ) -> Result<Self> {
+        let mut lobby = Lobby {
+            current_state: snapshot,
+            event_log: VecDeque::new(),
+            sequence: 0,
+        };
+
+        for event in events {
+            lobby.apply_event(event)?;
+        }
+
+        Ok(lobby)
+    }
+}
+----
+
+**Snapshot Strategy**:
+
+[source,rust]
+----
+const MAX_EVENTS_IN_MEMORY: usize = 100;
+
+impl Lobby {
+    pub fn maybe_snapshot(&mut self) {
+        if self.event_log.len() > MAX_EVENTS_IN_MEMORY {
+            // Create snapshot of current state
+            let snapshot = self.current_state.clone();
+
+            // Keep only recent events (last 20)
+            self.event_log.drain(0..(self.event_log.len() - 20));
+
+            // Store snapshot (could use localStorage)
+            self.save_snapshot(snapshot);
+        }
+    }
+}
+----
+
+=== Rationale
+
+==== Perfect Fit for DDD Event Storming
+
+Events come directly from our Event Storming workshop (xref:../02-discover.adoc[Discover]):
+
+[source]
+----
+Event Storming Event → Domain Event → Code
+
+"Participant Joined Lobby" → DomainEvent::ParticipantJoined → fn apply_event()
+"Activity Started"         → DomainEvent::ActivityStarted   → fn apply_event()
+"Host Delegated"           → DomainEvent::HostDelegated     → fn apply_event()
+----
+
+**Living documentation** - code mirrors domain events exactly.
+
+==== Audit Trail for Debugging
+
+When state diverges between peers:
+
+[source,rust]
+----
+// On Peer A
+Event 1: ParticipantJoined { Alice }
+Event 2: ParticipantJoined { Bob }
+Event 3: ActivityStarted { Quiz #1 }
+
+// On Peer B
+Event 1: ParticipantJoined { Alice }
+Event 2: ActivityStarted { Quiz #1 }  // Missing Bob!
+Event 3: ParticipantJoined { Bob }
+
+// Easy to see: Peer B missed Event 2 or received out of order
+----
+
+Can log full event stream for bug reports.
+
+==== Late Join / Reconnection
+
+[source,rust]
+----
+// New peer joins
+1. Host sends snapshot (current state)
+2. Host sends recent events (last 20)
+3. Peer replays events to reach current state
+4. Peer subscribes to new events
+
+// Bandwidth: ~5KB snapshot + ~2KB events vs. full state each time
+----
+
+==== Host Authority Preserved
+
+[source,rust]
+----
+pub fn apply_event(&mut self, event: LobbyEvent) -> Result<()> {
+    // Only host can emit events
+    if !self.verify_host_signature(&event)? {
+        return Err(LobbyError::UnauthorizedEvent);
+    }
+
+    // Guests apply host's events, don't generate their own
+    // (except requests, which host validates and emits events for)
+}
+----
+
+Host's event stream is **single source of truth** - no CRDT complexity needed.
+
+==== Event Sourcing + Commands Pattern
+
+[source,rust]
+----
+// Guest sends command (request)
+pub struct JoinLobbyCommand {
+    pub name: String,
+}
+
+// Host validates and emits event
+impl Lobby {
+    pub fn handle_join(&mut self, cmd: JoinLobbyCommand) -> Result<LobbyEvent> {
+        // Validation
+        if self.is_full() {
+            return Err(LobbyError::Full);
+        }
+        if self.has_participant(&cmd.name) {
+            return Err(LobbyError::DuplicateName);
+        }
+
+        // Create event
+        let event = LobbyEvent {
+            sequence: self.sequence + 1,
+            timestamp: now(),
+            event: DomainEvent::ParticipantJoined {
+                participant: Participant::guest(cmd.name),
+            },
+            signature: self.host_key.sign(&event),
+        };
+
+        // Apply locally
+        self.apply_event(event.clone())?;
+
+        // Broadcast to peers
+        Ok(event)
+    }
+}
+----
+
+Clean separation: Commands (requests) vs Events (facts).
+
+==== Memory-Efficient for WASM
+
+[source,rust]
+----
+// Bounded event log (last 100 events)
+event_log: VecDeque<LobbyEvent>,  // ~10KB for typical lobby
+
+// Periodic snapshots
+if event_log.len() > 100 {
+    snapshot();
+    event_log.truncate(20);  // Keep recent events for late joiners
+}
+----
+
+Not storing infinite history - only what's needed for replay.
+
+=== Event Versioning
+
+[source,rust]
+----
+#[derive(Serialize, Deserialize)]
+pub struct LobbyEvent {
+    pub version: u32,  // Event schema version
+
+    #[serde(flatten)]
+    pub event: DomainEvent,
+}
+
+// When schema evolves
+match event.version {
+    1 => apply_v1_event(event),
+    2 => apply_v2_event(event),
+    _ => Err(LobbyError::UnknownEventVersion),
+}
+----
+
+=== Integration with P2P
+
+[source,rust]
+----
+#[derive(Serialize, Deserialize)]
+pub enum P2PMessage {
+    // Guest → Host
+    CommandRequest(LobbyCommand),
+
+    // Host → Guests
+    EventBroadcast(LobbyEvent),
+
+    // For late joiners
+    SnapshotRequest { from_sequence: u64 },
+    SnapshotResponse {
+        snapshot: LobbyState,
+        events: Vec<LobbyEvent>,
+    },
+}
+----
+
+== Consequences
+
+=== Positive
+
+* **Perfect DDD alignment** - events from Event Storming → code
+* **Debuggable** - full audit trail of state changes
+* **Testable** - replay events in tests to verify state
+* **Deterministic** - same events always produce same state
+* **Late join support** - snapshot + recent events
+* **Conflict resolution** - host authority model is simple
+* **Traceability** - map runtime behavior to domain events
+
+=== Negative
+
+* **More complex** than direct mutation
+* **Memory overhead** - must keep event log (bounded)
+* **Serialization cost** - events sent over network
+* **Event versioning** - need migration strategy
+* **Snapshot logic** - when to compact events
+
+=== Neutral
+
+* **Not pure CQRS** - we're not separating read/write models (overkill for P2P)
+* **No event store** - events live in memory, not persisted long-term
+* **Bounded history** - can't replay from beginning of time (acceptable)
+
+=== Testing with Event Sourcing
+
+[source,rust]
+----
+#[test]
+fn test_participant_join_and_leave() {
+    let mut lobby = Lobby::new(host);
+
+    let events = vec![
+        DomainEvent::ParticipantJoined { participant: alice },
+        DomainEvent::ParticipantJoined { participant: bob },
+        DomainEvent::ParticipantLeft { participant_id: alice.id },
+    ];
+
+    for event in events {
+        lobby.apply_event(event).unwrap();
+    }
+
+    assert_eq!(lobby.current_state.participants.len(), 1);
+    assert_eq!(lobby.current_state.participants[0].name, "Bob");
+}
+----
+
+Tests are **scenarios** not imperative steps - very readable.
+
+=== Cucumber Integration
+
+[source,gherkin]
+----
+Scenario: Replay events for late joiner
+  Given Host "Alice" created lobby
+  And the following events occurred:
+    | Event               | Participant |
+    | ParticipantJoined   | Bob         |
+    | ParticipantJoined   | Charlie     |
+    | ActivityStarted     | Quiz #1     |
+  When Guest "Dave" joins late
+  Then "Dave" should receive snapshot with 3 participants
+  And "Dave" should receive recent events
+  And "Dave" state should match host state
+----
+
+== Implementation Checklist
+
+- [ ] Define `DomainEvent` enum from Event Storming
+- [ ] Implement `apply_event()` for each event type
+- [ ] Add event signature verification
+- [ ] Implement snapshot creation and loading
+- [ ] Add bounded event log (VecDeque with max size)
+- [ ] Create P2P event broadcast
+- [ ] Implement late join protocol (snapshot + events)
+- [ ] Add event versioning support
+- [ ] Write replay tests for each aggregate
+- [ ] Document event schema in rustdoc
+
+== References
+
+* **Event Sourcing** – Martin Fowler https://martinfowler.com/eaaDev/EventSourcing.html
+* **Domain Events** – https://www.domainlanguage.com/ddd/reference/
+* **CQRS Journey** – Microsoft https://learn.microsoft.com/en-us/previous-versions/msp-n-p/jj554200(v=pandp.10)
+
+=== Related ADRs
+
+* xref:0003-use-matchbox-for-signaling.adoc[ADR-0003] – Events broadcast via Matchbox
+* xref:0004-use-client-side-key-generation-for-identity.adoc[ADR-0004] – Events signed with host's key
+* xref:0007-use-cucumber-for-behavior-driven-testing.adoc[ADR-0007] – Events testable via scenarios
+* xref:0009-use-json-with-feature-gated-messagepack.adoc[ADR-0009] – Events serialized as JSON/MessagePack
+* xref:../02-discover.adoc[DDD: Discover] – Event Storming defines domain events

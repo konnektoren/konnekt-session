@@ -1,0 +1,466 @@
+= ADR-0011: Use std::future for WASM-Compatible Async
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+Konnekt Session requires **async operations** for:
+
+* **P2P networking** - WebRTC connections, message handling
+* **UI interactions** - non-blocking button clicks, lobby updates
+* **Storage** - localStorage operations
+* **Timeouts** - host delegation after 30s, activity timers
+
+The code must run in **both WASM (browser) and native (tests)** environments.
+
+=== Requirements
+
+* **WASM compatible** - works in browser without Node.js
+* **No runtime overhead** - minimal binary size increase
+* **Standard Rust** - use std library where possible
+* **Yew compatible** - integrates with Yew's async hooks
+* **Testable** - can use Tokio in tests
+* **Future-proof** - aligns with Rust ecosystem direction
+
+=== Alternatives Considered
+
+==== Tokio
+
+[source,rust]
+----
+#[tokio::main]
+async fn main() {
+    let result = tokio::spawn(async {
+        // async work
+    }).await;
+}
+----
+
+* ✅ Most popular async runtime
+* ✅ Rich ecosystem
+* ✅ Excellent for tests
+* ❌ **Doesn't work in WASM** - requires OS threads
+* ❌ **Large binary** - adds ~200KB to WASM
+* ❌ Not browser-compatible
+
+==== async-std
+
+[source,rust]
+----
+use async_std::task;
+
+async fn main() {
+    task::spawn(async {
+        // async work
+    }).await;
+}
+----
+
+* ✅ Similar API to std
+* ✅ Cross-platform
+* ❌ **Still needs runtime in WASM** - not browser-native
+* ❌ Smaller ecosystem than Tokio
+* ❌ Additional dependency
+
+==== wasm-bindgen-futures only
+
+[source,rust]
+----
+use wasm_bindgen_futures::spawn_local;
+
+spawn_local(async {
+    // async work
+});
+----
+
+* ✅ **WASM-first** - designed for browser
+* ✅ **Tiny overhead** - minimal runtime
+* ✅ Uses browser's event loop
+* ❌ **WASM-only** - need different code for tests
+* ❌ No `block_on` equivalent for native
+
+==== Custom executor
+
+[source,rust]
+----
+// Build own Future executor
+struct CustomExecutor;
+----
+
+* ✅ Full control
+* ❌ **Huge effort** - reinventing the wheel
+* ❌ **Bug-prone** - async is hard to get right
+* ❌ **Unmaintained** - team must maintain
+
+== Decision
+
+We will use **`std::future::Future`** as the async primitive, with **`wasm-bindgen-futures`** for WASM execution and **`tokio`** for tests.
+
+=== Architecture
+
+**Async Primitives** (no runtime):
+
+[source,rust]
+----
+use std::future::Future;
+use std::pin::Pin;
+
+pub async fn join_lobby(&mut self, name: String) -> Result<()> {
+    // Standard async/await - no runtime-specific code
+    self.validate_name(&name)?;
+    self.send_join_request(name).await?;
+    Ok(())
+}
+----
+
+**WASM Execution** (browser):
+
+[source,rust]
+----
+use wasm_bindgen_futures::spawn_local;
+
+#[wasm_bindgen]
+pub fn start_lobby(lobby_id: String) {
+    spawn_local(async move {
+        let lobby = create_lobby(lobby_id).await;
+        // Runs on browser event loop
+    });
+}
+----
+
+**Native Execution** (tests):
+
+[source,toml]
+----
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+----
+
+[source,rust]
+----
+#[cfg(test)]
+mod tests {
+    use tokio::test;
+
+    #[tokio::test]
+    async fn test_join_lobby() {
+        let mut lobby = Lobby::new();
+        lobby.join_lobby("Alice".into()).await.unwrap();
+        assert_eq!(lobby.participants.len(), 1);
+    }
+}
+----
+
+**Yew Integration**:
+
+[source,rust]
+----
+use yew::prelude::*;
+
+#[function_component(LobbyView)]
+pub fn lobby_view() -> Html {
+    let lobby_state = use_state(|| None);
+
+    use_effect_with((), move |_| {
+        let lobby_state = lobby_state.clone();
+
+        wasm_bindgen_futures::spawn_local(async move {
+            let lobby = fetch_lobby().await;
+            lobby_state.set(Some(lobby));
+        });
+
+        || ()
+    });
+
+    html! { /* ... */ }
+}
+----
+
+=== Rationale
+
+==== Zero Runtime in Production
+
+[source,rust]
+----
+// This is just a state machine - no runtime needed
+pub async fn send_message(&self, msg: Message) -> Result<()> {
+    let bytes = serialize(msg)?;
+    self.socket.send(bytes).await?;  // Browser's Promise
+    Ok(())
+}
+----
+
+Compiles to WASM **without embedding an executor** - uses browser's native event loop.
+
+==== Platform-Specific Execution
+
+[source,rust]
+----
+// Domain/infrastructure code - runtime-agnostic
+pub trait LobbyService {
+    async fn join(&mut self, name: String) -> Result<()>;
+}
+
+// WASM: spawn_local
+#[cfg(target_arch = "wasm32")]
+pub fn execute_async<F>(future: F)
+where
+    F: Future<Output = ()> + 'static,
+{
+    wasm_bindgen_futures::spawn_local(future);
+}
+
+// Native: tokio
+#[cfg(not(target_arch = "wasm32"))]
+pub fn execute_async<F>(future: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    tokio::spawn(future);
+}
+----
+
+Business logic stays **runtime-agnostic**.
+
+==== Browser Event Loop Native
+
+[source,javascript]
+----
+// WASM future maps to browser Promise
+const promise = lobby.join_lobby("Alice");
+await promise;  // Native browser await
+----
+
+No polling, no busy-waiting - just browser's native async.
+
+==== Minimal Dependencies
+
+[source,toml]
+----
+[dependencies]
+# Production - WASM only
+wasm-bindgen-futures = "0.4"
+
+[dev-dependencies]
+# Tests only - not in WASM bundle
+tokio = { version = "1", features = ["macros", "rt"] }
+----
+
+**Production WASM**: +5KB (wasm-bindgen-futures) +
+**Tests**: Full Tokio ecosystem
+
+==== Standard Rust Async
+
+[source,rust]
+----
+// Uses standard library Future trait
+pub async fn fetch_lobby(id: LobbyId) -> Result<Lobby> {
+    // No tokio::, no async_std::, just async/await
+    let response = make_request(id).await?;
+    parse_lobby(response).await
+}
+----
+
+No vendor lock-in - if ecosystem changes, minimal refactoring needed.
+
+=== Timer/Delay Handling
+
+**WASM** (gloo-timers):
+
+[source,toml]
+----
+[dependencies]
+gloo-timers = { version = "0.3", features = ["futures"] }
+----
+
+[source,rust]
+----
+use gloo_timers::future::sleep;
+use std::time::Duration;
+
+pub async fn host_delegation_timeout() {
+    sleep(Duration::from_secs(30)).await;
+    // Delegate host
+}
+----
+
+**Tests** (tokio::time):
+
+[source,rust]
+----
+#[tokio::test]
+async fn test_delegation_timeout() {
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        lobby.wait_for_delegation(),
+    )
+    .await
+    .unwrap();
+}
+----
+
+=== Streams for P2P Messages
+
+[source,rust]
+----
+use futures_util::stream::{Stream, StreamExt};
+
+pub struct MessageStream {
+    inner: Pin<Box<dyn Stream<Item = Message>>>,
+}
+
+impl MessageStream {
+    pub async fn next_message(&mut self) -> Option<Message> {
+        self.inner.next().await
+    }
+}
+
+// Usage
+while let Some(msg) = stream.next_message().await {
+    handle_message(msg).await;
+}
+----
+
+`futures-util` is **no_std** compatible - works in WASM.
+
+=== Error Handling with Async
+
+[source,rust]
+----
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum AsyncError {
+    #[error("Operation timed out")]
+    Timeout,
+
+    #[error("Future cancelled")]
+    Cancelled,
+}
+
+pub async fn with_timeout<F, T>(
+    future: F,
+    duration: Duration,
+) -> Result<T, AsyncError>
+where
+    F: Future<Output = T>,
+{
+    // Platform-specific timeout implementation
+    #[cfg(target_arch = "wasm32")]
+    {
+        use gloo_timers::future::sleep;
+        // Manual timeout via sleep + select
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        tokio::time::timeout(duration, future)
+            .await
+            .map_err(|_| AsyncError::Timeout)
+    }
+}
+----
+
+== Consequences
+
+=== Positive
+
+* **Minimal WASM size** - no runtime in production bundle
+* **Standard Rust** - uses std::future::Future
+* **Browser-native** - maps to JavaScript Promises
+* **Test-friendly** - full Tokio in tests
+* **Yew compatible** - spawn_local integrates naturally
+* **Future-proof** - aligns with Rust async ecosystem
+* **No vendor lock-in** - runtime-agnostic business logic
+
+=== Negative
+
+* **Two execution paths** - spawn_local (WASM) vs tokio::spawn (tests)
+* **Platform-specific code** - some `#[cfg]` blocks needed
+* **No `block_on`** - can't block async in WASM (not possible anyway)
+* **Manual timeout logic** - no unified timeout API
+
+=== Neutral
+
+* **Not using latest Tokio features** - but don't need them
+* **Some duplication** - timer code differs WASM vs native
+* **Learning curve** - team must understand two execution models
+
+=== Guidelines
+
+==== Write Runtime-Agnostic Code
+
+[source,rust]
+----
+// ✅ Good - works everywhere
+pub async fn process_message(msg: Message) -> Result<()> {
+    validate(msg)?;
+    apply_to_state(msg).await
+}
+
+// ❌ Bad - tokio-specific
+pub async fn process_message(msg: Message) -> Result<()> {
+    tokio::spawn(async move {  // Won't work in WASM!
+        // ...
+    });
+}
+----
+
+==== Use Feature Gates for Execution
+
+[source,rust]
+----
+#[cfg(target_arch = "wasm32")]
+pub fn spawn<F>(future: F)
+where
+    F: Future<Output = ()> + 'static,
+{
+    wasm_bindgen_futures::spawn_local(future);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn spawn<F>(future: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    tokio::spawn(future);
+}
+----
+
+==== Prefer Yew Hooks in UI
+
+[source,rust]
+----
+// ✅ Yew handles execution
+let on_join = use_callback(|name: String| async move {
+    join_lobby(name).await.unwrap();
+});
+
+// Instead of manual spawn_local
+----
+
+== Implementation Checklist
+
+- [ ] Add `wasm-bindgen-futures` dependency
+- [ ] Add `tokio` as dev dependency (tests only)
+- [ ] Add `gloo-timers` for WASM delays
+- [ ] Create `spawn()` helper with platform-specific impls
+- [ ] Wrap timeout logic in platform-agnostic function
+- [ ] Convert all `.await` to use `std::future::Future`
+- [ ] Remove any tokio-specific code from domain/infra layers
+- [ ] Test both WASM (wasm-pack) and native (cargo test)
+
+== References
+
+* **Async Book** – https://rust-lang.github.io/async-book/
+* **wasm-bindgen-futures** – https://docs.rs/wasm-bindgen-futures/
+* **gloo-timers** – https://docs.rs/gloo-timers/
+* **Yew Async** – https://yew.rs/docs/concepts/function-components/state
+
+=== Related ADRs
+
+* xref:0001-use-rust-for-implementation.adoc[ADR-0001] – Rust async/await in WASM
+* xref:0002-use-yew-for-frontend.adoc[ADR-0002] – Yew integrates with wasm-bindgen-futures
+* xref:0003-use-matchbox-for-signaling.adoc[ADR-0003] – Matchbox uses async streams

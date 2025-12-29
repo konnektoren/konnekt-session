@@ -90,6 +90,21 @@ Each ADR in this directory follows the **Michael Nygard format**:
 |Use JSON with Feature-Gated MessagePack
 |✅ Accepted
 |2025-12-29
+
+|xref:0010-use-event-sourcing-for-lobby-state.adoc[ADR-0010]
+|Use Event Sourcing for Lobby State
+|✅ Accepted
+|2025-12-29
+
+|xref:0011-use-std-async-for-wasm-compatibility.adoc[ADR-0011]
+|Use std::future for WASM-Compatible Async
+|✅ Accepted
+|2025-12-29
+
+|xref:0012-use-garde-for-domain-validation.adoc[ADR-0012]
+|Use garde for Domain Validation
+|✅ Accepted
+|2025-12-29
 |===
 
 == Guidelines for Writing ADRs
