@@ -1,9 +1,16 @@
 use clap::{Parser, Subcommand};
-use konnekt_session_cli::{CliError, Result};
-use konnekt_session_core::Participant;
+use konnekt_session_cli::{
+    application::use_cases::{
+        check_host_grace_period, handle_message_received, handle_peer_connected,
+        handle_peer_disconnected,
+    },
+    domain::SessionState,
+    infrastructure::{CliError, Result},
+};
+use konnekt_session_core::{Lobby, Participant};
 use konnekt_session_p2p::{ConnectionEvent, P2PSession, SessionConfig, SessionId};
 use std::time::Duration;
-use tracing::{info, warn};
+use tracing::info;
 
 #[derive(Parser)]
 #[command(name = "konnekt-cli")]
@@ -135,22 +142,16 @@ fn build_config(
 
 async fn create_host(config: SessionConfig, name: &str) -> Result<()> {
     info!("Creating new session as host '{}'", name);
-    info!(
-        "Connecting to signalling server: {}",
-        config.signalling_server
-    );
 
-    // Create participant
     let host = Participant::new_host(name.to_string())
         .map_err(|e| CliError::ParticipantCreation(e.to_string()))?;
 
-    info!(
-        "Host participant created: {} (ID: {})",
-        host.name(),
-        host.id()
-    );
+    let lobby = Lobby::new("CLI Lobby".to_string(), host.clone())
+        .map_err(|e| CliError::InvalidConfig(e.to_string()))?;
 
-    // Create P2P session
+    let mut state = SessionState::new(host);
+    state.set_lobby(lobby);
+
     let mut session = P2PSession::create_host_with_config(config)
         .await
         .map_err(|e| CliError::P2PConnection(e.to_string()))?;
@@ -158,84 +159,53 @@ async fn create_host(config: SessionConfig, name: &str) -> Result<()> {
     info!("✓ Session created successfully!");
     info!("📋 Session ID: {}", session.session_id());
 
-    // Wait for peer ID
-    let local_id = wait_for_peer_id(&mut session).await?;
-    info!("🔗 Local Peer ID: {}", local_id);
+    wait_for_peer_id(&mut session).await?;
 
     info!("");
     info!("Share this command with guests to join:");
     info!(
-        "  konnekt-cli join --server {} --session-id {}",
-        "wss://match.konnektoren.help",
+        "  konnekt-cli join --server wss://match.konnektoren.help --session-id {}",
         session.session_id()
     );
     info!("");
-    info!("Waiting for guests to connect...");
-    info!("Press Ctrl+C to exit");
-    info!("");
 
-    // Event loop
-    run_event_loop(&mut session, &host).await?;
-
-    Ok(())
+    run_event_loop(&mut session, &mut state).await
 }
 
 async fn join_session(config: SessionConfig, session_id_str: &str, name: &str) -> Result<()> {
     info!("Joining session as guest '{}'", name);
-    info!("Session ID: {}", session_id_str);
-    info!(
-        "Connecting to signalling server: {}",
-        config.signalling_server
-    );
 
-    // Create participant
     let guest = Participant::new_guest(name.to_string())
         .map_err(|e| CliError::ParticipantCreation(e.to_string()))?;
 
-    info!(
-        "Guest participant created: {} (ID: {})",
-        guest.name(),
-        guest.id()
-    );
+    let mut state = SessionState::new(guest);
 
-    // Parse session ID
     let session_id =
         SessionId::parse(session_id_str).map_err(|e| CliError::InvalidSessionId(e.to_string()))?;
 
-    // Join P2P session
     let mut session = P2PSession::join_with_config(config, session_id)
         .await
         .map_err(|e| CliError::P2PConnection(e.to_string()))?;
 
     info!("✓ Joined session successfully!");
 
-    // Wait for peer ID
-    let local_id = wait_for_peer_id(&mut session).await?;
-    info!("🔗 Local Peer ID: {}", local_id);
+    wait_for_peer_id(&mut session).await?;
 
-    info!("");
-    info!("Waiting for connection to host...");
-    info!("Press Ctrl+C to exit");
-    info!("");
-
-    // Event loop
-    run_event_loop(&mut session, &guest).await?;
-
-    Ok(())
+    run_event_loop(&mut session, &mut state).await
 }
 
-async fn wait_for_peer_id(session: &mut P2PSession) -> Result<konnekt_session_p2p::PeerId> {
+async fn wait_for_peer_id(session: &mut P2PSession) -> Result<()> {
     let timeout = Duration::from_secs(5);
     let start = std::time::Instant::now();
 
     loop {
-        if let Some(peer_id) = session.local_peer_id() {
-            return Ok(peer_id);
+        if session.local_peer_id().is_some() {
+            return Ok(());
         }
 
         if start.elapsed() > timeout {
             return Err(CliError::P2PConnection(
-                "Timeout waiting for peer ID assignment".to_string(),
+                "Timeout waiting for peer ID".to_string(),
             ));
         }
 
@@ -243,100 +213,33 @@ async fn wait_for_peer_id(session: &mut P2PSession) -> Result<konnekt_session_p2
     }
 }
 
-async fn run_event_loop(session: &mut P2PSession, participant: &Participant) -> Result<()> {
+async fn run_event_loop(session: &mut P2PSession, state: &mut SessionState) -> Result<()> {
     let mut interval = tokio::time::interval(Duration::from_millis(100));
 
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                // Poll for events
                 let events = session.poll_events();
 
                 for event in events {
-                    handle_event(session, participant, event).await?;
-                }
-            }
-            _ = tokio::signal::ctrl_c() => {
-                info!("");
-                info!("Shutting down...");
-                break;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-async fn handle_event(
-    session: &mut P2PSession,
-    participant: &Participant,
-    event: ConnectionEvent,
-) -> Result<()> {
-    match event {
-        ConnectionEvent::PeerConnected(peer_id) => {
-            info!("🟢 Peer connected: {}", peer_id);
-
-            // Send our participant info to the new peer
-            let intro_msg = serde_json::json!({
-                "type": "participant_info",
-                "participant_id": participant.id().to_string(),
-                "name": participant.name(),
-                "role": format!("{}", participant.lobby_role()),
-                "mode": format!("{}", participant.participation_mode()),
-            });
-
-            let data = serde_json::to_vec(&intro_msg)
-                .map_err(|e| CliError::Serialization(e.to_string()))?;
-
-            session
-                .send_to(peer_id, data)
-                .map_err(|e| CliError::MessageSend(e.to_string()))?;
-
-            info!("📤 Sent participant info to peer {}", peer_id);
-            info!("");
-            info!("Connected peers: {}", session.connected_peers().len());
-        }
-
-        ConnectionEvent::PeerDisconnected(peer_id) => {
-            warn!("🔴 Peer disconnected: {}", peer_id);
-            info!("");
-            info!("Connected peers: {}", session.connected_peers().len());
-        }
-
-        ConnectionEvent::MessageReceived { from, data } => {
-            // Try to parse as JSON
-            match serde_json::from_slice::<serde_json::Value>(&data) {
-                Ok(msg) => {
-                    if let Some(msg_type) = msg.get("type").and_then(|v| v.as_str()) {
-                        match msg_type {
-                            "participant_info" => {
-                                let name = msg
-                                    .get("name")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("Unknown");
-                                let role = msg
-                                    .get("role")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("Unknown");
-                                let mode = msg
-                                    .get("mode")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("Unknown");
-
-                                info!("📥 Received participant info from peer {}:", from);
-                                info!("   Name: {}", name);
-                                info!("   Role: {}", role);
-                                info!("   Mode: {}", mode);
-                            }
-                            _ => {
-                                info!("📥 Received message from {}: {:?}", from, msg);
-                            }
+                    match event {
+                        ConnectionEvent::PeerConnected(peer_id) => {
+                            handle_peer_connected(session, state, peer_id).await?;
+                        }
+                        ConnectionEvent::PeerDisconnected(peer_id) => {
+                            handle_peer_disconnected(session, state, peer_id).await?;
+                        }
+                        ConnectionEvent::MessageReceived { from, data } => {
+                            handle_message_received(session, state, from, data).await?;
                         }
                     }
                 }
-                Err(_) => {
-                    info!("📥 Received {} bytes from {}", data.len(), from);
-                }
+
+                check_host_grace_period(session, state).await?;
+            }
+            _ = tokio::signal::ctrl_c() => {
+                info!("Shutting down...");
+                break;
             }
         }
     }
