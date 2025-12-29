@@ -23,7 +23,7 @@ Align our architectural decisions with the business goals and user needs of Konn
 |**Key Activities**
 |• P2P lobby management
 • WebRTC connection orchestration
-• Admin election & authentication
+• Host delegation & guest management
 • Real-time state synchronization
 
 |**Key Resources**
@@ -38,6 +38,7 @@ Align our architectural decisions with the business goals and user needs of Konn
 • **Easy integration** – Rust library for Yew applications
 • **Decentralized** – resilient to server failures
 • **Extensible** – modular activity system
+• **Flexible participation** – guests can toggle between active play and spectating
 
 |**Customer Relationships**
 |• Documentation & examples
@@ -71,16 +72,19 @@ Align our architectural decisions with the business goals and user needs of Konn
 
 === Short-term
 * Deliver a **stable v1.0** with core lobby management features
-* Implement **admin election & reclaim** protocol
+* Implement **host delegation** protocol
+* Support **spectator mode** for flexible participation
 * Establish **documentation** with architecture diagrams
 
 === Medium-term
 * Add **activity catalog** extensibility
 * Implement **offline mode** with state reconciliation
+* Add **co-host** capabilities (optional)
 
 === Long-term
 * Enable **cross-platform** support (native + WASM)
 * Add **matchmaking** capabilities
+* Support **tournament brackets** with multiple lobbies
 
 == User Needs
 
@@ -107,9 +111,13 @@ Align our architectural decisions with the business goals and user needs of Konn
 |Flexible game types
 |Rigid frameworks lock you into specific patterns
 |Modular activity system, extensible via traits
+
+|Flexible participation
+|Players either "in" or "out" - no middle ground
+|Spectator mode lets guests watch without playing
 |===
 
-=== Secondary Users: Players
+=== Secondary Users: Players (Guests)
 
 [cols="1,2,2", options="header"]
 |===
@@ -123,11 +131,15 @@ Align our architectural decisions with the business goals and user needs of Konn
 
 |Reliable sessions
 |Disconnects kill entire game
-|Admin election keeps lobby alive
+|Host delegation keeps lobby alive
 
 |Privacy
 |Game state stored on untrusted servers
 |All state stays on client devices
+
+|Watch before playing
+|Forced to play immediately or leave
+|Spectator mode - watch first, join later
 |===
 
 == Impact Mapping
@@ -148,10 +160,12 @@ rectangle "Party Game\nCreators" as party
 rectangle "Reduce\ninfrastructure\ncosts" as impact1
 rectangle "Speed up\nprototyping" as impact2
 rectangle "Enable\nreal-time\nlearning" as impact3
+rectangle "Flexible\nparticipation" as impact4
 
 rectangle "P2P architecture\n(no game server)" as deliverable1
 rectangle "Pre-built Yew\ncomponents" as deliverable2
 rectangle "Activity\ncatalog system" as deliverable3
+rectangle "Spectator\nmode" as deliverable4
 
 goal --> dev
 goal --> edu
@@ -160,11 +174,12 @@ goal --> party
 dev --> impact1
 dev --> impact2
 edu --> impact3
-party --> impact2
+party --> impact4
 
 impact1 --> deliverable1
 impact2 --> deliverable2
 impact3 --> deliverable3
+impact4 --> deliverable4
 
 @enduml
 ----
@@ -190,6 +205,9 @@ impact3 --> deliverable3
 
 |**Rust ecosystem**
 |Limited Yew component ecosystem; may need to build UI primitives ourselves
+
+|**Single host (v1.0)**
+|Only one host per lobby; can delegate role but not share it
 |===
 
 == Success Metrics
@@ -209,14 +227,44 @@ impact3 --> deliverable3
 |< 2 seconds
 
 |**Reliability**
-|Admin election success rate
+|Host delegation success rate
 |> 95%
 
 |**Scalability**
-|Max concurrent players per lobby
-|10 players
+|Max concurrent guests per lobby
+|10 guests
 
 |**Documentation**
 |Coverage of core features
 |100%
+
+|**Flexibility**
+|Spectator mode toggle success rate
+|> 99%
+|===
+
+== Key Terminology
+
+[cols="1,3", options="header"]
+|===
+|Term
+|Definition
+
+|**Host**
+|The lobby organizer with management privileges (can kick guests, start activities, delegate host role)
+
+|**Guest**
+|A regular participant in the lobby
+
+|**Active Mode**
+|Guest is participating in activities (can submit results)
+
+|**Spectating Mode**
+|Guest is watching only (cannot submit results)
+
+|**Participation Mode**
+|Whether a guest is Active or Spectating
+
+|**Host Delegation**
+|Transfer of host role from current host to a guest
 |===

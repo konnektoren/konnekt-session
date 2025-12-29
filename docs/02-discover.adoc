@@ -1,0 +1,500 @@
+= Step 2: Discover – Domain Discovery
+:icons: font
+:toc: left
+:toclevels: 3
+:sectnums:
+
+== Purpose
+
+Discover the **Lobby Management** domain visually and collaboratively. Build a shared understanding of:
+
+* How lobbies are created, managed, and closed
+* What activities can happen within a lobby
+* How **hosts** and **guests** interact
+* The **spectator mode** and participation lifecycle
+* Edge cases and failure scenarios
+
+This is the foundation for all design decisions. **We cannot skip discovery.**
+
+[... previous sections remain ...]
+
+== Key Domain Events
+
+[cols="2,3,2", options="header"]
+|===
+|Event
+|Description
+|Triggered By
+
+|**LobbyCreated**
+|A new lobby has been created
+|CreateLobby command
+
+|**GuestJoined**
+|A guest successfully joined the lobby
+|JoinLobby command
+
+|**GuestLeft**
+|A guest left the lobby
+|LeaveLobby command or disconnect
+
+|**GuestKicked**
+|Host removed a guest from the lobby
+|KickGuest command
+
+|**ParticipationModeChanged**
+|A guest toggled between Active and Spectating
+|ToggleSpectatorMode command
+
+|**HostDelegated**
+|Host role transferred to another guest
+|DelegateHost command
+
+|**ActivityPlanned**
+|An activity was added to the upcoming queue
+|PlanActivity command
+
+|**ActivityStarted**
+|An activity began and guests can participate
+|StartActivity command
+
+|**ResultSubmitted**
+|An active guest submitted their activity result
+|SubmitResult command
+
+|**ActivityCompleted**
+|All active guests finished, activity is done
+|Policy (all results in)
+
+|**ActivityCancelled**
+|Host cancelled a running activity
+|CancelActivity command
+
+|**LeaderboardUpdated**
+|Scores recalculated after activity
+|Policy (after ActivityCompleted)
+
+|**LobbyClosed**
+|Lobby was closed and no longer accepting guests
+|CloseLobby command
+
+|**LobbyArchived**
+|Lobby is finished and in read-only state
+|Policy (after close + timeout)
+|===
+
+== Key Commands
+
+[cols="2,3,2", options="header"]
+|===
+|Command
+|Description
+|Actor
+
+|**CreateLobby**
+|Create a new lobby with name, optional password
+|Host (becomes host on creation)
+
+|**JoinLobby**
+|Join an existing lobby by ID
+|Guest (joins in Active mode by default)
+
+|**LeaveLobby**
+|Leave the current lobby
+|Guest or Host
+
+|**KickGuest**
+|Remove a guest from the lobby
+|Host
+
+|**ToggleSpectatorMode**
+|Switch between Active ↔ Spectating
+|Guest (self) or Host (force guest)
+
+|**DelegateHost**
+|Transfer host role to a guest
+|Host
+
+|**PlanActivity**
+|Add an activity to the upcoming queue
+|Host
+
+|**RemovePlannedActivity**
+|Remove an activity from queue before starting
+|Host
+
+|**StartActivity**
+|Begin a planned activity
+|Host
+
+|**SubmitResult**
+|Submit activity completion data (only if Active)
+|Guest (Active mode only)
+
+|**CancelActivity**
+|Stop a running activity early
+|Host
+
+|**CloseLobby**
+|Close lobby to new guests
+|Host
+|===
+
+== Aggregates
+
+[cols="2,3,3", options="header"]
+|===
+|Aggregate
+|Responsibilities
+|Invariants
+
+|**Lobby**
+|• Manage lobby lifecycle
+• Track guests and host
+• Enforce lobby rules
+• Maintain activity queue
+|• Must have exactly 1 host at all times
+• Name must be 3-50 characters
+• Max guest limit enforced
+• Unique guest names within lobby
+
+|**Activity**
+|• Manage activity state
+• Collect results from active guests
+• Calculate scores
+|• Can't start if state != Planned
+• Can't submit result if state != InProgress
+• Only active guests can submit results
+• Results are immutable after submission
+
+|**Participant**
+|• Track participant identity
+• Manage lobby role (Host/Guest)
+• Manage participation mode (Active/Spectating)
+|• Participant ID is unique within lobby
+• Lobby role is valid (Host or Guest)
+• Participation mode is valid (Active or Spectating)
+• Name is unique within lobby
+• Only guests can be in Spectating mode
+|===
+
+== Business Rules (Policies)
+
+[cols="2,3,2", options="header"]
+|===
+|Policy
+|Rule
+|Triggered By
+
+|**Host Auto-Promotion**
+|When host leaves, promote oldest guest to host
+|GuestLeft (if host)
+
+|**Activity Queue Management**
+|Only one activity can be in-progress at a time
+|StartActivity command
+
+|**Lobby Capacity**
+|Reject joins if lobby is at max capacity
+|JoinLobby command
+
+|**Password Protection**
+|Reject joins if password doesn't match (when set)
+|JoinLobby command
+
+|**Spectator Restrictions**
+|Spectating guests cannot submit activity results
+|SubmitResult command
+
+|**Mode Change Restrictions**
+|Cannot change participation mode during active activity
+|ToggleSpectatorMode command
+
+|**Idle Lobby Cleanup**
+|Archive lobbies with no activity for 24 hours
+|Scheduled background task
+
+|**Result Finalization**
+|Complete activity when all active guests have submitted
+|ResultSubmitted event
+
+|**Leaderboard Calculation**
+|Recalculate scores after each activity completion
+|ActivityCompleted event
+
+|**Default Participation Mode**
+|New guests join in Active mode by default
+|GuestJoined event
+|===
+
+== Example Mapping: Concrete Scenarios
+
+=== Scenario 1: Password-Protected Lobby
+
+[cols="1,3", options="header"]
+|===
+|Type
+|Content
+
+|**Rule**
+|Lobbies can have optional password protection
+
+|**Example 1**
+|Host creates lobby "Friday Night Quiz" with password "fun123"
+→ LobbyCreated with password set
+
+|**Example 2**
+|Guest joins with correct password "fun123"
+→ GuestJoined (Active mode by default)
+
+|**Example 3**
+|Guest joins with wrong password "fun124"
+→ JoinRejected(reason: "Invalid password")
+
+|**Example 4**
+|Guest joins without password (when required)
+→ JoinRejected(reason: "Password required")
+
+|**Question**
+|Can host change password after creation?
+**Decision**: Yes, via UpdateLobbySettings command
+|===
+
+=== Scenario 2: Host Leaves During Activity
+
+[cols="1,3", options="header"]
+|===
+|Type
+|Content
+
+|**Rule**
+|When host leaves, oldest guest becomes host
+
+|**Example 1**
+|Lobby has Host (Alice), Guest (Bob joined 10s ago, Active), Guest (Carol joined 5s ago, Active)
+→ Alice leaves
+→ Bob becomes host (oldest guest)
+→ Bob inherits host privileges, stays in Active mode
+
+|**Example 2**
+|Activity is in-progress when host leaves
+→ New host inherits control
+→ Activity continues
+
+|**Example 3**
+|Only host and one guest in lobby, host leaves
+→ Guest becomes host
+→ Lobby stays open
+
+|**Example 4**
+|Host leaves, but no other guests in lobby
+→ Lobby closes automatically
+
+|**Question**
+|What if host disconnects temporarily (network issue)?
+**Decision**: After 30s timeout, treat as "leave" and promote new host. Original host can rejoin as regular guest.
+|===
+
+=== Scenario 3: Spectator Mode Toggle
+
+[cols="1,3", options="header"]
+|===
+|Type
+|Content
+
+|**Rule**
+|Guests can toggle between Active and Spectating modes
+
+|**Example 1**
+|Guest (Carol, Active) toggles to Spectating before activity starts
+→ ParticipationModeChanged(Carol, Spectating)
+→ Carol cannot submit results in next activity
+
+|**Example 2**
+|Activity is in progress, Carol tries to toggle
+→ Rejected ("Cannot change mode during activity")
+
+|**Example 3**
+|Spectating guest (Dave) tries to submit result
+→ Rejected ("Spectators cannot submit results")
+
+|**Example 4**
+|Host forces guest to Spectating mode
+→ ParticipationModeChanged(forced=true)
+→ Guest notified
+
+|**Question**
+|Can host be in Spectating mode?
+**Decision**: Yes - host can spectate and still manage lobby (rare but allowed)
+|===
+
+=== Scenario 4: Activity Completion with Spectators
+
+[cols="1,3", options="header"]
+|===
+|Type
+|Content
+
+|**Rule**
+|Activity completes when all active guests have submitted results (spectators excluded)
+
+|**Example 1**
+|4 guests: Alice (Active), Bob (Active), Carol (Spectating), Dave (Active)
+→ 2 of 3 active guests submitted
+→ Activity state: InProgress, waiting for 1 more
+
+|**Example 2**
+|3rd active guest submits
+→ ActivityCompleted (Carol's non-submission doesn't block)
+→ Leaderboard updated (Carol not ranked)
+
+|**Example 3**
+|Guest switches to Spectating mid-activity
+→ ActivityAbandoned event
+→ Activity can complete without them
+
+|**Question**
+|What if all guests switch to Spectating during activity?
+**Decision**: Activity auto-completes with no results (edge case)
+|===
+
+== Domain Storytelling: User Workflows
+
+=== Story 1: Creating and Hosting a Quiz Night
+
+[plantuml, "domain-story-quiz-night", png]
+----
+@startuml
+title Domain Story: Quiz Night Hosting
+
+actor "Host" as host
+actor "Guest 1" as guest1
+actor "Guest 2" as guest2
+
+participant "Lobby" as lobby
+participant "Activity" as activity
+
+host -> lobby : 1. Create lobby "Friday Quiz"
+host -> lobby : 2. Set password "friends"
+host -> lobby : 3. Share lobby ID via chat
+
+guest1 -> lobby : 4. Join with password (Active mode)
+guest2 -> lobby : 5. Join with password (Active mode)
+
+host -> activity : 6. Plan "Trivia Round 1"
+host -> activity : 7. Plan "Trivia Round 2"
+
+guest2 -> lobby : 8. Toggle to Spectating (wants to watch first)
+
+host -> activity : 9. Start "Trivia Round 1"
+
+guest1 -> activity : 10. Submit answers (score: 8)
+host -> activity : 11. Submit answers (score: 9)
+
+note right: Guest 2 (Spectating) doesn't submit
+
+activity -> activity : 12. Complete round 1 (2 active guests done)
+activity -> lobby : 13. Update leaderboard (Guest 1: 8, Host: 9)
+
+guest2 -> lobby : 14. Toggle to Active (ready to play now)
+
+host -> activity : 15. Start "Trivia Round 2"
+note right: All 3 participate this time
+
+@enduml
+----
+
+=== Story 2: Host Delegation
+
+[plantuml, "domain-story-host-delegation", png]
+----
+@startuml
+title Domain Story: Host Delegation
+
+actor "Original Host" as host
+actor "Guest (soon-to-be Host)" as guest
+participant "Lobby" as lobby
+
+host -> lobby : 1. Create lobby
+guest -> lobby : 2. Join as Guest (Active)
+
+host -> lobby : 3. Start activity
+note right: Both participate
+
+host -> lobby : 4. "I need to leave, making you host"
+host -> lobby : 5. DelegateHost(guest_id)
+
+lobby -> lobby : 6. Transfer host role
+lobby -> guest : 7. HostDelegated event
+
+guest -> guest : 8. Now has host privileges
+note right: Can manage lobby, kick guests, start activities
+
+host -> host : 9. Downgraded to Guest role
+host -> lobby : 10. Leave lobby (now allowed)
+
+guest -> lobby : 11. Continue managing lobby
+note right: Seamless transition
+
+@enduml
+----
+
+== Questions & Decisions
+
+[cols="2,3,2", options="header"]
+|===
+|Question
+|Decision
+|Rationale
+
+|Can a lobby have multiple hosts (co-hosts)?
+|**No (v1.0)** - Single host only. Can delegate to another guest.
+|Simplicity. Multiple hosts = complex permission conflicts. Future feature.
+
+|What happens to running activity if host leaves?
+|**New host inherits control**. Activity continues.
+|Better UX than cancelling activity.
+
+|Can guests join mid-activity?
+|**Yes**, but they join in Spectating mode and can't participate in current activity.
+|Avoids unfair advantage. They can toggle to Active for next activity.
+
+|Max lobby size?
+|**10 guests + 1 host = 11 total** (v1.0 target)
+|Based on P2P connection limits & UX testing.
+
+|Can guest names be changed after joining?
+|**No** - Name is set on join and immutable.
+|Prevents confusion. Guest can leave and rejoin with new name.
+
+|How long until idle lobby is archived?
+|**24 hours** of no events
+|Balance between keeping state available and cleanup.
+
+|Can host toggle spectator mode?
+|**Yes** - Host can spectate while still managing lobby.
+|Allows host to organize without playing (rare but valid).
+
+|Can guests toggle mode during activity?
+|**No** - Must wait until activity completes.
+|Prevents gaming the system (toggle to avoid hard questions).
+|===
+
+== Next Steps
+
+1. **Validate discovery** with target users (game developers)
+   - Show EventStorming diagrams
+   - Walk through domain stories
+   - Collect feedback on spectator mode UX
+
+2. **Identify missing scenarios**
+   - What happens if all guests go Spectating?
+   - How to handle host delegation during activity?
+   - Edge cases with mode toggling
+
+3. **Refine aggregate boundaries**
+   - Is `Participant` (Host/Guest) an entity or value object?
+   - Should `ParticipationMode` be on `Participant` or `Activity`?
+   - Does `Activity` need to track "active participants" separately?
+
+4. Move to **Step 3: Decompose** to identify subdomain boundaries

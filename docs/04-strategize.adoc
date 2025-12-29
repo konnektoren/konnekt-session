@@ -29,10 +29,11 @@ rectangle "Domain Complexity →" as x_axis
 ' Core Domains (high differentiation, high/medium complexity)
 rectangle "Lobby\nManagement" as lobby_mgmt CORE_COLOR
 rectangle "Activity\nLifecycle" as activity_lifecycle CORE_COLOR
-rectangle "Player Role\nManagement" as role_mgmt CORE_COLOR
+rectangle "Host/Guest\nManagement" as role_mgmt CORE_COLOR
 
 ' Supporting Domains (medium differentiation, medium complexity)
 rectangle "Activity\nCatalog &\nPlugins" as activity_catalog SUPPORTING_COLOR
+rectangle "Participation\nMode\n(Spectator)" as participation_mode SUPPORTING_COLOR
 rectangle "Authentication\n& Identity" as auth SUPPORTING_COLOR
 rectangle "Game State\nSerialization" as game_state SUPPORTING_COLOR
 
@@ -46,7 +47,8 @@ rectangle "Local Storage" as storage GENERIC_COLOR
 lobby_mgmt -[hidden]-> activity_lifecycle
 activity_lifecycle -[hidden]-> role_mgmt
 role_mgmt -[hidden]-> activity_catalog
-activity_catalog -[hidden]-> auth
+activity_catalog -[hidden]-> participation_mode
+participation_mode -[hidden]-> auth
 auth -[hidden]-> game_state
 game_state -[hidden]-> p2p_sync
 p2p_sync -[hidden]-> webrtc
@@ -57,10 +59,19 @@ note right of lobby_mgmt
 **Core Domain**
 This is what users pay for:
 • Creating & managing game sessions
-• Inviting/kicking players
-• Starting/stopping activities
+• Host/Guest model with delegation
 • Managing lobby lifecycle
+• Inviting/kicking guests
 High differentiation & complexity
+end note
+
+note right of participation_mode
+**Supporting Domain**
+Enables flexible participation:
+• Active vs Spectating modes
+• Toggle between modes
+• Not highly differentiating
+(many systems have "observer mode")
 end note
 
 note right of p2p_sync
@@ -88,8 +99,8 @@ end note
 |⭐⭐⭐⭐⭐
 |• **Primary business value** – what developers integrate for
 • Managing session lifecycle (create, join, leave, close)
-• Player admission control (passwords, invites, kicks)
-• Lobby configuration (max players, privacy settings)
+• Guest admission control (passwords, invites, kicks)
+• Lobby configuration (max guests, privacy settings)
 • This is what makes the product unique & valuable
 
 |**Activity Lifecycle**
@@ -97,18 +108,27 @@ end note
 |⭐⭐⭐⭐⭐
 |• **Core user workflow** – starting/stopping games
 • Activity state machine (planned → in-progress → finished)
-• Results collection & aggregation
+• Results collection from active guests
 • Activity ordering & queue management
 • Critical to user experience
 
-|**Player Role Management**
+|**Host/Guest Management**
 |Core
-|⭐⭐⭐⭐
-|• **Domain-specific logic** – Admin/Player/Observer roles
-• Role transitions & permissions
-• Admin delegation (appointing new admin)
-• Observer promotion to player
+|⭐⭐⭐⭐⭐
+|• **Domain-specific logic** – Host/Guest model
+• Host delegation (transferring control)
+• Guest permissions & restrictions
 • Business rules about who can do what
+• Differentiates from generic "player" models
+
+|**Participation Mode (Spectator)**
+|Supporting
+|⭐⭐⭐
+|• Enables flexibility (important for UX)
+• Active ↔ Spectating mode transitions
+• Result submission restrictions
+• Moderate complexity (state + validation)
+• Not highly differentiating (many systems have observers)
 
 |**Activity Catalog & Plugins**
 |Supporting
@@ -123,7 +143,8 @@ end note
 |Supporting
 |⭐⭐⭐
 |• Essential for security, not differentiating
-• Key generation & storage (Ed25519) or Signature verification
+• Key generation & storage (Ed25519)
+• Signature verification
 • Identity persistence (LocalStorage)
 • Use standard crypto libraries
 
@@ -172,7 +193,12 @@ end note
 ----
 ┌─────────────────────────────────────────────────────────┐
 │         Core Domain: Lobby Management                    │
-│  (Business Logic: Activities, Roles, Permissions)        │
+│  (Business Logic: Host/Guest, Activities, Permissions)   │
+└─────────────────────────────────────────────────────────┘
+                          ↓ uses
+┌─────────────────────────────────────────────────────────┐
+│      Supporting: Participation Mode                      │
+│        (Active/Spectating, Mode Transitions)             │
 └─────────────────────────────────────────────────────────┘
                           ↓ uses
 ┌─────────────────────────────────────────────────────────┐
@@ -193,43 +219,61 @@ end note
 
 === Key Insight
 
-**Admin role is domain logic, not sync infrastructure:**
+**Host role is domain logic, not sync infrastructure:**
 
-* **Domain Layer**: Admin is a `Role` enum value on a `Player` entity
-  - Business rules: "Only admin can start activities"
-  - Domain events: `AdminChanged`, `PlayerPromotedToAdmin`
-  - Aggregate invariants: "Lobby must have exactly one admin"
+* **Domain Layer**: Host is a `LobbyRole` enum value on a `Participant` entity
+  - Business rules: "Only host can start activities"
+  - Domain events: `HostDelegated`, `GuestPromotedToHost`
+  - Aggregate invariants: "Lobby must have exactly one host"
+
+* **Participation Layer**: Active/Spectating is a separate concern
+  - Business rules: "Spectating guests cannot submit results"
+  - Domain events: `ParticipationModeChanged`
+  - Can change independently of host/guest role
 
 * **Infrastructure Layer**: Round-robin leader election for state sync
   - Technical concern: "Who broadcasts the next state update?"
-  - Could be ANY peer (not necessarily the domain admin)
+  - Could be ANY peer (not necessarily the domain host)
   - Could rotate every N seconds or every M messages
-  - Completely decoupled from domain concept of "admin"
+  - Completely decoupled from domain concept of "host"
 
 === Example Scenario
 
 [source]
 ----
-Lobby has 4 players:
-  - Alice (Admin role in domain)
-  - Bob (Player role)
-  - Carol (Player role)
-  - Dave (Observer role)
+Lobby has 4 participants:
+  - Alice (Host, Active mode)
+  - Bob (Guest, Active mode)
+  - Carol (Guest, Active mode)
+  - Dave (Guest, Spectating mode)
 
 P2P Sync uses round-robin:
   - Cycle 1: Alice broadcasts
   - Cycle 2: Bob broadcasts
   - Cycle 3: Carol broadcasts
-  - Cycle 4: Alice broadcasts again
-  (Dave doesn't broadcast - not in rotation)
+  - Cycle 4: Dave broadcasts
+  - Cycle 5: Alice broadcasts again
+  (All peers participate in sync, regardless of participation mode)
 
-Alice (domain admin) can:
-  - Kick players (domain logic)
+Alice (domain host) can:
+  - Kick guests (domain logic)
   - Start activities (domain logic)
+  - Toggle her own participation mode (Active ↔ Spectating)
 
-Bob/Carol broadcast state but can't:
-  - Execute admin commands (domain forbids it)
-  - Their broadcasts just replicate Alice's commands
+Bob/Carol (guests, active) can:
+  - Submit activity results (allowed when Active)
+  - Toggle to Spectating mode (self-controlled)
+  - Their P2P broadcasts replicate Alice's commands
+
+Dave (guest, spectating) can:
+  - Watch activities (read-only)
+  - Toggle to Active mode (to participate)
+  - Still participates in P2P sync broadcasts
+
+All guests cannot:
+  - Execute host commands (domain forbids it)
+  - Kick other guests
+  - Start/stop activities
 ----
 
 == Complexity Assessment (Revised)
@@ -244,27 +288,35 @@ Bob/Carol broadcast state but can't:
 |8
 |• Complex state machine (lobby states)
 |• Multi-actor concurrency (simultaneous joins)
-|• Invariant enforcement (max players, unique names)
+|• Invariant enforcement (max guests, unique names)
 |• Password protection & invite codes
 |• Lobby closure & cleanup logic
-|• Edge cases: admin leaves, last player leaves
+|• Edge cases: host leaves, last guest leaves
 
 |**Activity Lifecycle**
 |7
 |• Activity state transitions (planned → running → done)
-|• Result collection from multiple players
+|• Result collection from active guests only
 |• Timeout handling (max activity duration)
 |• Activity cancellation & restart logic
-|• Scoring & leaderboard calculations
-|• Edge cases: activity running when admin disconnects
+|• Scoring & leaderboard calculations (excluding spectators)
+|• Edge cases: activity running when host disconnects
 
-|**Player Role Management**
-|6
-|• Role transition rules (Observer ↔ Player, Admin delegation)
+|**Host/Guest Management**
+|7
+|• Host delegation rules (when, to whom)
+|• Auto-promotion when host leaves
 |• Permission enforcement (who can do what)
-|• Admin succession (when admin leaves)
-|• Multi-admin scenarios (co-admins?)
-|• Edge cases: all admins leave simultaneously
+|• Guest kick logic & notifications
+|• Edge cases: all guests leave, host delegates mid-activity
+
+|**Participation Mode (Spectator)**
+|5
+|• Mode transition rules (Active ↔ Spectating)
+|• When mode changes are allowed (not during activity)
+|• Result submission validation (only Active guests)
+|• Forced mode changes by host (optional)
+|• Activity completion logic (only count Active guests)
 
 |**Activity Catalog & Plugins**
 |5
@@ -330,12 +382,20 @@ Bob/Carol broadcast state but can't:
 |• Differentiation in how activities integrate
 |• Better than generic "game session" libraries
 
-|**Player Role Management**
-|8
-|• **Flexible role system** (not just "host" vs "player")
-|• Smooth role transitions (Observer ↔ Player)
-|• Admin delegation without full reconnect
+|**Host/Guest Management**
+|9
+|• **Unique model** (not just "admin" vs "player")
+|• Host delegation without full reconnect
+|• Smooth host transitions
 |• More sophisticated than most lobby libs
+|• Natural language ("host invites guests")
+
+|**Participation Mode (Spectator)**
+|4
+|• Nice-to-have feature for UX
+|• Not highly differentiating (many systems have "observer mode")
+|• Smooth toggling is a plus
+|• Not a primary decision factor for developers
 
 |**Activity Catalog & Plugins**
 |5
@@ -381,7 +441,7 @@ Bob/Carol broadcast state but can't:
 |Example Actions
 
 |**Core**
-(Lobby, Activity Lifecycle, Role Mgmt)
+(Lobby, Activity Lifecycle, Host/Guest Mgmt)
 |• **Build in-house** with highest quality
 |• Deep domain modeling (DDD tactical patterns)
 |• Extensive testing (domain scenarios)
@@ -392,17 +452,17 @@ Bob/Carol broadcast state but can't:
 |• EventStorming sessions with users
 |• Property-based testing for invariants
 |• Tutorial videos & interactive docs
-|• Blog posts about domain patterns
+|• Blog posts about host/guest patterns
 
 |**Supporting**
-(Activity Catalog, Auth, Serialization)
+(Participation Mode, Activity Catalog, Auth)
 |• **Build competently** using best practices
 |• Leverage standard patterns
 |• Good test coverage
 |• Clear API documentation
+|• State machine for mode transitions
 |• Use Rust trait system for plugins
 |• Standard crypto libraries (ring, ed25519-dalek)
-|• Serde for serialization
 |• API reference docs
 
 |**Generic**
@@ -417,64 +477,116 @@ Bob/Carol broadcast state but can't:
 |• Copy standard algorithms from papers/books
 |===
 
-== P2P State Sync: Round-Robin Approach
+== Domain Model: Host/Guest + Spectator Mode
 
-Since P2P state sync is **generic infrastructure**, we can use a simple, well-known algorithm:
-
-=== Round-Robin Leader Election
+=== Rust Implementation
 
 ```rust
-// Simple round-robin: each peer gets a turn to broadcast
-struct RoundRobinSync {
-    peers: Vec<PeerId>,
-    current_leader_index: usize,
-    rotation_interval: Duration, // e.g., 5 seconds
+// Domain layer: Host/Guest roles
+pub enum LobbyRole {
+    Host,   // Can manage lobby, kick guests, start activities
+    Guest,  // Regular participant
 }
 
-impl RoundRobinSync {
-    fn current_leader(&self) -> PeerId {
-        self.peers[self.current_leader_index % self.peers.len()]
-    }
-
-    fn rotate_leader(&mut self) {
-        self.current_leader_index += 1;
-    }
-
-    fn am_i_leader(&self, my_id: PeerId) -> bool {
-        self.current_leader() == my_id
-    }
-}
-```
-
-=== Decoupling from Domain
-
-```rust
-// Domain layer: Admin role is business logic
-pub enum Role {
-    Admin,    // Can execute admin commands
-    Player,   // Can participate in activities
-    Observer, // Read-only
+// Participation layer: Active vs Spectating
+pub enum ParticipationMode {
+    Active,      // Can participate in activities
+    Spectating,  // View-only, cannot submit results
 }
 
-// Infrastructure layer: Sync leader is technical concern
+pub struct Participant {
+    id: Uuid,
+    name: String,
+    lobby_role: LobbyRole,
+    participation_mode: ParticipationMode,
+}
+
+impl Participant {
+    pub fn is_host(&self) -> bool {
+        matches!(self.lobby_role, LobbyRole::Host)
+    }
+
+    pub fn can_submit_results(&self) -> bool {
+        matches!(self.participation_mode, ParticipationMode::Active)
+    }
+
+    pub fn can_manage_lobby(&self) -> bool {
+        self.is_host()
+    }
+
+    pub fn toggle_spectator_mode(&mut self) -> Result<(), DomainError> {
+        self.participation_mode = match self.participation_mode {
+            ParticipationMode::Active => ParticipationMode::Spectating,
+            ParticipationMode::Spectating => ParticipationMode::Active,
+        };
+        Ok(())
+    }
+}
+
+// Infrastructure layer: Sync leader (independent)
 pub struct SyncLeader {
-    current_broadcaster: PeerId, // Who sends next state update
+    current_broadcaster: PeerId,
     rotation_schedule: Vec<PeerId>,
 }
 
 // These are INDEPENDENT:
-// - Domain admin can be different from sync leader
-// - Sync leader just replicates commands, doesn't authorize them
-// - Domain layer validates "is this user allowed to kick players?"
-// - Sync layer just ensures "did this message reach everyone?"
+// - Domain host (LobbyRole::Host) manages lobby
+// - Participation mode (Active/Spectating) controls activity submission
+// - Sync leader (infrastructure) controls state broadcast rotation
+```
+
+=== Business Rules
+
+```rust
+impl Lobby {
+    pub fn submit_result(&mut self, participant_id: Uuid, result: ActivityResult)
+        -> Result<(), DomainError> {
+
+        let participant = self.find_participant(participant_id)?;
+
+        // Check participation mode
+        if !participant.can_submit_results() {
+            return Err(DomainError::SpectatorCannotSubmit);
+        }
+
+        // Check activity state
+        let activity = self.current_activity()?;
+        if activity.status != ActivityStatus::InProgress {
+            return Err(DomainError::ActivityNotRunning);
+        }
+
+        // Submit result
+        activity.add_result(participant_id, result)?;
+
+        // Check if all ACTIVE participants have submitted
+        if self.all_active_participants_submitted() {
+            activity.complete()?;
+        }
+
+        Ok(())
+    }
+
+    fn all_active_participants_submitted(&self) -> bool {
+        let active_participants = self.participants.iter()
+            .filter(|p| matches!(p.participation_mode, ParticipationMode::Active))
+            .count();
+
+        let submitted_count = self.current_activity()
+            .map(|a| a.results.len())
+            .unwrap_or(0);
+
+        active_participants == submitted_count
+    }
+}
 ```
 
 === Benefits of Separation
 
-1. **Simpler domain model** – no mixing of business logic and sync logic
-2. **Testable in isolation** – test lobby rules without P2P complexity
-3. **Swappable sync layer** – can upgrade from round-robin to Raft without touching domain code
-4. **Clear responsibilities** – domain = "what", infrastructure = "how"
+1. **Clear domain model** – Host/Guest is about authority, Active/Spectating is about participation
+2. **Flexible UX** – Host can spectate, guests can toggle modes
+3. **Testable in isolation** – Test lobby rules without P2P, test participation without host logic
+4. **Swappable sync layer** – Can upgrade sync without touching domain code
+5. **Natural language** – "Host invites guests" is intuitive
 
 == Alternative Sync Approaches (Future)
 
@@ -495,11 +607,11 @@ Since sync is **generic**, we have options:
 |• Latency (wait for your turn)
 |v1.0 (simple)
 
-|**Admin-Only Broadcast**
-|• Clear authority (domain admin = sync leader)
+|**Host-Only Broadcast**
+|• Clear authority (domain host = sync leader)
 |• Lowest latency (no rotation)
-|• Admin is bottleneck
-|• Admin disconnect breaks sync
+|• Host is bottleneck
+|• Host disconnect breaks sync
 |v1.0 alternative
 
 |**CRDT (Conflict-Free)**
@@ -536,9 +648,14 @@ Since sync is **generic**, we have options:
 |Domain invariants, command validation
 |🔴 Critical
 
-|**Role Management**
-|Orphaned lobby (all admins leave)
-|Auto-promote oldest player to admin
+|**Host/Guest Management**
+|Orphaned lobby (host leaves, no guests)
+|Auto-close lobby after timeout
+|🟡 Medium
+
+|**Participation Mode**
+|Mode change during activity (gaming the system)
+|Forbid mode changes during active activity
 |🟡 Medium
 
 |**P2P Sync**
@@ -547,7 +664,7 @@ Since sync is **generic**, we have options:
 |🟡 Medium
 
 |**Authentication**
-|Key loss (user can't rejoin as admin)
+|Key loss (user can't rejoin as original identity)
 |Key export/backup UX
 |🟡 Medium
 |===
@@ -556,8 +673,9 @@ Since sync is **generic**, we have options:
 
 1. **Focus 80% effort on Core Domains**:
    - Deep domain modeling for Lobby Management
-   - Activity lifecycle state machine design
-   - Role management business rules
+   - Host delegation state machine design
+   - Activity lifecycle with spectator handling
+   - Guest permissions & restrictions
 
 2. **Use off-the-shelf for Generic**:
    - Research existing Rust CRDT/Raft libraries
@@ -565,8 +683,9 @@ Since sync is **generic**, we have options:
    - Document sync layer as swappable component
 
 3. **Validate with users**:
-   - EventStorm lobby management flows
-   - Prototype activity lifecycle with real games
-   - Test role transition UX
+   - EventStorm host/guest workflows
+   - Prototype spectator mode UX
+   - Test host delegation scenarios
+   - Collect feedback on terminology
 
-4. Move to **Step 2: Discover** to model the core domain collaboratively
+4. Move to **Step 3: Decompose** to identify subdomain boundaries

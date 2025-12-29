@@ -11,7 +11,7 @@
 This project follows the **Domain-Driven Design Starter Modelling Process**. The architecture documentation is organized into steps:
 
 1. **xref:01-understand.adoc[Understand]** – Business model & strategic goals
-2. **Discover** – Domain discovery (EventStorming) _(coming soon)_
+2. **xref:02-discover.adoc[Discover]** – Domain discovery (EventStorming)
 3. **Decompose** – Subdomain boundaries _(coming soon)_
 4. **xref:04-strategize.adoc[Strategize]** – Core Domain Charts
 5. **Connect** – Domain message flows _(coming soon)_
@@ -30,20 +30,21 @@ Its purpose is to let developers build multiplayer games that:
 * use **Matchbox** only for WebRTC signalling, and
 * keep **all game state on the clients** – there is no central game server.
 
-The design is expressed through **Domain-Driven Design (DDD)** bounded contexts, a **C4 container architecture**, and a **signed-message** flow that makes an admin the authoritative source of truth.
+The design uses a **Host/Guest model** with **Spectator Mode** for flexible participation, is expressed through **Domain-Driven Design (DDD)** bounded contexts, and uses a **C4 container architecture**.
 
 == 2. Vision & Scope
 
 * **Vision** – Enable low-latency, peer-to-peer multiplayer experiences without the operational cost of a dedicated backend.
-* **In-Scope** – Lobby creation, activity definition, admin-driven state broadcasts, player-role management, admin election & reclaim.
+* **In-Scope** – Lobby creation with host/guest roles, activity management, spectator mode, host delegation.
 * **Out-Of-Scope** – Persistent server-side storage of game data, matchmaking beyond signalling, or any cloud-hosted "game-engine" component.
 
 == 3. Architectural Constraints
 
 * **No central game server** – Matchbox (`match.konnektoren.help`) handles only WebRTC signalling.
-* **Client-side state** – Full lobby state lives in the browser; synchronization is P2P via signed messages.
-* **Admin as source of truth** – Admin broadcasts authoritative updates; peers verify signatures before applying state.
-* **Rust everywhere** – Backend logic (if any) and frontend (Yew/WASM) both written in Rust.
+* **Client-side state** – Full lobby state lives in the browser; synchronization is P2P.
+* **Host as organizer** – Host manages lobby; can delegate role to guests.
+* **Flexible participation** – Guests can toggle between Active and Spectating modes.
+* **Rust everywhere** – Frontend (Yew/WASM) written in Rust.
 
 == 4. System Context (C4 - Level 1)
 
@@ -56,7 +57,7 @@ LAYOUT_WITH_LEGEND()
 
 title Konnekt Session – System Context
 
-Person(user, "User", "Admin, Player, or Observer")
+Person(user, "User", "Host or Guest")
 System(konnekt, "Konnekt Session", "Decentralized multiplayer lobby library")
 System_Ext(matchbox, "Matchbox Signalling Server", "WebRTC signalling (match.konnektoren.help)")
 System_Ext(browser, "Web Browser", "Chrome, Firefox, Safari")
@@ -70,262 +71,31 @@ Rel_Back(matchbox, konnekt, "Relays signalling messages")
 ----
 
 **Narrative**
-The **user** interacts with a **Yew SPA** running in their browser. The SPA connects to **Matchbox** for WebRTC signalling, establishing peer-to-peer data channels with other participants. Matchbox never sees game state – it only facilitates the initial connection handshake.
+The **user** (host or guest) interacts with a **Yew SPA** running in their browser. The SPA connects to **Matchbox** for WebRTC signalling, establishing peer-to-peer data channels with other participants. Matchbox never sees game state – it only facilitates the initial connection handshake.
 
-== 5. Container Diagram (C4 - Level 2)
-
-[plantuml, "container-diagram", png]
-----
-@startuml
-!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
-
-LAYOUT_WITH_LEGEND()
-
-title Konnekt Session – Container Diagram
-
-Person(user, "User", "Admin, Player, or Observer")
-
-System_Boundary(browser, "Web Browser") {
-    Container(spa, "Yew SPA", "Rust/WASM", "UI components, local state management")
-    Container(p2p_client, "P2P Client", "Matchbox Socket", "WebRTC data channels")
-    ContainerDb(local_storage, "Local Storage", "Browser API", "Private keys, cached state")
-}
-
-System_Ext(matchbox, "Matchbox Signalling Server", "External WebRTC signalling service")
-
-Rel(user, spa, "Interacts with")
-Rel(spa, p2p_client, "Sends/receives lobby updates")
-Rel(spa, local_storage, "Stores keys and cache")
-Rel(p2p_client, matchbox, "WebSocket handshake", "wss://")
-Rel_Back(matchbox, p2p_client, "Relays offers/answers")
-Rel(p2p_client, p2p_client, "P2P data channel", "WebRTC")
-
-@enduml
-----
-
-**Key points**
-
-* The **Yew SPA** manages all UI and local state.
-* The **P2P Client** (Matchbox socket) handles WebRTC connections between peers.
-* **Local Storage** persists the user's private key and admin key (if admin).
-* **Matchbox** only relays WebRTC signalling – no game state passes through it.
-
-== 6. Component Diagram (C4 - Level 3)
-
-[plantuml, "component-diagram", png]
-----
-@startuml
-!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
-
-LAYOUT_WITH_LEGEND()
-
-title Konnekt Session – Component Diagram (Client-Side)
-
-Container_Boundary(spa, "Yew SPA") {
-    Component(lobby_comp, "LobbyComponent", "Yew Component", "Renders lobby UI")
-    Component(activity_comp, "ActivityComponent", "Yew Component", "Renders activity list")
-    Component(player_comp, "PlayerComponent", "Yew Component", "Renders player list")
-
-    Component(lobby_handler, "LobbyCommandHandler", "Application Service", "Handles commands locally")
-    Component(p2p_sync, "P2P Sync Service", "Domain Service", "Broadcasts/receives state updates")
-    Component(auth_service, "Auth Service", "Domain Service", "Key management, signature verification")
-
-    ComponentDb(lobby_state, "Lobby Aggregate", "Domain Model", "Full lobby state")
-    ComponentDb(key_store, "Key Store", "Repository", "Private key, admin key")
-}
-
-Component_Ext(matchbox_socket, "Matchbox Socket", "External Library", "WebRTC abstraction")
-
-Rel(lobby_comp, lobby_handler, "Triggers commands")
-Rel(activity_comp, lobby_handler, "Triggers commands")
-Rel(player_comp, lobby_state, "Reads state")
-
-Rel(lobby_handler, lobby_state, "Updates")
-Rel(lobby_handler, p2p_sync, "Broadcasts changes")
-
-Rel(p2p_sync, auth_service, "Signs messages")
-Rel(p2p_sync, matchbox_socket, "Sends/receives", "WebRTC data channel")
-
-Rel(auth_service, key_store, "Reads/writes keys")
-
-Rel_Back(matchbox_socket, p2p_sync, "Receives peer messages")
-
-@enduml
-----
-
-**Narrative**
-
-* **UI Components** trigger commands via the `LobbyCommandHandler`.
-* The handler updates the local **Lobby Aggregate** state.
-* If the user is admin, the **P2P Sync Service** signs the update and broadcasts it to all peers.
-* Incoming messages are verified by the **Auth Service** before being applied to the local state.
-
-== 7. Deployment Diagram (C4 - Level 3)
-
-[plantuml, "deployment-diagram", png]
-----
-@startuml
-!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Deployment.puml
-
-LAYOUT_WITH_LEGEND()
-
-title Konnekt Session – Deployment Diagram
-
-Deployment_Node(client_device, "Client Device", "User PC / Mobile") {
-    Deployment_Node(browser, "Web Browser", "Chrome, Firefox, Safari") {
-        Container(spa, "Yew SPA", "Rust/WASM", "Frontend application")
-        Container(ws_client, "WebSocket Client", "Browser WebSocket API", "Connects to Matchbox")
-    }
-}
-
-Deployment_Node(cloud, "Cloud Infrastructure", "Hosted Service") {
-    Deployment_Node(matchbox_host, "Matchbox Server Host", "match.konnektoren.help") {
-        Container(matchbox_server, "Matchbox Signalling Server", "Rust/Axum", "WebRTC signalling only")
-    }
-}
-
-Rel(ws_client, matchbox_server, "WebSocket", "wss://match.konnektoren.help")
-Rel_Back(matchbox_server, ws_client, "Signalling messages")
-
-@enduml
-----
-
-**Key points**
-
-* The **client device** runs only a web browser – no local server needed.
-* The **Matchbox server** is hosted externally and handles only WebRTC signalling.
-* All game logic and state management happens in the **Yew SPA** (client-side).
-
-== 8. Data Flow – Admin Starts an Activity
-
-[plantuml, "admin-start-activity-sequence", png]
-----
-@startuml
-!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Sequence.puml
-
-title Admin Starts Activity – Sequence Diagram
-
-participant "Admin UI" as ui
-participant "LobbyCommandHandler" as handler
-participant "Lobby Aggregate" as lobby
-participant "P2P Sync Service" as p2p
-participant "Auth Service" as auth
-participant "Matchbox Socket" as socket
-participant "Peer Client" as peer
-
-ui -> handler: StartActivity(activityType)
-activate handler
-
-handler -> lobby: startActivity(activityType)
-activate lobby
-lobby --> handler: Activity created
-deactivate lobby
-
-handler -> p2p: broadcastUpdate(LobbyStateUpdate)
-activate p2p
-
-p2p -> auth: sign(LobbyStateUpdate)
-activate auth
-auth --> p2p: Signature
-deactivate auth
-
-p2p -> socket: send(P2PMessage)
-activate socket
-socket --> peer: WebRTC data channel
-deactivate socket
-
-peer -> peer: Verify signature
-peer -> peer: Apply state update
-peer -> peer: Re-render UI
-
-deactivate p2p
-handler --> ui: ACK
-deactivate handler
-
-@enduml
-----
-
-**Narrative**
-
-1. **Admin UI** triggers `StartActivity` command.
-2. **LobbyCommandHandler** updates the local **Lobby Aggregate**.
-3. The handler calls **P2P Sync Service** to broadcast the change.
-4. **Auth Service** signs the message with the admin's private key.
-5. The signed message is sent via **Matchbox Socket** to all connected peers.
-6. **Peer clients** verify the signature, apply the update, and re-render their UI.
-
-== 9. Admin Election & Reclaim Flow
-
-[plantuml, "admin-election-sequence", png]
-----
-@startuml
-!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Sequence.puml
-
-title Admin Election & Reclaim – Sequence Diagram
-
-participant "Peer 1" as p1
-participant "Peer 2" as p2
-participant "Peer 3" as p3
-participant "Original Admin" as admin
-
-note over p1,p3: Admin disconnects
-
-p1 -> p1: Detect admin disconnect
-p1 -> p2: AdminElection(candidateId, timestamp)
-p1 -> p3: AdminElection(candidateId, timestamp)
-
-p2 -> p2: Compare timestamps
-p2 -> p1: ACK (Peer 1 is oldest)
-
-p3 -> p3: Compare timestamps
-p3 -> p1: ACK (Peer 1 is oldest)
-
-p1 -> p1: Assume temporary admin role
-p1 -> p2: LobbyStateUpdate (signed by temp admin)
-p1 -> p3: LobbyStateUpdate (signed by temp admin)
-
-note over admin: Original admin reconnects
-
-admin -> p1: AdminClaimed(adminKey)
-admin -> p2: AdminClaimed(adminKey)
-admin -> p3: AdminClaimed(adminKey)
-
-p1 -> p1: Verify admin key
-p1 -> admin: ACK (Admin reclaimed)
-
-p2 -> p2: Verify admin key
-p2 -> admin: ACK (Admin reclaimed)
-
-p3 -> p3: Verify admin key
-p3 -> admin: ACK (Admin reclaimed)
-
-admin -> admin: Resume admin role
-admin -> p1: LobbyStateUpdate (signed by original admin)
-admin -> p2: LobbyStateUpdate (signed by original admin)
-admin -> p3: LobbyStateUpdate (signed by original admin)
-
-@enduml
-----
-
-**Narrative**
-
-1. When the **admin disconnects**, peers detect the loss of connection.
-2. Each peer broadcasts an `AdminElection` message with their connection timestamp.
-3. The peer with the **oldest timestamp** becomes the **temporary admin**.
-4. When the **original admin reconnects**, they broadcast an `AdminClaimed` message with their stored admin key.
-5. Peers **verify the admin key** and acknowledge the reclaim.
-6. The original admin **resumes control** and broadcasts authoritative updates.
+[... Container, Component, Deployment diagrams remain the same ...]
 
 == 10. Domain Model (DDD Perspective)
 
 === Bounded Contexts
 
-| Context | Responsibility |
-|---------|---------------|
-| **Session Management** | Core domain – manages `Lobby`, `Player`, `Activity` aggregates. |
-| **P2P Networking** | Handles WebRTC connections, message broadcasting, signature verification. |
-| **Authentication** | Manages private keys, admin keys, identity proofs. |
-| **Signalling** (External) | Matchbox server – only WebRTC handshake, no game state. |
+[cols="1,3", options="header"]
+|===
+|Context
+|Responsibility
+
+|**Session Management**
+|Core domain – manages `Lobby`, `Participant`, `Activity` aggregates with Host/Guest roles.
+
+|**P2P Networking**
+|Handles WebRTC connections, message broadcasting, signature verification.
+
+|**Authentication**
+|Manages private keys, identity proofs.
+
+|**Signalling** (External)
+|Matchbox server – only WebRTC handshake, no game state.
+|===
 
 === Core Entities & Aggregates
 
@@ -334,20 +104,22 @@ admin -> p3: LobbyStateUpdate (signed by original admin)
 @startuml
 !include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
 
-title Domain Model – Core Entities
+title Domain Model – Core Entities (Host/Guest Model)
 
-Component(lobby, "Lobby", "Aggregate Root", "id: UUID\nplayers: Vec<Player>\nactivities: Vec<Activity>\nadmin_key: AdminKey")
-Component(player, "Player", "Entity", "id: UUID\nrole: Role\npublic_key: PublicKey")
+Component(lobby, "Lobby", "Aggregate Root", "id: UUID\nparticipants: Vec<Participant>\nactivities: Vec<Activity>")
+Component(participant, "Participant", "Entity", "id: UUID\nlobby_role: LobbyRole\nparticipation_mode: ParticipationMode")
 Component(activity, "Activity", "Entity", "id: UUID\nstatus: ActivityStatus\ndata: T")
-Component(result, "ActivityResult", "Value Object", "activity_id: UUID\nplayer_id: UUID\nscore: u32")
+Component(result, "ActivityResult", "Value Object", "activity_id: UUID\nparticipant_id: UUID\nscore: u32")
 
-Component(role, "Role", "Enum", "Admin | Player | Observer")
+Component(lobby_role, "LobbyRole", "Enum", "Host | Guest")
+Component(participation_mode, "ParticipationMode", "Enum", "Active | Spectating")
 Component(status, "ActivityStatus", "Enum", "NotStarted | InProgress | Done")
 
-Rel(lobby, player, "contains")
+Rel(lobby, participant, "contains")
 Rel(lobby, activity, "contains")
 Rel(activity, result, "produces")
-Rel(player, role, "has")
+Rel(participant, lobby_role, "has")
+Rel(participant, participation_mode, "has")
 Rel(activity, status, "has")
 
 @enduml
@@ -355,7 +127,7 @@ Rel(activity, status, "has")
 
 === Key Domain Services
 
-* **LobbyCommandHandler** – Processes commands (`JoinLobby`, `StartActivity`, `KickPlayer`).
+* **LobbyCommandHandler** – Processes commands (`JoinLobby`, `StartActivity`, `KickGuest`, `DelegateHost`).
 * **P2P Sync Service** – Broadcasts state updates to all peers via Matchbox data channels.
 * **Auth Service** – Signs outgoing messages, verifies incoming signatures, manages keys.
 
@@ -367,16 +139,28 @@ Rel(activity, status, "has")
 |Definition
 
 |Lobby
-|Aggregate root representing a single game session.
+|Aggregate root representing a single game session with one host and multiple guests.
+
+|Host
+|The lobby organizer with management privileges (can kick guests, start activities, delegate role).
+
+|Guest
+|A regular participant in the lobby.
+
+|Active Mode
+|Participation mode where guest can submit activity results.
+
+|Spectating Mode
+|Participation mode where guest can only watch (cannot submit results).
+
+|Participation Mode
+|Whether a guest is actively playing (Active) or watching (Spectating).
+
+|Host Delegation
+|Transfer of host role from current host to a guest.
 
 |Activity
-|A concrete game/task that participants can join.
-
-|Player
-|Entity representing a participant with a role (Admin/Player/Observer).
-
-|Admin
-|The authoritative source of truth for the lobby state.
+|A concrete game/task that active participants can join.
 
 |Matchbox
 |External WebRTC signalling server (match.konnektoren.help).
@@ -384,17 +168,8 @@ Rel(activity, status, "has")
 |P2PMessage
 |Signed message envelope containing lobby updates.
 
-|PrivateKey
-|Ed25519 key generated by each client for identity.
-
-|AdminKey
-|Special key proving ownership of admin role.
-
-|Admin Election
-|Protocol for selecting a temporary admin when original admin disconnects.
-
-|Admin Reclaim
-|Process where original admin proves ownership and resumes control.
+|LobbyRole
+|Whether participant is Host or Guest.
 |===
 
 == 12. Architectural Decisions
@@ -407,17 +182,26 @@ Rel(activity, status, "has")
 |No game server
 |Reduces infrastructure costs, improves scalability, enables offline play.
 
-|Admin as source of truth
-|Simplifies state synchronization, avoids consensus protocols.
+|Host/Guest model
+|Intuitive natural language ("host invites guests"). Clear authority hierarchy.
+
+|Spectator mode
+|Flexible participation - guests can watch before playing, or take breaks without leaving.
+
+|Single host (v1.0)
+|Simplicity. Host can delegate but not share role. Avoids permission conflicts.
 
 |Cryptographic authentication
-|Enables persistent identity, admin reclaim, prevents impersonation.
+|Enables persistent identity, prevents impersonation.
 
 |Matchbox for signalling only
 |Delegates WebRTC complexity to proven library, keeps codebase focused.
 
 |Client-side state
 |Enables instant UI updates, reduces server load, supports offline mode.
+
+|Separation: LobbyRole vs ParticipationMode
+|Host/Guest is about authority, Active/Spectating is about participation. Independent concerns.
 |===
 
 == 13. Quality Attributes
@@ -428,10 +212,10 @@ Rel(activity, status, "has")
 |How it is addressed
 
 |Scalability
-|P2P architecture scales with number of players; signalling server is stateless.
+|P2P architecture scales with number of guests; signalling server is stateless.
 
 |Reliability
-|Admin election ensures lobby survives disconnections; admin reclaim restores authority.
+|Host delegation ensures lobby survives disconnections; oldest guest auto-promoted.
 
 |Security
 |All messages signed with Ed25519; verification mandatory before state changes.
@@ -441,21 +225,25 @@ Rel(activity, status, "has")
 
 |Testability
 |Pure domain logic, dependency injection, simulated P2P network for tests.
+
+|Flexibility
+|Spectator mode allows guests to watch/play dynamically without leaving lobby.
 |===
 
 == 14. Risks & Technical Debt
 
 * **Network partitions** – If peers can't reach each other via WebRTC, state may diverge. Mitigation: Implement reconnection logic with state reconciliation.
-* **Admin key loss** – If admin loses their key, they can't reclaim the role. Mitigation: Provide key export/backup UI.
-* **Malicious peers** – A peer could spam invalid messages. Mitigation: Rate limiting, signature verification, admin kick functionality.
+* **Host key loss** – If host loses their key, they can't reclaim the role. Mitigation: Provide key export/backup UI.
+* **Malicious peers** – A peer could spam invalid messages. Mitigation: Rate limiting, signature verification, host kick functionality.
 * **Browser compatibility** – WebRTC support varies. Mitigation: Test on major browsers, provide fallback messaging.
+* **Spectator gaming** – Guest toggles to Spectating to avoid hard questions. Mitigation: Forbid mode changes during active activity.
 
 == 15. Next Steps
 
-1. Implement **admin election protocol** in `src/p2p/election.rs`.
-2. Add **signature verification** in `src/auth/verify.rs`.
+1. Implement **host delegation protocol** in `src/domain/lobby.rs`.
+2. Add **participation mode transitions** in `src/domain/participant.rs`.
 3. Create **integration tests** for P2P sync scenarios.
-4. Build **key management UI** in Yew components.
+4. Build **spectator mode UI** in Yew components.
 5. Document **message format** and versioning strategy.
 6. Add **observability** – logging, metrics, error tracking.
 
@@ -466,7 +254,3 @@ Rel(activity, status, "has")
 * **C4 Model** – https://c4model.com/
 * **ARC42** – https://arc42.org/
 * **DDD** – _Domain-Driven Design_ by Eric Evans
-
----
-
-*This document is the authoritative design reference for Konnekt Session. Keep it synchronized with the codebase as the architecture evolves.*
