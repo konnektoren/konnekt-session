@@ -1,0 +1,272 @@
+= ADR-0018: Use Ratatui for Interactive CLI Development
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+The current CLI (xref:0016-use-clap-for-cli-tooling.adoc[ADR-0016]) uses basic terminal output with Clap for argument parsing. While functional for testing, it lacks **interactivity** for development workflows:
+
+* **Manual refresh** - must restart CLI to see state changes
+* **No real-time updates** - can't see events as they happen
+* **Poor debugging UX** - difficult to correlate events across multiple terminals
+* **No state inspection** - can't browse lobby state, participants, activities
+* **Limited testing** - hard to simulate complex multi-peer scenarios
+
+=== Requirements
+
+* **Real-time event display** - see events as they arrive from P2P
+* **Interactive navigation** - browse lobby state, participants, activity queue
+* **Split-pane views** - see multiple peers simultaneously
+* **Keyboard shortcuts** - quick actions (join, leave, start activity)
+* **Terminal-native** - runs in any terminal, no GUI dependencies
+* **Development-focused** - not for end users (Yew is the production UI)
+* **WASM-independent** - native-only tool
+
+=== Use Cases
+
+1. **Multi-peer debugging** - Run 3 CLI instances in split terminals, see synchronized state
+2. **Event stream inspection** - Watch events flow between host/guests in real-time
+3. **State validation** - Verify lobby state matches across peers after operations
+4. **Performance testing** - Monitor message latency, event processing time
+5. **Cucumber scenario prototyping** - Manually test scenarios before writing feature files
+
+=== Alternatives Considered
+
+==== Plain terminal output (current)
+
+[source,bash]
+----
+cargo run --bin konnekt-cli create --name Alice
+# Output: Lobby created: abc123
+# Static, no updates
+----
+
+* ✅ Simple implementation
+* ✅ Works everywhere
+* ❌ **No interactivity** - must restart for updates
+* ❌ **No real-time** - can't see events as they happen
+* ❌ **Poor multi-peer** - hard to correlate across terminals
+
+==== Cursive
+
+[source,rust]
+----
+use cursive::views::TextView;
+----
+
+* ✅ Mature TUI library
+* ✅ Rich widget set
+* ❌ **Callback-based** - harder async integration
+* ❌ **Less ergonomic** than immediate mode
+* ❌ **Heavier** - more dependencies
+
+==== Crossterm + manual rendering
+
+[source,rust]
+----
+use crossterm::{terminal, cursor};
+----
+
+* ✅ Full control
+* ✅ Lightweight
+* ❌ **Manual everything** - re-implementing TUI primitives
+* ❌ **Complex** - state management, rendering, input handling
+* ❌ **Maintenance burden**
+
+== Decision
+
+We will use **Ratatui** (successor to tui-rs) to build an interactive terminal UI for development and debugging.
+
+=== Dependencies
+
+[source,toml]
+----
+[dependencies]
+ratatui = "0.28"
+crossterm = "0.28"
+
+[dev-dependencies]
+# Already have tokio for async
+----
+
+=== Architecture
+
+**App State**:
+
+[source,rust]
+----
+struct CliApp {
+    lobby: Option<Lobby>,
+    event_log: VecDeque<LobbyEvent>,
+    mode: AppMode,
+    selected_tab: Tab,
+}
+
+enum AppMode {
+    Lobby,        // View lobby state
+    Events,       // Event stream
+    Participants, // Participant list
+    Activities,   // Activity queue
+}
+----
+
+**Event Loop**:
+
+[source,rust]
+----
+async fn run_app() -> Result<()> {
+    let mut terminal = setup_terminal()?;
+    let mut app = CliApp::new();
+
+    loop {
+        terminal.draw(|f| ui(f, &app))?;
+
+        tokio::select! {
+            Some(event) = p2p_rx.recv() => {
+                app.handle_p2p_event(event);
+            }
+            Some(key) = input_rx.recv() => {
+                if !app.handle_input(key) {
+                    break; // Quit
+                }
+            }
+        }
+    }
+
+    restore_terminal()?;
+    Ok(())
+}
+----
+
+**Rendering**:
+
+[source,rust]
+----
+fn ui(f: &mut Frame, app: &CliApp) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),  // Header
+            Constraint::Min(0),     // Main content
+            Constraint::Length(1),  // Status bar
+        ])
+        .split(f.area());
+
+    render_header(f, chunks[0], app);
+    render_main(f, chunks[1], app);
+    render_status(f, chunks[2], app);
+}
+----
+
+=== Rationale
+
+==== Immediate-Mode Rendering
+
+[source,rust]
+----
+// Ratatui - immediate mode (like imgui)
+terminal.draw(|f| {
+    let text = Paragraph::new(format!("Events: {}", count));
+    f.render_widget(text, area);
+});
+// State lives in app, rendering is pure function
+----
+
+vs Cursive (retained mode):
+
+[source,rust]
+----
+// Must manage widget tree, callbacks
+siv.add_layer(Dialog::around(TextView::new("Events")));
+----
+
+==== Async-Friendly
+
+[source,rust]
+----
+// Easy to integrate with tokio::select!
+tokio::select! {
+    event = p2p.next() => handle_p2p(event),
+    key = terminal.next() => handle_input(key),
+}
+----
+
+==== Mature Ecosystem
+
+* **Successor to tui-rs** - widely used (gitui, spotify-tui, kdash)
+* **Active maintenance** - regular releases
+* **Good documentation** - examples for common patterns
+
+==== Terminal Independence
+
+* Works in **any terminal** (iTerm, Alacritty, Windows Terminal)
+* **No GUI runtime** - pure terminal escape codes
+* **Remote-friendly** - works over SSH
+
+==== Lightweight
+
+* ~50KB binary size increase
+* **Minimal dependencies** - just crossterm + unicode helpers
+* **No unsafe code**
+
+== Consequences
+
+=== Positive
+
+* ✅ **Real-time debugging** - see state changes as they happen
+* ✅ **Multi-peer visibility** - split terminal shows all peers simultaneously
+* ✅ **Interactive exploration** - navigate state without restarting
+* ✅ **Better testing** - manually trigger scenarios before writing tests
+* ✅ **Performance monitoring** - display event latency, throughput
+* ✅ **Development velocity** - faster iteration than full Yew app
+* ✅ **Terminal-native** - no browser overhead
+
+=== Negative
+
+* ❌ **More complex** than plain `println!` - state management, rendering
+* ❌ **Binary size** - adds ~50KB (acceptable for dev tool)
+* ❌ **Terminal-only** - not accessible to non-technical users
+* ❌ **Not production** - Yew is still the end-user UI
+
+=== Neutral
+
+* **ASCII-only** - no fancy graphics (terminal limitation)
+* **Learning curve** - team must learn Ratatui patterns
+* **Dev tool** - not shipped to end users
+
+== Implementation Checklist
+
+- [ ] Add `ratatui` and `crossterm` dependencies
+- [ ] Create `src/bin/konnekt-tui.rs`
+- [ ] Implement basic app state and event loop
+- [ ] Add tab navigation (Lobby, Events, Participants, Activities)
+- [ ] Implement event log view with scrolling
+- [ ] Add lobby state inspector
+- [ ] Add participant list with role/mode display
+- [ ] Add activity queue view
+- [ ] Implement keyboard shortcuts (j/k scroll, q quit, tab switch)
+- [ ] Test with multiple instances (host + 2 guests)
+- [ ] Document in `README.md` (developer tool section)
+
+== References
+
+=== Libraries
+
+* **Ratatui** – https://ratatui.rs/
+* **Crossterm** – https://docs.rs/crossterm/
+* **Ratatui Book** – https://ratatui.rs/introduction/
+
+=== Examples
+
+* **gitui** – Git TUI using Ratatui
+* **kdash** – Kubernetes TUI
+* **spotify-tui** – Spotify terminal client
+
+=== Related ADRs
+
+* xref:0016-use-clap-for-cli-tooling.adoc[ADR-0016] – Basic CLI foundation
+* xref:0005-use-tracing-for-logging-and-diagnostics.adoc[ADR-0005] – Event logging in TUI
+* xref:0010-use-event-sourcing-for-lobby-state.adoc[ADR-0010] – Event stream displayed in TUI
+* xref:0007-use-cucumber-for-behavior-driven-testing.adoc[ADR-0007] – TUI helps prototype scenarios
