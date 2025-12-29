@@ -70,6 +70,16 @@ Each ADR in this directory follows the **Michael Nygard format**:
 |Use Tracing for Logging and Diagnostics
 |✅ Accepted
 |2025-12-29
+
+|xref:0006-use-workspace-structure-for-modular-architecture.adoc[ADR-0006]
+|Use Cargo Workspace for Modular Architecture
+|✅ Accepted
+|2025-12-29
+
+|xref:0007-use-cucumber-for-behavior-driven-testing.adoc[ADR-0007]
+|Use Cucumber for Behavior-Driven Testing
+|✅ Accepted
+|2025-12-29
 |===
 
 == Guidelines for Writing ADRs

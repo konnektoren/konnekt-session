@@ -1,0 +1,304 @@
+= ADR-0006: Use Cargo Workspace for Modular Architecture
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+The current `konnekt-session` crate has grown into a **monolithic structure** with multiple concerns mixed together:
+
+* **Domain logic** (Lobby, Participant, Activity aggregates)
+* **Yew UI components** (frontend)
+* **P2P networking** (WebRTC via Matchbox)
+* **Server infrastructure** (signaling server)
+* **Feature flags explosion** - complex dependency tree based on features
+
+=== Current Problems
+
+* **Tight coupling** - domain logic mixed with UI and infrastructure
+* **Large compile times** - changing domain logic rebuilds entire Yew app
+* **Unclear boundaries** - hard to enforce DDD layer separation
+* **Feature flag complexity** - `default = ["yew", "websocket", "webrtc", "matchbox"]`
+* **Testing difficulties** - E2E tests live alongside unit tests
+* **Reusability limited** - can't use core logic without pulling in Yew
+
+=== Requirements
+
+* **Clear DDD boundaries** - separate domain, application, infrastructure
+* **Independent compilation** - change UI without rebuilding core
+* **Flexible deployment** - use core library in different frontends (Yew, Leptos, native)
+* **Test isolation** - E2E/BDD tests separate from unit tests
+* **Migration path** - preserve existing code during transition
+* **Smaller WASM bundles** - only include what's needed
+
+=== Alternatives Considered
+
+==== Single Crate with Features (Current)
+* ✅ Simple structure
+* ✅ Easy to navigate
+* ❌ **Tight coupling** - everything depends on everything
+* ❌ **Feature explosion** - combinatorial complexity
+* ❌ **Long compile times** - all-or-nothing rebuilds
+
+==== Workspace with Fine-Grained Crates
+```
+konnekt-session-domain/
+konnekt-session-application/
+konnekt-session-infrastructure-p2p/
+konnekt-session-infrastructure-storage/
+konnekt-session-ui-yew/
+...
+```
+* ✅ **Perfect layer isolation**
+* ✅ **Maximum reusability**
+* ❌ **Too granular** - navigation overhead
+* ❌ **Dependency graph complexity**
+* ❌ Over-engineering for current scope
+
+==== Monorepo with Multiple Independent Projects
+* ✅ Complete independence
+* ❌ **Code duplication**
+* ❌ **Version synchronization issues**
+* ❌ Doesn't fit "single library" vision
+
+== Decision
+
+We will use a **Cargo workspace** with **4-5 focused crates** following DDD layers:
+
+```
+konnekt-session/
+├── Cargo.toml                      # Workspace root
+├── crates/
+│   ├── konnekt-session-core/       # Domain + Application (pure Rust)
+│   ├── konnekt-session-yew/        # Yew UI + WASM glue
+│   ├── konnekt-session-p2p/        # P2P infrastructure (Matchbox, WebRTC)
+│   ├── konnekt-session/            # DEPRECATED - old monolith
+│   └── konnekt-session-tests/      # E2E, BDD, integration tests
+├── examples/                       # Demo apps
+└── docs/                           # Documentation (incl. ADRs)
+```
+
+=== Crate Responsibilities
+
+==== `konnekt-session-core`
+**Pure domain + application logic**
+
+* Domain entities: `Lobby`, `Participant`, `Activity`
+* Value objects: `LobbyId`, `ParticipantId`, `ActivityStatus`
+* Domain services: `LobbyCommandHandler`, `HostDelegationService`
+* Application services: Commands, Queries, Events
+* **Zero web dependencies** - can run in native/server contexts
+* **Fast compilation** - minimal dependencies
+
+==== `konnekt-session-yew`
+**Yew frontend framework**
+
+* UI components: `LobbyView`, `ParticipantList`, `ActivityPanel`
+* Hooks: `use_lobby_connection`, `use_participant_state`
+* WASM bindings and browser APIs
+* Depends on: `konnekt-session-core`, `konnekt-session-p2p`
+
+==== `konnekt-session-p2p`
+**P2P networking infrastructure**
+
+* Matchbox WebRTC integration
+* Message serialization/deserialization
+* Signature verification (Ed25519)
+* Connection state management
+* Depends on: `konnekt-session-core`
+
+==== `konnekt-session` (DEPRECATED)
+**Legacy monolith - to be deleted**
+
+* Kept during migration for reference
+* Not published to crates.io
+* Removed when migration complete
+
+==== `konnekt-session-tests`
+**End-to-end and BDD tests**
+
+* Cucumber/Gherkin scenarios
+* Multi-peer integration tests
+* Browser automation (wasm-pack test)
+* Performance benchmarks
+* Depends on: all other crates
+
+=== Workspace Configuration
+
+Root `Cargo.toml`:
+```toml
+[workspace]
+members = [
+    "crates/konnekt-session-core",
+    "crates/konnekt-session-yew",
+    "crates/konnekt-session-p2p",
+    "crates/konnekt-session-tests",
+]
+
+[workspace.package]
+version = "0.4.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# Shared versions across workspace
+serde = { version = "1.0", features = ["derive"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+tracing = "0.1"
+```
+
+=== Rationale
+
+==== Why Not "matchbox" in Crate Name?
+
+**Original consideration**: `konnekt-session-matchbox`
+
+**Problem**: Coupling implementation to specific library
+
+* ✅ If we switch from Matchbox to custom WebRTC, crate name is misleading
+* ✅ "p2p" describes **what it does**, not **how** (implementation detail)
+* ✅ Future-proof for alternative P2P transports (libp2p, QUIC, etc.)
+
+**Decision**: `konnekt-session-p2p` - describes capability, not implementation
+
+==== Layer Boundaries
+
+Dependency flow (following DDD):
+```
+┌─────────────────────────┐
+│  konnekt-session-yew    │  (Presentation)
+└───────────┬─────────────┘
+            │
+            v
+┌─────────────────────────┐
+│  konnekt-session-p2p    │  (Infrastructure)
+└───────────┬─────────────┘
+            │
+            v
+┌─────────────────────────┐
+│  konnekt-session-core   │  (Domain + Application)
+└─────────────────────────┘
+```
+
+**Core never depends on infrastructure or UI** - ensures domain purity.
+
+==== Compilation Independence
+
+* Change UI component → only rebuild `yew` crate
+* Change P2P logic → rebuild `p2p` + `yew` (not `core`)
+* Change domain → rebuild everything (expected)
+
+==== WASM Bundle Optimization
+
+Users can exclude unused crates:
+```toml
+# Minimal WASM app - no Yew
+[dependencies]
+konnekt-session-core = "0.4"
+konnekt-session-p2p = "0.4"
+
+# Full Yew app
+[dependencies]
+konnekt-session-yew = "0.4"  # Includes core + p2p transitively
+```
+
+== Consequences
+
+=== Positive
+
+* **Clear boundaries** enforced by crate separation
+* **Faster incremental builds** - only rebuild what changed
+* **Reusable core** - use domain logic in different frontends
+* **Testability** - core can be tested without WASM/browser
+* **Smaller bundles** - exclude unused crates
+* **Migration safety** - old crate preserved during transition
+* **Future flexibility** - can add `konnekt-session-native` for desktop apps
+
+=== Negative
+
+* **More `Cargo.toml` files** to maintain
+* **Version synchronization** across workspace
+* **Path dependencies** during development
+* **Initial migration effort** - move code between crates
+* **Documentation split** across crates
+
+=== Neutral
+
+* **More crates to publish** (but automation handles this)
+* **Dependency graph** more explicit (good for understanding)
+
+=== Migration Strategy
+
+==== Phase 1: Create Empty Workspace (Week 1)
+- [ ] Create workspace `Cargo.toml`
+- [ ] Create `crates/konnekt-session-core/` with skeleton
+- [ ] Create `crates/konnekt-session-yew/` with skeleton
+- [ ] Create `crates/konnekt-session-p2p/` with skeleton
+- [ ] Rename current crate to `crates/konnekt-session/` (deprecated)
+
+==== Phase 2: Extract Domain Layer (Week 2)
+- [ ] Move `src/domain/` → `konnekt-session-core/src/domain/`
+- [ ] Move pure application logic → `konnekt-session-core/src/application/`
+- [ ] Remove web dependencies from core
+- [ ] Add core unit tests
+
+==== Phase 3: Extract Infrastructure (Week 3)
+- [ ] Move Matchbox integration → `konnekt-session-p2p/src/`
+- [ ] Move signature verification → `konnekt-session-p2p/src/`
+- [ ] Add p2p integration tests
+
+==== Phase 4: Extract UI (Week 4)
+- [ ] Move Yew components → `konnekt-session-yew/src/components/`
+- [ ] Move hooks → `konnekt-session-yew/src/hooks/`
+- [ ] Update example app to use new crates
+
+==== Phase 5: Testing & Cleanup (Week 5)
+- [ ] Create `konnekt-session-tests/` with Cucumber scenarios
+- [ ] Verify all tests pass with new structure
+- [ ] Update documentation
+- [ ] Delete `crates/konnekt-session/` (old code)
+- [ ] Publish 0.4.0 with new workspace structure
+
+=== Publishing Strategy
+
+All crates versioned together:
+```bash
+# Publish all at once
+cargo workspaces publish --from-git
+```
+
+Users can depend on individual crates or umbrella:
+```toml
+# Option 1: Individual crates
+konnekt-session-core = "0.4"
+
+# Option 2: Full stack (re-export crate)
+konnekt-session-yew = "0.4"
+```
+
+=== Documentation Structure
+
+Each crate has its own `README.md`:
+```
+crates/konnekt-session-core/README.md    → Domain/app docs
+crates/konnekt-session-yew/README.md     → Yew component docs
+crates/konnekt-session-p2p/README.md     → P2P setup docs
+```
+
+Root `README.md` provides overview and points to specific crates.
+
+== References
+
+=== Rust Workspace Documentation
+* **Cargo Book - Workspaces** – https://doc.rust-lang.org/cargo/reference/workspaces.html
+* **cargo-workspaces** – https://github.com/pksunkara/cargo-workspaces
+
+=== Similar Projects
+* **Bevy Engine** – Multi-crate workspace (bevy_core, bevy_render, etc.)
+* **Tokio** – Modular workspace (tokio, tokio-util, tokio-stream)
+* **Actix Web** – Layered workspace (actix-rt, actix-web, actix-files)
+
+=== Related ADRs
+* xref:0001-use-rust-for-implementation.adoc[ADR-0001] – Workspace enables better Rust module structure
+* xref:../06-organise.adoc[DDD: Organise] – Workspace maps to DDD layers

@@ -1,0 +1,551 @@
+= ADR-0007: Use Cucumber for Behavior-Driven Testing
+
+**Status**: Accepted +
+**Date**: 2025-12-29 +
+**Deciders**: Core Team
+
+== Context
+
+Konnekt Session follows **Domain-Driven Design (DDD)** principles, with extensive documentation of:
+
+* **Domain events** from Event Storming (xref:../02-discover.adoc[Discover])
+* **User scenarios** and acceptance criteria (xref:../01-understand.adoc[Understand])
+* **Bounded contexts** and aggregates (xref:../03-decompose.adoc[Decompose])
+* **Core domain investment** strategy (xref:../04-strategize.adoc[Strategize])
+
+=== Testing Challenges
+
+* **Gap between docs and code** - requirements in AsciiDoc, tests in Rust
+* **Domain knowledge scattered** - hard to trace feature → event → test
+* **Non-technical stakeholders** - can't verify behavior from unit tests
+* **Regression risk** - refactoring might break domain logic silently
+* **P2P complexity** - multi-peer scenarios hard to express in unit tests
+
+=== Requirements
+
+* **Executable specifications** - tests are living documentation
+* **Ubiquitous language** - tests use domain terminology (Host, Guest, Activity)
+* **Traceability** - map tests to domain events and user stories
+* **Readable by non-developers** - product owners can validate scenarios
+* **P2P scenario support** - express multi-participant interactions naturally
+* **WASM compatibility** - must run in browser environment
+
+=== Example Scenario
+
+From Event Storming (xref:../02-discover.adoc[Discover]):
+
+```
+Event: "Participant Joined Lobby"
+Trigger: Guest clicks "Join" button
+Command: JoinLobbyCommand
+Aggregate: Lobby
+Validation: Lobby not full, unique name
+```
+
+**Current problem**: This is documented separately from tests. If we change validation logic, docs might become stale.
+
+=== Alternatives Considered
+
+==== Unit Tests Only (Current Approach)
+```rust
+#[test]
+fn test_join_lobby_success() {
+    let mut lobby = Lobby::new();
+    let participant = Participant::guest("Alice");
+    assert!(lobby.add_participant(participant).is_ok());
+}
+```
+
+* ✅ **Fast** execution
+* ✅ **Precise** assertions
+* ✅ **Good for edge cases**
+* ❌ **No domain language** - "add_participant" not in ubiquitous language
+* ❌ **Technical focus** - tests internal methods, not user behavior
+* ❌ **Not readable** by stakeholders
+* ❌ **Hard to trace** to requirements
+
+==== Property-Based Testing (proptest/quickcheck)
+```rust
+proptest! {
+    fn lobby_capacity_never_exceeded(participants in vec(any::<Participant>(), 0..100)) {
+        let mut lobby = Lobby::new();
+        for p in participants {
+            let _ = lobby.add_participant(p);
+        }
+        assert!(lobby.participants.len() <= MAX_CAPACITY);
+    }
+}
+```
+
+* ✅ **Finds edge cases**
+* ✅ **Tests invariants**
+* ❌ **Not scenario-driven** - tests properties, not workflows
+* ❌ **Complex to write**
+* ❌ **No traceability** to domain events
+
+==== Integration Tests (wasm-pack test)
+```rust
+#[wasm_bindgen_test]
+async fn test_multi_peer_join() {
+    let host = create_peer("Host").await;
+    let guest = create_peer("Guest").await;
+    // ...
+}
+```
+
+* ✅ **Real WASM environment**
+* ✅ **Full stack testing**
+* ❌ **Still code-focused** - not readable by non-developers
+* ❌ **No standard format** - hard to extract scenarios
+* ❌ **Setup boilerplate** - obscures intent
+
+==== Specification by Example (Manual)
+Write scenarios in AsciiDoc, implement tests separately:
+
+```adoc
+Scenario: Guest joins active lobby
+Given: Lobby exists with Host
+When: Guest "Alice" joins
+Then: Lobby contains 2 participants
+```
+
+* ✅ **Readable documentation**
+* ✅ **Domain language**
+* ❌ **Not executable** - manual sync with code
+* ❌ **Drift risk** - docs and tests diverge
+* ❌ **Duplication** - scenarios written twice
+
+== Decision
+
+We will use **Cucumber** (via `cucumber-rs`) for **behavior-driven testing** with **Gherkin syntax** to create executable specifications.
+
+=== Core Dependencies
+
+```toml
+[dependencies]
+cucumber = "0.21"
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+=== Gherkin Feature Files
+
+Features live in `crates/konnekt-session-tests/features/`:
+
+```gherkin
+# features/lobby/join_lobby.feature
+Feature: Join Lobby
+  As a Guest
+  I want to join an existing lobby
+  So that I can participate in activities
+
+  Background:
+    Given a lobby exists with Host "Bob"
+
+  Scenario: Guest joins with unique name
+    When Guest "Alice" joins the lobby
+    Then the lobby should contain 2 participants
+    And "Alice" should be a Guest
+    And "Alice" should be in Active mode
+
+  Scenario: Guest cannot join with duplicate name
+    Given Guest "Alice" has joined the lobby
+    When Guest "Alice" joins the lobby
+    Then the join should be rejected
+    And the error should be "Name already taken"
+
+  Scenario: Guest cannot join full lobby
+    Given the lobby has 10 participants
+    When Guest "Charlie" joins the lobby
+    Then the join should be rejected
+    And the error should be "Lobby is full"
+
+  Scenario: Multiple guests join simultaneously
+    When the following guests join concurrently:
+      | Name    |
+      | Alice   |
+      | Bob     |
+      | Charlie |
+    Then the lobby should contain 4 participants
+    And all participants should have unique names
+```
+
+=== Step Definitions
+
+```rust
+// tests/steps/lobby_steps.rs
+use cucumber::{given, when, then, World};
+use konnekt_session_core::domain::{Lobby, Participant};
+
+#[derive(Debug, World)]
+struct LobbyWorld {
+    lobby: Option<Lobby>,
+    last_result: Option<Result<(), String>>,
+}
+
+#[given(expr = "a lobby exists with Host {string}")]
+async fn lobby_exists(world: &mut LobbyWorld, host_name: String) {
+    let host = Participant::host(host_name);
+    world.lobby = Some(Lobby::new(host));
+}
+
+#[when(expr = "Guest {string} joins the lobby")]
+async fn guest_joins(world: &mut LobbyWorld, name: String) {
+    let guest = Participant::guest(name);
+    let result = world.lobby
+        .as_mut()
+        .unwrap()
+        .add_participant(guest);
+
+    world.last_result = Some(result.map_err(|e| e.to_string()));
+}
+
+#[then(expr = "the lobby should contain {int} participant(s)")]
+async fn lobby_contains_participants(world: &mut LobbyWorld, count: usize) {
+    assert_eq!(world.lobby.as_ref().unwrap().participants.len(), count);
+}
+
+#[then(expr = "{string} should be a Guest")]
+async fn participant_is_guest(world: &mut LobbyWorld, name: String) {
+    let participant = world.lobby
+        .as_ref()
+        .unwrap()
+        .find_participant_by_name(&name)
+        .unwrap();
+
+    assert!(matches!(participant.role, LobbyRole::Guest));
+}
+```
+
+=== Rationale
+
+==== Traceability to Domain Events
+
+**Event Storming → Gherkin Feature**
+
+From Event Storming (xref:../02-discover.adoc[Discover]):
+```
+Domain Event: "Activity Started"
+Command: StartActivityCommand
+Actor: Host
+Precondition: At least one Active participant
+```
+
+Maps directly to:
+```gherkin
+Scenario: Host starts activity with active participants
+  Given a lobby with Host "Alice"
+  And Guest "Bob" in Active mode
+  When Host "Alice" starts activity "Quiz #1"
+  Then the activity status should be "InProgress"
+  And event "ActivityStarted" should be published
+```
+
+**One-to-one mapping** between domain events and test scenarios.
+
+==== Ubiquitous Language
+
+Tests use exact domain terminology:
+* ✅ "Guest" not "user" or "participant"
+* ✅ "Active mode" not "enabled" or "participating"
+* ✅ "Host delegates" not "transfer admin"
+* ✅ "Activity" not "game" or "task"
+
+This enforces consistency across docs, code, and tests.
+
+==== Living Documentation
+
+Features are **executable specs**:
+```bash
+cargo test --package konnekt-session-tests
+
+Feature: Join Lobby
+  ✓ Guest joins with unique name
+  ✓ Guest cannot join with duplicate name
+  ✓ Guest cannot join full lobby
+  ✓ Multiple guests join simultaneously
+```
+
+Stakeholders can read features and verify behavior without understanding Rust.
+
+==== P2P Scenario Expression
+
+Gherkin naturally expresses multi-peer interactions:
+
+```gherkin
+Scenario: Host delegation during disconnection
+  Given a lobby with Host "Alice"
+  And Guest "Bob" joined 5 seconds ago
+  And Guest "Charlie" joined 2 seconds ago
+  When Host "Alice" disconnects
+  And 30 seconds pass
+  Then "Bob" should become the new Host
+  And event "HostDelegated" should be published
+```
+
+This is **much clearer** than equivalent imperative test code.
+
+==== Tag-Based Organization
+
+```gherkin
+@core-domain @aggregate-lobby
+Feature: Join Lobby
+  ...
+
+@infrastructure @p2p
+Feature: WebRTC Connection
+  ...
+
+@slow @e2e
+Feature: Multi-Browser Session
+  ...
+```
+
+Run specific test suites:
+```bash
+cargo test -- --tags @core-domain
+cargo test -- --tags "not @slow"
+```
+
+=== Why Cucumber Specifically?
+
+==== vs. Plain Text Scenarios
+* ✅ **Standard syntax** (Gherkin) - portable, tool support
+* ✅ **Step reusability** - DRY across features
+* ✅ **IDE support** - IntelliJ/VSCode plugins
+
+==== vs. Custom Test DSL
+* ✅ **Industry standard** - well-known format
+* ✅ **Tooling ecosystem** - reporters, formatters, CI integrations
+* ✅ **No maintenance** - don't build our own parser
+
+==== vs. Concordion/FitNesse
+* ✅ **Rust-native** - no JVM dependency
+* ✅ **Modern syntax** - Gherkin more readable than HTML tables
+* ✅ **Better IDE integration**
+
+== Consequences
+
+=== Positive
+
+* **Requirements are tests** - features execute and validate behavior
+* **Stakeholder verification** - PMs can read and approve scenarios
+* **Regression protection** - refactoring breaks tests if behavior changes
+* **Domain event traceability** - direct mapping from Event Storming
+* **Onboarding tool** - new developers read features to understand domain
+* **Multi-peer scenarios** - natural expression of P2P interactions
+* **Documentation never stale** - tests fail if behavior diverges from specs
+
+=== Negative
+
+* **Additional test layer** - unit tests still needed for edge cases
+* **Setup complexity** - step definitions require boilerplate
+* **Slower than unit tests** - feature tests are integration-level
+* **Learning curve** - team must learn Gherkin syntax
+* **Potential duplication** - some scenarios might overlap with integration tests
+
+=== Neutral
+
+* **Not a replacement** for unit/integration tests - complementary
+* **Requires discipline** - teams must keep features updated
+* **Natural language ambiguity** - need clear step definition conventions
+
+=== Test Pyramid with Cucumber
+
+```
+         ╱╲
+        ╱E2E╲          ← Browser automation (few, slow)
+       ╱──────╲
+      ╱Cucumber╲       ← BDD scenarios (moderate, medium)
+     ╱──────────╲
+    ╱Integration╲      ← Multi-crate tests (more, faster)
+   ╱──────────────╲
+  ╱   Unit Tests   ╲   ← Domain logic (many, very fast)
+ ╱──────────────────╲
+```
+
+Cucumber sits **between integration and E2E** - validates domain behavior without full browser overhead.
+
+=== Feature Organization
+
+```
+features/
+├── lobby/
+│   ├── create_lobby.feature
+│   ├── join_lobby.feature
+│   └── host_delegation.feature
+├── participant/
+│   ├── active_mode.feature
+│   ├── spectator_mode.feature
+│   └── kick_participant.feature
+├── activity/
+│   ├── start_activity.feature
+│   ├── submit_result.feature
+│   └── complete_activity.feature
+└── p2p/
+    ├── connection.feature
+    ├── reconnection.feature
+    └── state_sync.feature
+```
+
+**Maps directly** to bounded contexts and aggregates from DDD decomposition.
+
+=== Mapping to Event Storming
+
+Each feature references originating domain event:
+
+```gherkin
+# features/lobby/join_lobby.feature
+# Domain Event: ParticipantJoinedLobby
+# Command: JoinLobbyCommand
+# Reference: docs/02-discover.adoc#participant-joined-lobby
+
+Feature: Join Lobby
+  ...
+```
+
+Provides **bidirectional traceability**:
+* Docs → Feature → Test
+* Test failure → Feature → Domain Event → Business requirement
+
+=== CI/CD Integration
+
+```yaml
+# .github/workflows/test.yml
+- name: Run BDD Tests
+  run: |
+    cargo test --package konnekt-session-tests
+
+- name: Generate Cucumber Report
+  run: |
+    cargo test --package konnekt-session-tests -- \
+      --format json > cucumber-report.json
+
+- name: Upload Report
+  uses: actions/upload-artifact@v2
+  with:
+    name: cucumber-report
+    path: cucumber-report.json
+```
+
+=== Example: Complete Feature
+
+```gherkin
+# features/activity/start_activity.feature
+@core-domain @aggregate-activity
+Feature: Start Activity
+  As a Host
+  I want to start an activity
+  So that active participants can begin playing
+
+  Rule: Only Host can start activities
+
+    Scenario: Host starts activity
+      Given a lobby with Host "Alice"
+      And Guest "Bob" in Active mode
+      When Host "Alice" starts activity "Quiz #1"
+      Then activity "Quiz #1" status should be "InProgress"
+      And event "ActivityStarted" should be published
+      And "Bob" should be notified
+
+    Scenario: Guest cannot start activity
+      Given a lobby with Host "Alice"
+      And Guest "Bob" in Active mode
+      When Guest "Bob" attempts to start activity "Quiz #1"
+      Then the command should be rejected
+      And the error should be "Only host can start activities"
+
+  Rule: Cannot start if no active participants
+
+    Scenario: Start fails with only spectators
+      Given a lobby with Host "Alice"
+      And Guest "Bob" in Spectating mode
+      When Host "Alice" starts activity "Quiz #1"
+      Then the command should be rejected
+      And the error should be "No active participants"
+
+    Scenario: Start succeeds with at least one active participant
+      Given a lobby with Host "Alice"
+      And Guest "Bob" in Spectating mode
+      And Guest "Charlie" in Active mode
+      When Host "Alice" starts activity "Quiz #1"
+      Then activity "Quiz #1" status should be "InProgress"
+      And only "Alice" and "Charlie" should be participants
+```
+
+=== Implementation Checklist
+
+==== Phase 1: Setup (Week 1)
+- [ ] Add `cucumber-rs` to `konnekt-session-tests/Cargo.toml`
+- [ ] Create `features/` directory structure
+- [ ] Write first feature (`create_lobby.feature`)
+- [ ] Implement basic step definitions
+- [ ] Configure CI to run Cucumber tests
+
+==== Phase 2: Core Domain (Week 2-3)
+- [ ] Map all Event Storming events to features
+- [ ] Write features for Lobby aggregate
+- [ ] Write features for Participant aggregate
+- [ ] Write features for Activity aggregate
+- [ ] Cross-reference with xref:../02-discover.adoc[Discover]
+
+==== Phase 3: Infrastructure (Week 4)
+- [ ] Write P2P connection scenarios
+- [ ] Write signature verification scenarios
+- [ ] Write reconnection scenarios
+
+==== Phase 4: E2E (Week 5)
+- [ ] Add browser automation (wasm-pack test)
+- [ ] Multi-browser scenarios
+- [ ] Performance/load scenarios
+
+=== Documentation Cross-References
+
+Each feature file includes links:
+
+```gherkin
+# features/lobby/host_delegation.feature
+# Business Requirement: docs/01-understand.adoc#host-delegation
+# Domain Event: docs/02-discover.adoc#host-delegated
+# ADR: docs/adr/0001-use-rust-for-implementation.adoc
+
+Feature: Host Delegation
+  ...
+```
+
+This creates **full traceability chain**:
+```
+Business Need → Domain Event → Feature → Test → Code
+```
+
+=== Future Enhancements
+
+* **Cucumber HTML Reports** - visual test results for stakeholders
+* **Test Data Builders** - fluent API for complex setups
+* **Screenshot on Failure** - browser automation captures
+* **Performance Assertions** - `Then operation completes in <100ms`
+* **Accessibility Testing** - `Then page should be WCAG AA compliant`
+
+== References
+
+=== Cucumber & BDD
+
+* **Cucumber Documentation** – https://cucumber.io/docs/guides/overview/
+* **cucumber-rs** – https://github.com/cucumber-rs/cucumber
+* **Gherkin Reference** – https://cucumber.io/docs/gherkin/reference/
+* **BDD in Action** – John Ferguson Smart (book)
+
+=== DDD & Testing
+
+* **Specification by Example** – Gojko Adzic (book)
+* **Event Storming** – Alberto Brandolini
+* **DDD Testing Strategies** – https://www.domainlanguage.com/
+
+=== Related ADRs
+
+* xref:0001-use-rust-for-implementation.adoc[ADR-0001] – Rust supports cucumber-rs natively
+* xref:0006-use-workspace-structure-for-modular-architecture.adoc[ADR-0006] – Dedicated tests crate for Cucumber
+* xref:../02-discover.adoc[DDD: Discover] – Event Storming defines scenarios
+* xref:../04-strategize.adoc[DDD: Strategize] – Core domain prioritization guides test coverage
