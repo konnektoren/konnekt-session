@@ -2,8 +2,8 @@
 resolver = "2"
 
 members = [
-    #"crates/konnekt-session-tests",
-    "crates/konnekt-session", "konnekt-session-tests",  # Legacy - to be deprecated
+    "konnekt-session-tests",
+    "konnekt-session",  # Legacy - to be deprecated
 ]
 
 # Shared workspace metadata

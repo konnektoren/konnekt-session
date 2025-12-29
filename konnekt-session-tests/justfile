@@ -1,0 +1,37 @@
+# konnekt-session/konnekt-session-tests/justfile
+
+# Default recipe
+default:
+    @just --list
+
+# Run all tests (pretty output)
+test:
+    cargo test -p konnekt-session-tests
+
+# Run tests with JSON output
+test-json:
+    cargo test -p konnekt-session-tests --features output-json
+    @echo "✓ JSON report: cucumber-report.json"
+
+# Run tests with JUnit XML output
+test-junit:
+    cargo test -p konnekt-session-tests --features output-junit
+    @echo "✓ JUnit report: junit-report.xml"
+
+# List all scenarios
+list-scenarios:
+    @grep -r "Scenario:" tests/features/ | sed 's/.*Scenario: /  - /' | sort
+
+# Count scenarios
+count:
+    @echo "Feature files: $(find tests/features -name '*.feature' | wc -l)"
+    @echo "Scenarios: $(grep -r "Scenario:" tests/features/ | wc -l)"
+
+# Validate feature files (check syntax)
+validate:
+    @echo "Validating feature files..."
+    @cargo test -p konnekt-session-tests --no-run
+
+# Clean artifacts
+clean:
+    rm -f cucumber-report.json junit-report.xml
