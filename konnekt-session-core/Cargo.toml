@@ -1,0 +1,20 @@
+[package]
+name = "konnekt-session-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+uuid = { version = "1.0", features = ["v4", "serde"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+instant = { version = "0.1", features = ["wasm-bindgen"] }
+
+[dev-dependencies]
+serde_json = "1.0"
