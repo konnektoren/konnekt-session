@@ -1,6 +1,8 @@
 use cucumber::World;
 use konnekt_session_tests::SessionWorld;
 
+mod steps;
+
 #[tokio::main]
 async fn main() {
     #[cfg(feature = "output-junit")]

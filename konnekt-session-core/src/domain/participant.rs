@@ -208,7 +208,6 @@ impl Participant {
     }
 
     /// Create a participant with an explicit timestamp (for testing or deserialization)
-    #[cfg(test)]
     pub fn with_timestamp(
         name: String,
         lobby_role: LobbyRole,

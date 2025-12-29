@@ -1,3 +1,5 @@
 pub mod domain;
 
-pub use domain::{LobbyRole, Participant, ParticipantError, ParticipationMode};
+pub use domain::{
+    Lobby, LobbyError, LobbyRole, Participant, ParticipantError, ParticipationMode, Timestamp,
+};
