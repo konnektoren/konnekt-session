@@ -338,6 +338,7 @@ async fn command_type_is(world: &mut TranslatorWorld, expected_type: String) {
         DomainCommand::KickGuest { .. } => "KickGuest",
         DomainCommand::ToggleParticipationMode { .. } => "ToggleParticipationMode",
         DomainCommand::DelegateHost { .. } => "DelegateHost",
+        _ => todo!(),
     };
 
     assert_eq!(actual_type, expected_type, "Command type mismatch");
@@ -525,6 +526,7 @@ async fn p2p_event_type_is(world: &mut TranslatorWorld, expected_type: String) {
         P2PDomainEvent::GuestKicked { .. } => "GuestKicked",
         P2PDomainEvent::HostDelegated { .. } => "HostDelegated",
         P2PDomainEvent::ParticipationModeChanged { .. } => "ParticipationModeChanged",
+        _ => todo!(),
     };
 
     assert_eq!(actual_type, expected_type, "P2P event type mismatch");
