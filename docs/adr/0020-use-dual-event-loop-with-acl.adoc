@@ -1,0 +1,292 @@
+= ADR-0020: Dual Event Loop Architecture with Anti-Corruption Layer
+
+**Status**: Proposed +
+**Date**: 2025-12-30 +
+**Deciders**: Core Team
+
+== Context
+
+Konnekt Session is a **P2P system** where:
+
+* **P2P layer** handles network events (connections, messages, timeouts)
+* **Domain layer** handles business logic (lobby state, participants, activities)
+* Both layers need **independent event processing** to maintain clean boundaries
+
+Currently, all event handling is mixed in the CLI application layer, violating DDD principles.
+
+=== Problem
+
+[source,rust]
+----
+// ❌ Current: Mixed concerns in main loop
+loop {
+    let p2p_events = p2p_session.poll_events();
+    for event in p2p_events {
+        match event {
+            PeerConnected(id) => { /* network logic */ }
+            MessageReceived { data, .. } => {
+                // Domain logic mixed here!
+                let cmd = parse_command(data)?;
+                lobby.execute(cmd)?;
+            }
+        }
+    }
+}
+----
+
+=== Requirements
+
+* **Separation of concerns** - P2P and domain don't depend on each other
+* **Independent evolution** - change domain logic without touching P2P
+* **Clear boundaries** - messages cross via Anti-Corruption Layer (ACL)
+* **Single responsibility** - each loop handles one bounded context
+* **Testable** - test domain without P2P, test P2P without domain
+
+== Decision
+
+We will use **dual event loops** with an **Anti-Corruption Layer** (message queues) between P2P and Domain contexts.
+
+=== Architecture
+
+[plantuml, "dual-event-loop", png]
+----
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Dual Event Loop Architecture
+
+rectangle "Application Layer\n(Orchestrator)" as app {
+    component "Runtime" as runtime
+}
+
+rectangle "P2P Bounded Context" as p2p_ctx {
+    queue "Outbound Queue" as p2p_out
+    component "P2P Event Loop" as p2p_loop
+    queue "Inbound Queue" as p2p_in
+
+    p2p_loop --> p2p_out : Domain Commands
+    p2p_in --> p2p_loop : Network Messages
+}
+
+rectangle "Anti-Corruption Layer" as acl {
+    component "Message Translator" as translator
+}
+
+rectangle "Domain Bounded Context" as domain_ctx {
+    queue "Inbound Queue" as domain_in
+    component "Domain Event Loop" as domain_loop
+    queue "Outbound Queue" as domain_out
+
+    domain_in --> domain_loop : Commands
+    domain_loop --> domain_out : Events
+}
+
+p2p_out --> translator : P2PMessage
+translator --> domain_in : DomainCommand
+
+domain_out --> translator : DomainEvent
+translator --> p2p_in : P2PMessage
+
+runtime --> p2p_loop : poll()
+runtime --> domain_loop : poll()
+
+@enduml
+----
+
+=== Message Flow
+
+[plantuml, "message-flow", png]
+----
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Sequence.puml
+
+title Message Flow: Guest Joins Lobby
+
+participant "P2P Loop" as p2p
+participant "ACL" as acl
+participant "Domain Loop" as domain
+
+== Inbound: Network → Domain ==
+
+p2p -> p2p : Receive WebRTC message
+p2p -> acl : P2PMessage::JoinRequest
+activate acl
+acl -> acl : Translate to domain
+acl -> domain : JoinLobbyCommand
+deactivate acl
+
+domain -> domain : Validate & execute
+domain -> domain : Emit GuestJoined event
+
+== Outbound: Domain → Network ==
+
+domain -> acl : DomainEvent::GuestJoined
+activate acl
+acl -> acl : Translate to P2P
+acl -> p2p : P2PMessage::EventBroadcast
+deactivate acl
+
+p2p -> p2p : Serialize & send via WebRTC
+
+@enduml
+----
+
+=== Implementation
+
+**P2P Event Loop** (infrastructure):
+
+[source,rust]
+----
+pub struct P2PEventLoop {
+    session: P2PSession,
+    outbound: mpsc::Receiver<P2PMessage>,  // From domain
+    domain_commands: mpsc::Sender<DomainCommand>,  // To ACL
+}
+
+impl P2PEventLoop {
+    pub fn poll(&mut self) {
+        // Process network events
+        for event in self.session.poll_events() { /* ... */ }
+
+        // Send queued messages
+        while let Ok(msg) = self.outbound.try_recv() {
+            self.session.broadcast(msg);
+        }
+    }
+}
+----
+
+**Domain Event Loop** (core):
+
+[source,rust]
+----
+pub struct DomainEventLoop {
+    lobby: Lobby,
+    inbound: mpsc::Receiver<DomainCommand>,  // From ACL
+    events: mpsc::Sender<DomainEvent>,  // To ACL
+}
+
+impl DomainEventLoop {
+    pub fn poll(&mut self) {
+        // Process commands
+        while let Ok(cmd) = self.inbound.try_recv() {
+            if let Ok(event) = self.lobby.execute(cmd) {
+                self.events.send(event).unwrap();
+            }
+        }
+    }
+}
+----
+
+**Anti-Corruption Layer** (application):
+
+[source,rust]
+----
+pub struct MessageTranslator;
+
+impl MessageTranslator {
+    // P2P → Domain
+    pub fn to_command(msg: P2PMessage) -> Option<DomainCommand> {
+        match msg {
+            P2PMessage::JoinRequest { name } =>
+                Some(DomainCommand::JoinLobby { name }),
+            // ...
+        }
+    }
+
+    // Domain → P2P
+    pub fn to_p2p_message(event: DomainEvent) -> P2PMessage {
+        match event {
+            DomainEvent::GuestJoined { participant } =>
+                P2PMessage::EventBroadcast { event },
+            // ...
+        }
+    }
+}
+----
+
+=== Rationale
+
+**Bounded Context Isolation**:
+* P2P layer knows **nothing** about `Lobby`, `Participant`, domain rules
+* Domain layer knows **nothing** about WebRTC, Matchbox, peers
+* Changes to domain logic don't require P2P layer recompilation
+
+**Independent Testing**:
+* Test domain with mock command queue (no network)
+* Test P2P with mock message queue (no domain logic)
+* Test ACL independently (translation correctness)
+
+**Evolutionary Architecture**:
+* Swap P2P transport (WebRTC → WebTransport) without touching domain
+* Change domain model without touching P2P
+* Add new commands/events by extending ACL only
+
+== Consequences
+
+=== Positive
+
+* ✅ **Clean boundaries** - DDD bounded contexts properly isolated
+* ✅ **Testable** - test each loop independently
+* ✅ **Flexible** - swap implementations without cascading changes
+* ✅ **Clear ownership** - P2P team vs Domain team can work independently
+* ✅ **Message-driven** - natural async/event-sourcing fit
+
+=== Negative
+
+* ❌ **More complex** - two loops instead of one
+* ❌ **Message translation** - ACL adds code/maintenance
+* ❌ **Latency** - queue hop adds microseconds (negligible)
+* ❌ **Queue management** - bounded queues need capacity tuning
+
+=== Neutral
+
+* **Two runtimes** - but both use same executor (tokio/spawn_local)
+* **More types** - but clearer contracts
+
+== Pattern: Port-Adapter with Queues
+
+This is a **Hexagonal Architecture** implementation:
+
+* **P2P Loop** = Adapter (infrastructure port)
+* **Domain Loop** = Core (application/domain)
+* **ACL** = Anti-Corruption Layer (protects domain)
+* **Queues** = Message bus (decouples contexts)
+
+[plantuml, "hexagonal-mapping", png]
+----
+@startuml
+
+rectangle "Hexagonal Architecture" {
+    hexagon "Domain\nCore" as core
+
+    rectangle "P2P Adapter\n(Infrastructure)" as p2p
+    rectangle "CLI Adapter\n(Presentation)" as cli
+
+    queue "Command Queue" as cmd_q
+    queue "Event Queue" as evt_q
+
+    p2p --> cmd_q
+    cmd_q --> core
+
+    core --> evt_q
+    evt_q --> p2p
+    evt_q --> cli
+}
+
+@enduml
+----
+
+== References
+
+* **DDD - Bounded Contexts** – Eric Evans
+* **Anti-Corruption Layer** – xref:../03-decompose.adoc[DDD: Decompose]
+* **Hexagonal Architecture** – Alistair Cockburn
+* **Message-Driven Architecture** – Reactive Manifesto
+
+=== Related ADRs
+
+* xref:0006-use-cargo-workspace-for-modular-architecture.adoc[ADR-0006] – Crates map to bounded contexts
+* xref:0010-use-event-sourcing-for-lobby-state.adoc[ADR-0010] – Domain events flow through ACL
+* xref:0011-use-std-async-for-wasm-compatibility.adoc[ADR-0011] – Both loops use async primitives
+* xref:../03-decompose.adoc[DDD: Decompose] – Subdomain boundaries

@@ -248,6 +248,74 @@ a|
   - Could rotate every N seconds or every M messages
   - Completely decoupled from domain concept of "host"
 
+=== Runtime & Integration Pattern
+
+To keep the domain pure (hexagonal/DDD) while supporting P2P networking, we adopt a
+dual-event-loop pattern connected by an Anti-Corruption Layer (ACL). This keeps
+responsibilities separated:
+
+* P2P Event Loop (in konnekt-session-p2p): handles WebRTC/Matchbox, peer registry,
+  heartbeats and raw P2P messages.
+* Domain (Core) Event Loop (in konnekt-session-core): consumes DomainCommands,
+  runs lobby/domain logic, and emits DomainEvents.
+* ACL / Message Translator (application layer): translates P2P messages ↔ Domain
+  commands/events and wires queues between the two loops.
+
+Benefits: clear bounded context boundaries, independent testing and evolution,
+and minimal coupling between infrastructure and domain.
+
+[plantuml, "dual-event-loop-brief", png]
+----
+@startuml
+title Dual Event Loop (brief)
+
+actor "Runtime / Orchestrator" as Orch
+
+rectangle "P2P Bounded Context\n(konnekt-session-p2p)" as P2P {
+  component "P2P Event Loop\n(WebRTC, peer registry)" as P2PLoop
+  queue "P2P → ACL queue" as Qp
+  queue "ACL → P2P queue" as Qp2
+}
+
+rectangle "Anti-Corruption Layer\n(Application glue)" as ACL {
+  component "Translator / Queues" as T
+}
+
+rectangle "Domain Bounded Context\n(konnekt-session-core)" as Domain {
+  component "Domain Event Loop\n(Lobby, Participants, Activities)" as DLoop
+  queue "ACL → Domain queue" as Qd
+  queue "Domain → ACL queue" as Qd2
+}
+
+Orch --> P2PLoop : poll()
+Orch --> DLoop : poll()
+
+P2PLoop -> Qp : P2PMessage
+Qp -> T : translate()
+T -> Qd : DomainCommand
+
+DLoop -> Qd2 : DomainEvent
+Qd2 -> T : translate()
+T -> Qp2 : P2PMessage
+
+P2PLoop <- Qp2 : send()
+DLoop <- Qd : handle()
+
+@enduml
+----
+
+A compact animated illustration is included below to make the flow obvious at-a-glance:
+
+image::images/dual_event_loop_animated.svg[Dual Event Loop — P2P ↔ ACL ↔ Domain, width=880, align=center]
+
+Implementation notes (short)
+* P2P crate exposes an event-loop type that accepts outbound P2P messages (from ACL) and produces inbound raw messages (to ACL).
+* Core crate exposes a domain-loop type that accepts DomainCommands and emits DomainEvents.
+* The application (orchestrator / CLI) composes the ACL/translator with bounded channels (tokio::mpsc or wasm-compatible channels) to wire the two loops.
+* Tests: unit-test domain loop with mock command queue; unit-test P2P loop with mock messages; integration tests verify ACL translations.
+
+See xref:adr/0020-use-dual-event-loop-with-acl.adoc[ADR-0020] for the rationale and extended diagrams.
+
 === Example Scenario
 
 [source]
