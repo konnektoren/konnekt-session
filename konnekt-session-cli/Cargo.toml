@@ -21,31 +21,39 @@ name = "konnekt-tui"
 path = "src/bin/tui.rs"
 required-features = ["tui"]
 
+
 [dependencies]
 konnekt-session-core = { path = "../konnekt-session-core" }
 konnekt-session-p2p = { path = "../konnekt-session-p2p" }
 
-clap = { version = "4.5", features = ["derive"] }
-serde_json = "1.0"
-serde = "1.0"
-thiserror = "1.0"
-uuid = { version = "1.0", features = ["v4", "serde"] }
+# CLI
+clap = { workspace = true }
+
+# Serialization
+serde_json = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
 
 # Async runtime
-tokio = { version = "1.37", features = ["macros", "rt-multi-thread", "signal"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 
 # Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 
+# Observability (optional)
+console-subscriber = { workspace = true, optional = true }
+tracing-chrome = { version = "0.7", optional = true }
 
-# TUI (optional, only for interactive mode)
-ratatui = { version = "0.28", optional = true }
-crossterm = { version = "0.28", optional = true }
-arboard = { version = "3.4", optional = true }
+# TUI (optional)
+ratatui = { workspace = true, optional = true }
+crossterm = { workspace = true, optional = true }
+arboard = { workspace = true, optional = true }
 
 [features]
 default = []
 tui = ["ratatui", "crossterm", "arboard"]
+console = ["konnekt-session-p2p/console", "console-subscriber", "tokio/tracing"]
+chrome-trace = ["tracing-chrome"]
 
 [dev-dependencies]

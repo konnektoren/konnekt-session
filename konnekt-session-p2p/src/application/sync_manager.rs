@@ -1,6 +1,7 @@
 use crate::domain::{DomainEvent, EventLog, LobbyEvent, PeerId};
 use konnekt_session_core::DomainCommand;
 use std::collections::HashMap;
+use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
 
 /// Messages sent over the P2P network for event synchronization
@@ -50,7 +51,9 @@ pub struct EventSyncManager {
 
 impl EventSyncManager {
     /// Create a new sync manager as host
+    #[instrument(fields(lobby_id = %lobby_id))]
     pub fn new_host(lobby_id: Uuid) -> Self {
+        info!("Creating EventSyncManager as HOST");
         Self {
             lobby_id,
             is_host: true,
@@ -60,7 +63,9 @@ impl EventSyncManager {
     }
 
     /// Create a new sync manager as guest
+    #[instrument(fields(lobby_id = %lobby_id))]
     pub fn new_guest(lobby_id: Uuid) -> Self {
+        info!("Creating EventSyncManager as GUEST");
         Self {
             lobby_id,
             is_host: false,
@@ -70,7 +75,9 @@ impl EventSyncManager {
     }
 
     /// Promote to host (after delegation)
+    #[instrument(skip(self))]
     pub fn promote_to_host(&mut self) {
+        info!("Promoting EventSyncManager to HOST");
         self.is_host = true;
     }
 
@@ -84,15 +91,20 @@ impl EventSyncManager {
     }
 
     /// Create and broadcast a new event (host only)
+    #[instrument(skip(self, event), fields(
+        event_type = ?std::mem::discriminant(&event),
+        is_host = %self.is_host
+    ))]
     pub fn create_event(&mut self, event: DomainEvent) -> Result<SyncMessage, SyncError> {
         if !self.is_host {
+            warn!("Attempted to create event as guest");
             return Err(SyncError::NotHost);
         }
 
         let lobby_event = LobbyEvent::without_sequence(self.lobby_id, event);
         let sequence = self.event_log.append(lobby_event.clone());
 
-        tracing::debug!("Host created event sequence {}", sequence);
+        debug!(sequence = %sequence, "Host created new event");
 
         Ok(SyncMessage::EventBroadcast {
             event: self.event_log.get(sequence).unwrap().clone(),
@@ -100,6 +112,10 @@ impl EventSyncManager {
     }
 
     /// Handle incoming sync message
+    #[instrument(skip(self, message), fields(
+        from = %from,
+        message_type = ?std::mem::discriminant(&message)
+    ))]
     pub fn handle_message(
         &mut self,
         from: PeerId,
@@ -108,11 +124,11 @@ impl EventSyncManager {
         match message {
             SyncMessage::CommandRequest { command } => {
                 if !self.is_host {
-                    tracing::warn!("Guest received CommandRequest from {}, ignoring", from);
+                    warn!("Guest received CommandRequest, ignoring");
                     return Ok(SyncResponse::None);
                 }
 
-                tracing::info!("HOST: Received command request from peer {}", from);
+                info!("HOST: Received command request from peer");
                 Ok(SyncResponse::ProcessCommand { command })
             }
 
@@ -120,10 +136,11 @@ impl EventSyncManager {
 
             SyncMessage::RequestFullSync { lobby_id } => {
                 if lobby_id != self.lobby_id {
+                    warn!(expected = %self.lobby_id, received = %lobby_id, "Wrong lobby ID");
                     return Err(SyncError::WrongLobby);
                 }
 
-                tracing::info!("Peer {} requested full sync", from);
+                info!("Peer requested full sync");
                 Ok(SyncResponse::NeedSnapshot {
                     for_peer: from,
                     since_sequence: 0,
@@ -137,11 +154,16 @@ impl EventSyncManager {
     }
 
     /// Handle event broadcast from host
+    #[instrument(skip(self, event), fields(
+        sequence = %event.sequence,
+        lobby_id = %event.lobby_id
+    ))]
     fn handle_event_broadcast(&mut self, event: LobbyEvent) -> Result<SyncResponse, SyncError> {
-        tracing::debug!("Received event broadcast: sequence {}", event.sequence);
+        debug!("Received event broadcast");
 
         // Validate event is for our lobby
         if event.lobby_id != self.lobby_id {
+            warn!("Event for wrong lobby, rejecting");
             return Err(SyncError::WrongLobby);
         }
 
@@ -150,7 +172,7 @@ impl EventSyncManager {
         if event.sequence == expected_sequence {
             // Event is next in sequence - apply immediately
             self.event_log.add_event(event.clone());
-            tracing::debug!("Applied event sequence {} immediately", event.sequence);
+            debug!("Applied event immediately (in sequence)");
 
             // Try to apply any pending events that are now in sequence
             let applied_pending = self.try_apply_pending_events();
@@ -161,25 +183,29 @@ impl EventSyncManager {
             Ok(SyncResponse::ApplyEvents { events })
         } else if event.sequence > expected_sequence {
             // Out of order - buffer it
-            tracing::debug!(
-                "Event {} is out of order (expected {}), buffering",
-                event.sequence,
-                expected_sequence
+            warn!(
+                expected = %expected_sequence,
+                received = %event.sequence,
+                gap_size = %(event.sequence - expected_sequence),
+                "Event out of order, buffering"
             );
             self.pending_events.insert(event.sequence, event);
             Ok(SyncResponse::None)
         } else {
             // Duplicate or old event - ignore
-            tracing::debug!(
-                "Event {} is duplicate/old (expected {}), ignoring",
-                event.sequence,
-                expected_sequence
+            debug!(
+                expected = %expected_sequence,
+                received = %event.sequence,
+                "Duplicate/old event, ignoring"
             );
             Ok(SyncResponse::None)
         }
     }
 
     /// Try to apply pending events that are now in sequence
+    #[instrument(skip(self), fields(
+        pending_count = %self.pending_events.len()
+    ))]
     fn try_apply_pending_events(&mut self) -> Vec<LobbyEvent> {
         let mut applied = Vec::new();
 
@@ -187,10 +213,7 @@ impl EventSyncManager {
             let next_expected = self.event_log.highest_sequence() + 1;
 
             if let Some(event) = self.pending_events.remove(&next_expected) {
-                tracing::debug!(
-                    "Applying pending event sequence {} from buffer",
-                    event.sequence
-                );
+                debug!(sequence = %event.sequence, "Applying pending event from buffer");
                 self.event_log.add_event(event.clone());
                 applied.push(event);
             } else {
@@ -199,23 +222,27 @@ impl EventSyncManager {
         }
 
         if !applied.is_empty() {
-            tracing::info!("Applied {} pending events from buffer", applied.len());
+            info!(
+                applied = %applied.len(),
+                still_pending = %self.pending_events.len(),
+                "Applied pending events from buffer"
+            );
         }
 
         applied
     }
 
     /// Handle full sync response (late joiner)
+    #[instrument(skip(self, snapshot, events), fields(
+        snapshot.sequence = %snapshot.as_of_sequence,
+        events_count = %events.len()
+    ))]
     fn handle_full_sync_response(
         &mut self,
         snapshot: LobbySnapshot,
         events: Vec<LobbyEvent>,
     ) -> Result<SyncResponse, SyncError> {
-        tracing::info!(
-            "Received full sync: snapshot at sequence {}, {} events",
-            snapshot.as_of_sequence,
-            events.len()
-        );
+        info!("Received full sync response");
 
         // Clear our event log
         self.event_log = EventLog::new();
@@ -224,6 +251,11 @@ impl EventSyncManager {
         for event in &events {
             self.event_log.add_event(event.clone());
         }
+
+        debug!(
+            final_sequence = %self.event_log.highest_sequence(),
+            "Full sync applied"
+        );
 
         // Create lobby from snapshot
         let create_lobby_event = DomainEvent::LobbyCreated {

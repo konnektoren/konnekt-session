@@ -19,6 +19,36 @@ readme = "README.adoc"
 keywords = ["p2p", "lobby", "multiplayer", "webrtc", "wasm"]
 categories = ["game-development", "network-programming", "wasm", "web-programming"]
 
+
 [workspace.dependencies]
+# Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+# Async runtime
+tokio = { version = "1.47", default-features = false }
+futures = "0.3"
+
+# Utilities
+uuid = { version = "1.19", features = ["v4", "serde"] }
+thiserror = "2.0"
+tracing = "0.1"
+instant = { version = "0.1", features = ["wasm-bindgen"] }
+
+# Observability
+tracing-subscriber = { version = "0.3", default-features = false }
+console-subscriber = { version = "0.5" }
+
+# JSON Schema
+schemars = { version = "1.2", features = ["uuid1", "preserve_order"] }
+
+# P2P networking
+matchbox_socket = "0.10"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# TUI
+ratatui = { version = "0.30" }
+crossterm = { version = "0.29" }
+arboard = { version = "3.6" }

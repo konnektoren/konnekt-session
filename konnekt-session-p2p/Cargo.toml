@@ -10,27 +10,35 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+
 [dependencies]
 # Core domain
 konnekt-session-core = { path = "../konnekt-session-core" }
 
 # P2P networking
-matchbox_socket = "0.10"
+matchbox_socket = { workspace = true }
 
 # Async runtime
-tokio = { version = "1.37", features = ["sync", "time"] }
-futures = "0.3"
+tokio = { workspace = true, features = ["sync", "time"] }
+futures = { workspace = true }
 
 # Serialization
-serde = { workspace=true }
-serde_json = { workspace=true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # Utilities
-uuid = { version = "1.0", features = ["v4", "serde"] }
-thiserror = "1.0"
-tracing = "0.1"
-instant = { version = "0.1", features = ["wasm-bindgen"] }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+instant = { workspace = true }
+
+# Observability (optional)
+console-subscriber = { workspace = true, optional = true }
+
+[features]
+default = []
+console = ["console-subscriber", "tokio/tracing"]
 
 [dev-dependencies]
-tokio = { version = "1.37", features = ["macros", "rt-multi-thread"] }
-tracing-subscriber = "0.3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }

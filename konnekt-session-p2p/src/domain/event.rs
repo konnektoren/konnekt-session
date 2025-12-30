@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum DomainEvent {
     // Existing events...
     LobbyCreated {
@@ -39,7 +39,6 @@ pub enum DomainEvent {
         new_mode: String,
     },
 
-    // ✅ ADD: Activity events
     ActivityPlanned {
         metadata: ActivityMetadata,
     },
@@ -63,6 +62,7 @@ pub enum DomainEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum DelegationReason {
     Manual,
     Timeout,
@@ -71,6 +71,7 @@ pub enum DelegationReason {
 
 /// An event with metadata for ordering and synchronization
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub struct LobbyEvent {
     /// Monotonically increasing sequence number (assigned by host)
     pub sequence: u64,

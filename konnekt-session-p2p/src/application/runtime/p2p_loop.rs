@@ -9,6 +9,9 @@ use konnekt_session_core::{DomainCommand, DomainEvent as CoreDomainEvent};
 use std::collections::VecDeque;
 use uuid::Uuid;
 
+// 🆕 Add tracing
+use tracing::{debug, error, info, instrument, trace, warn};
+
 /// P2P event loop - handles network communication and event ordering
 pub struct P2PLoop {
     /// WebRTC connection (Matchbox adapter)
@@ -41,13 +44,14 @@ pub struct P2PLoop {
 
 impl P2PLoop {
     /// Create a new P2P loop as HOST
+    #[instrument(skip(connection), fields(lobby_id = %lobby_id))]
     pub fn new_host(
         connection: MatchboxConnection,
         lobby_id: Uuid,
         batch_size: usize,
         max_queue_size: usize,
     ) -> Self {
-        tracing::info!("🎯 P2PLoop initialized as HOST for lobby {}", lobby_id);
+        info!("P2PLoop initialized as HOST");
         Self {
             connection,
             peer_registry: PeerRegistry::with_grace_period(Duration::from_secs(30)),
@@ -62,13 +66,14 @@ impl P2PLoop {
     }
 
     /// Create a new P2P loop as GUEST
+    #[instrument(skip(connection), fields(lobby_id = %lobby_id))]
     pub fn new_guest(
         connection: MatchboxConnection,
         lobby_id: Uuid,
         batch_size: usize,
         max_queue_size: usize,
     ) -> Self {
-        tracing::info!("🎯 P2PLoop initialized as GUEST for lobby {}", lobby_id);
+        info!("P2PLoop initialized as GUEST");
         Self {
             connection,
             peer_registry: PeerRegistry::with_grace_period(Duration::from_secs(30)),
@@ -83,18 +88,21 @@ impl P2PLoop {
     }
 
     /// Send a domain command to host (GUEST ONLY)
+    #[instrument(skip(self), fields(command_type = ?std::mem::discriminant(&command)))]
     pub fn send_command_to_host(&mut self, command: DomainCommand) -> Result<()> {
-        tracing::info!("📤 GUEST: Sending command to host: {:?}", command);
+        debug!("GUEST: Sending command to host");
 
         let msg = SyncMessage::CommandRequest { command };
         let data = serde_json::to_vec(&msg)
             .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
 
         self.connection.broadcast(data)?;
+        trace!("Command broadcast complete");
         Ok(())
     }
 
     /// Request full sync from host (GUEST ONLY)
+    #[instrument(skip(self))]
     pub fn request_full_sync(&mut self) -> Result<()> {
         let sync_msg = self
             .event_sync
@@ -106,15 +114,20 @@ impl P2PLoop {
 
         self.connection.broadcast(data)?;
 
-        tracing::info!("📤 Sent full sync request to host");
+        info!("Sent full sync request to host");
         Ok(())
     }
 
     /// Apply snapshot to domain layer (converts snapshot to domain commands)
+    #[instrument(skip(self, snapshot, events), fields(
+        snapshot.lobby_id = %snapshot.lobby_id,
+        snapshot.name = %snapshot.name,
+        participants = %snapshot.participants.len(),
+        events_count = %events.len()
+    ))]
     fn apply_snapshot_to_domain(&mut self, snapshot: LobbySnapshot, events: Vec<LobbyEvent>) {
-        tracing::info!("📥 Received lobby snapshot: {}", snapshot.name);
-        tracing::info!("   Host: {}", snapshot.host_id);
-        tracing::info!("   Participants: {}", snapshot.participants.len());
+        info!("Applying lobby snapshot");
+        debug!(host_id = %snapshot.host_id, "Snapshot host");
 
         // Create lobby from snapshot
         let create_lobby_cmd = DomainCommand::CreateLobby {
@@ -137,13 +150,11 @@ impl P2PLoop {
             }
         }
 
-        tracing::info!(
-            "✅ Queued {} commands from snapshot",
-            self.pending_domain_commands.len()
-        );
+        info!(commands_queued = %self.pending_domain_commands.len(), "Snapshot applied");
     }
 
     /// Broadcast a domain event (HOST ONLY)
+    #[instrument(skip(self, event), fields(event_type = ?std::mem::discriminant(&event)))]
     pub fn broadcast_domain_event(&mut self, event: CoreDomainEvent) -> Result<()> {
         // Translate core event to P2P event
         let p2p_event = self.translator.to_p2p_event(event).ok_or_else(|| {
@@ -164,11 +175,12 @@ impl P2PLoop {
 
         self.connection.broadcast(data)?;
 
-        tracing::debug!("✅ Broadcast domain event via P2P");
+        trace!("Domain event broadcast complete");
         Ok(())
     }
 
     /// Process network events
+    #[instrument(skip(self), fields(peer_count = %self.connection.connected_peers().len()))]
     pub fn poll(&mut self) -> usize {
         let mut processed = 0;
 
@@ -181,63 +193,65 @@ impl P2PLoop {
             match &event {
                 ConnectionEvent::PeerConnected(peer_id) => {
                     self.peer_registry.add_peer(*peer_id);
-                    tracing::debug!("✅ Added peer {} to registry", peer_id);
+                    debug!(peer_id = %peer_id, "Added peer to registry");
                 }
                 ConnectionEvent::MessageReceived { from, data } => {
                     self.peer_registry.update_last_seen(from);
+                    trace!(peer_id = %from, bytes = %data.len(), "Received message");
 
                     if let Ok(sync_msg) = serde_json::from_slice::<SyncMessage>(data) {
-                        tracing::debug!("📥 Received sync message from {}", from);
+                        debug!(peer_id = %from, "Received sync message");
 
                         match self.event_sync.handle_message(*from, sync_msg) {
                             Ok(SyncResponse::ProcessCommand { command }) => {
-                                tracing::info!("📥 HOST: Processing command from peer {}", from);
+                                info!(peer_id = %from, "HOST: Processing command from peer");
                                 self.pending_domain_commands.push_back(command);
                             }
                             Ok(SyncResponse::ApplyEvents { events }) => {
-                                tracing::info!("✅ Applying {} events from sync", events.len());
+                                info!(events = %events.len(), "Applying events from sync");
                                 self.inbound_lobby_events.extend(events);
                             }
                             Ok(SyncResponse::SendMessage { to, message }) => {
                                 if let Ok(data) = serde_json::to_vec(&message) {
                                     if let Some(peer) = to {
-                                        tracing::info!("📤 Sending sync response to {}", peer);
+                                        debug!(peer_id = %peer, "Sending sync response");
                                         let _ = self.connection.send_to(PeerId(peer.inner()), data);
                                     } else {
-                                        tracing::info!("📤 Broadcasting sync response");
+                                        debug!("Broadcasting sync response");
                                         let _ = self.connection.broadcast(data);
                                     }
                                 }
                             }
                             Ok(SyncResponse::ApplySnapshot { snapshot, events }) => {
-                                tracing::info!("✅ Applying snapshot + {} events", events.len());
+                                info!(events = %events.len(), "Applying snapshot");
                                 self.apply_snapshot_to_domain(snapshot, events);
                             }
                             Ok(SyncResponse::NeedSnapshot {
                                 for_peer,
                                 since_sequence,
                             }) => {
-                                tracing::info!(
-                                    "📤 Peer {} needs snapshot from sequence {}",
-                                    for_peer,
-                                    since_sequence
+                                info!(
+                                    peer_id = %for_peer,
+                                    since_sequence = %since_sequence,
+                                    "Peer needs snapshot"
                                 );
-                                // Will be handled by SessionLoop
                             }
-                            Ok(SyncResponse::None) => {}
+                            Ok(SyncResponse::None) => {
+                                trace!("Sync message processed (no action)");
+                            }
                             Err(e) => {
-                                tracing::warn!("❌ Failed to handle sync message: {:?}", e);
+                                warn!(error = ?e, "Failed to handle sync message");
                             }
                         }
                     }
                 }
                 ConnectionEvent::PeerDisconnected(peer_id) => {
                     self.peer_registry.mark_peer_disconnected(peer_id);
-                    tracing::debug!("🔴 Marked peer {} as disconnected", peer_id);
+                    debug!(peer_id = %peer_id, "Marked peer as disconnected");
                 }
                 ConnectionEvent::PeerTimedOut { peer_id, .. } => {
                     self.peer_registry.remove_peer(peer_id);
-                    tracing::debug!("⏰ Removed peer {} after timeout", peer_id);
+                    debug!(peer_id = %peer_id, "Removed peer after timeout");
                 }
             }
 
@@ -251,7 +265,7 @@ impl P2PLoop {
                 let participant_id = peer_state.participant_id;
                 let was_host = peer_state.is_host;
 
-                tracing::warn!("⏰ Peer {} timed out (was_host: {})", peer_id, was_host);
+                warn!(peer_id = %peer_id, was_host = %was_host, "Peer timed out");
 
                 self.inbound_events.push(ConnectionEvent::PeerTimedOut {
                     peer_id,
@@ -269,23 +283,51 @@ impl P2PLoop {
         let lobby_events = std::mem::take(&mut self.inbound_lobby_events);
         for lobby_event in lobby_events {
             if let Some(cmd) = self.translator.to_domain_command(&lobby_event.event) {
-                tracing::debug!(
-                    "🔄 Translated P2P event (seq {}) → Domain command",
-                    lobby_event.sequence
-                );
+                trace!(sequence = %lobby_event.sequence, "Translated P2P event → Domain command");
                 self.pending_domain_commands.push_back(cmd);
             }
+        }
+
+        if processed > 0 {
+            debug!(processed = %processed, "Poll cycle complete");
         }
 
         processed
     }
 
-    /// Drain connection events
+    /// Send full sync to a specific peer (HOST ONLY)
+    #[instrument(skip(self, snapshot), fields(
+        peer_id = %peer_id,
+        snapshot.lobby_id = %snapshot.lobby_id,
+        participants = %snapshot.participants.len()
+    ))]
+    pub fn send_full_sync_to_peer(
+        &mut self,
+        peer_id: PeerId,
+        snapshot: LobbySnapshot,
+    ) -> Result<()> {
+        info!("Sending full sync to peer");
+
+        let sync_msg = self
+            .event_sync
+            .create_full_sync_response(0, snapshot)
+            .map_err(|e| crate::infrastructure::error::P2PError::SendFailed(e.to_string()))?;
+
+        let data = serde_json::to_vec(&sync_msg)
+            .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
+
+        self.connection.send_to(PeerId(peer_id.inner()), data)?;
+
+        debug!("Full sync sent successfully");
+        Ok(())
+    }
+
+    // ... rest of methods unchanged ...
+
     pub fn drain_events(&mut self) -> Vec<ConnectionEvent> {
         std::mem::take(&mut self.inbound_events)
     }
 
-    /// Drain domain commands
     pub fn drain_domain_commands(&mut self) -> Vec<DomainCommand> {
         self.pending_domain_commands.drain(..).collect()
     }
@@ -310,29 +352,10 @@ impl P2PLoop {
         self.event_sync.current_sequence()
     }
 
+    #[instrument(skip(self))]
     pub fn promote_to_host(&mut self) {
+        info!("Promoting to HOST in P2P layer");
         self.event_sync.promote_to_host();
-        tracing::info!("👑 Promoted to HOST in P2P layer");
-    }
-
-    /// Send full sync to a specific peer (HOST ONLY)
-    pub fn send_full_sync_to_peer(
-        &mut self,
-        peer_id: PeerId,
-        snapshot: LobbySnapshot,
-    ) -> Result<()> {
-        let sync_msg = self
-            .event_sync
-            .create_full_sync_response(0, snapshot)
-            .map_err(|e| crate::infrastructure::error::P2PError::SendFailed(e.to_string()))?;
-
-        let data = serde_json::to_vec(&sync_msg)
-            .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
-
-        self.connection.send_to(PeerId(peer_id.inner()), data)?;
-
-        tracing::info!("📤 Sent full sync to peer {}", peer_id);
-        Ok(())
     }
 
     pub fn pending_messages(&self) -> usize {
@@ -341,23 +364,5 @@ impl P2PLoop {
 
     pub fn pending_domain_commands(&self) -> usize {
         self.pending_domain_commands.len()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_command_routing() {
-        // This would require mocking the connection
-        // For now, verify API exists
-        let cmd = DomainCommand::JoinLobby {
-            lobby_id: Uuid::new_v4(),
-            guest_name: "Test".to_string(),
-        };
-
-        // Just verify it compiles
-        let _ = format!("{:?}", cmd);
     }
 }

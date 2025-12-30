@@ -16,12 +16,11 @@ impl MatchboxConnection {
         Self::connect(signalling_url, IceServer::default_stun_servers()).await
     }
 
-    /// Connect to Matchbox signalling server with custom ICE servers
+    //// Connect to Matchbox signalling server with custom ICE servers
     pub async fn connect(signalling_url: &str, ice_servers: Vec<IceServer>) -> Result<Self> {
         tracing::info!("Connecting to signalling server: {}", signalling_url);
         tracing::info!("Configured with {} ICE servers", ice_servers.len());
 
-        // Log ICE server details
         for (i, server) in ice_servers.iter().enumerate() {
             if server.username.is_some() {
                 tracing::info!(
@@ -41,8 +40,10 @@ impl MatchboxConnection {
             .add_channel(matchbox_socket::ChannelConfig::reliable())
             .build();
 
-        // Spawn the loop future to drive the socket
+        // 🔧 FIX: Simple spawn with instrument span
+        let matchbox_span = tracing::info_span!("matchbox::webrtc_loop");
         tokio::spawn(async move {
+            let _enter = matchbox_span.enter();
             let _ = loop_fut.await;
         });
 

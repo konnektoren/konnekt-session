@@ -1,5 +1,6 @@
 use crate::domain::event::LobbyEvent;
 use std::collections::VecDeque;
+use tracing::{debug, instrument, trace, warn};
 
 /// Bounded event log that keeps the last N events
 ///
@@ -24,12 +25,16 @@ pub struct EventLog {
 
 impl EventLog {
     /// Create a new event log with default capacity (100 events)
+    #[instrument]
     pub fn new() -> Self {
+        debug!("Creating new EventLog with default capacity");
         Self::with_capacity(100)
     }
 
     /// Create a new event log with custom capacity
+    #[instrument(fields(max_size = %max_size))]
     pub fn with_capacity(max_size: usize) -> Self {
+        debug!("Creating EventLog with capacity {}", max_size);
         Self {
             max_size,
             events: VecDeque::with_capacity(max_size),
@@ -39,47 +44,94 @@ impl EventLog {
     }
 
     /// Append an event (host only - assigns sequence number)
+    #[instrument(skip(self, event), fields(
+        event_type = ?std::mem::discriminant(&event.event),
+        lobby_id = %event.lobby_id
+    ))]
     pub fn append(&mut self, mut event: LobbyEvent) -> u64 {
         event.sequence = self.next_sequence;
+        let assigned_seq = self.next_sequence;
         self.next_sequence += 1;
 
+        debug!(
+            sequence = %assigned_seq,
+            next_sequence = %self.next_sequence,
+            "Assigned sequence number to event"
+        );
+
         self.add_event(event);
-        self.next_sequence - 1 // Return the assigned sequence
+        assigned_seq
     }
 
     /// Add an event that already has a sequence number (guests receiving from host)
+    #[instrument(skip(self, event), fields(
+        sequence = %event.sequence,
+        event_type = ?std::mem::discriminant(&event.event),
+        lobby_id = %event.lobby_id
+    ))]
     pub fn add_event(&mut self, event: LobbyEvent) {
+        let old_highest = self.highest_seen;
+
         // Track highest sequence we've seen
         if event.sequence > self.highest_seen {
             self.highest_seen = event.sequence;
+            debug!(
+                old_highest = %old_highest,
+                new_highest = %self.highest_seen,
+                "Updated highest seen sequence"
+            );
         }
 
         // Add to buffer
         self.events.push_back(event);
+        trace!(event_count = %self.events.len(), "Added event to buffer");
 
         // Evict oldest if over capacity
         if self.events.len() > self.max_size {
-            self.events.pop_front();
+            if let Some(evicted) = self.events.pop_front() {
+                warn!(
+                    evicted_sequence = %evicted.sequence,
+                    buffer_size = %self.events.len(),
+                    "Evicted oldest event (buffer full)"
+                );
+            }
         }
     }
 
     /// Get event by sequence number
+    #[instrument(skip(self), fields(sequence = %sequence))]
     pub fn get(&self, sequence: u64) -> Option<&LobbyEvent> {
-        self.events.iter().find(|e| e.sequence == sequence)
+        let result = self.events.iter().find(|e| e.sequence == sequence);
+        trace!(found = %result.is_some(), "Event lookup by sequence");
+        result
     }
 
     /// Get all events after a given sequence (for late joiners)
+    #[instrument(skip(self), fields(
+        since_sequence = %sequence,
+        current_highest = %self.highest_seen
+    ))]
     pub fn get_since(&self, sequence: u64) -> Vec<LobbyEvent> {
-        self.events
+        let events: Vec<LobbyEvent> = self
+            .events
             .iter()
             .filter(|e| e.sequence > sequence)
             .cloned()
-            .collect()
+            .collect();
+
+        debug!(
+            events_returned = %events.len(),
+            "Retrieved events since sequence"
+        );
+
+        events
     }
 
     /// Get the last N events
+    #[instrument(skip(self), fields(n = %n))]
     pub fn get_last(&self, n: usize) -> Vec<LobbyEvent> {
-        self.events
+        let events: Vec<LobbyEvent> = self
+            .events
             .iter()
             .rev()
             .take(n)
@@ -87,11 +139,17 @@ impl EventLog {
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
-            .collect()
+            .collect();
+
+        debug!(events_returned = %events.len(), "Retrieved last N events");
+
+        events
     }
 
     /// Get all events
+    #[instrument(skip(self))]
     pub fn all_events(&self) -> Vec<LobbyEvent> {
+        debug!(total_events = %self.events.len(), "Retrieving all events");
         self.events.iter().cloned().collect()
     }
 
@@ -106,8 +164,13 @@ impl EventLog {
     }
 
     /// Check if we're missing any events between oldest and highest
+    #[instrument(skip(self), fields(
+        event_count = %self.events.len(),
+        highest_seen = %self.highest_seen
+    ))]
     pub fn detect_gaps(&self) -> Vec<u64> {
         if self.events.is_empty() {
+            trace!("No events in log, no gaps to detect");
             return vec![];
         }
 
@@ -120,12 +183,25 @@ impl EventLog {
             }
         }
 
+        if !missing.is_empty() {
+            warn!(
+                gaps = ?missing,
+                oldest = %oldest,
+                highest = %self.highest_seen,
+                "Detected sequence gaps in event log"
+            );
+        } else {
+            trace!("No gaps detected in event log");
+        }
+
         missing
     }
 
     /// Clear all events (for testing)
     #[cfg(test)]
+    #[instrument(skip(self))]
     pub fn clear(&mut self) {
+        debug!("Clearing event log");
         self.events.clear();
         self.highest_seen = 0;
     }
