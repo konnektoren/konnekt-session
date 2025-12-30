@@ -181,7 +181,10 @@ impl EventTranslator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use konnekt_session_core::{EchoChallenge, Participant};
+    use konnekt_session_core::{
+        EchoChallenge, Participant,
+        domain::{ActivityMetadata, ActivityResult},
+    };
 
     #[test]
     fn test_guest_joined_to_command() {
@@ -280,8 +283,6 @@ mod tests {
             _ => panic!("Expected JoinLobby command"),
         }
     }
-
-    // ✅ NEW TESTS: Activity events
 
     #[test]
     fn test_activity_planned_to_p2p() {

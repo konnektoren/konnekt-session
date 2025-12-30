@@ -243,6 +243,13 @@ impl SessionLoop {
                 DomainCommand::LeaveLobby { participant_id, .. } => {
                     tracing::info!("📥 Participant {} leaving", participant_id);
                 }
+                DomainCommand::SubmitResult { result, .. } => {
+                    tracing::info!(
+                        "📥 HOST: Received result from participant {} for activity {}",
+                        result.participant_id,
+                        result.activity_id
+                    );
+                }
                 _ => {
                     tracing::debug!("📥 Received command: {:?}", cmd);
                 }
@@ -289,6 +296,17 @@ impl SessionLoop {
                 CoreDomainEvent::GuestLeft { participant_id, .. } => {
                     tracing::info!("📤 Domain event: GuestLeft - {}", participant_id);
                 }
+                CoreDomainEvent::ActivityCompleted {
+                    activity_id,
+                    results,
+                    ..
+                } => {
+                    tracing::info!(
+                        "📤 Domain event: ActivityCompleted - {} ({} results)",
+                        activity_id,
+                        results.len()
+                    );
+                }
                 CoreDomainEvent::CommandFailed { command, reason } => {
                     tracing::warn!("⚠️  Command failed: {} - {}", command, reason);
                 }
@@ -304,7 +322,7 @@ impl SessionLoop {
                     continue;
                 }
 
-                if let Err(e) = self.p2p.broadcast_domain_event(event) {
+                if let Err(e) = self.p2p.broadcast_domain_event(event.clone()) {
                     tracing::warn!("Failed to broadcast event: {:?}", e);
                 } else {
                     tracing::debug!("✅ Event broadcast to P2P network");
