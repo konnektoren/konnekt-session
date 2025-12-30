@@ -1,4 +1,5 @@
 use super::app::{App, Tab};
+use konnekt_session_core::EchoChallenge;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -19,15 +20,16 @@ pub fn render(f: &mut Frame, app: &App) {
 
     render_header(f, chunks[0], app);
     render_content(f, chunks[1], app);
-    render_footer(f, chunks[2]);
+    render_footer(f, chunks[2], app);
 }
 
 fn render_header(f: &mut Frame, area: Rect, app: &App) {
     let titles = vec![
         Tab::Session.title(),
         Tab::Lobby.title(),
-        Tab::Events.title(),
+        Tab::Activities.title(),
         Tab::Participants.title(),
+        Tab::Events.title(),
         Tab::Help.title(),
     ];
 
@@ -48,13 +50,16 @@ fn render_content(f: &mut Frame, area: Rect, app: &App) {
     match app.current_tab {
         Tab::Session => render_session(f, area, app),
         Tab::Lobby => render_lobby(f, area, app),
-        Tab::Events => render_events(f, area, app),
+        Tab::Activities => render_activities(f, area, app),
         Tab::Participants => render_participants(f, area, app),
+        Tab::Events => render_events(f, area, app),
         Tab::Help => render_help(f, area),
     }
 }
 
 fn render_session(f: &mut Frame, area: Rect, app: &App) {
+    let session_tab = &app.session_tab;
+
     let mut text = vec![
         Line::from(""),
         Line::from(vec![Span::styled(
@@ -65,7 +70,7 @@ fn render_session(f: &mut Frame, area: Rect, app: &App) {
         )]),
         Line::from(""),
         Line::from(vec![Span::styled(
-            &app.session_id,
+            session_tab.session_id(),
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
@@ -92,7 +97,7 @@ fn render_session(f: &mut Frame, area: Rect, app: &App) {
         )]),
         Line::from(""),
         Line::from(vec![Span::styled(
-            format!("konnekt-tui join --session-id {}", app.session_id),
+            format!("konnekt-tui join --session-id {}", session_tab.session_id()),
             Style::default()
                 .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),
@@ -111,7 +116,7 @@ fn render_session(f: &mut Frame, area: Rect, app: &App) {
     ];
 
     // Show clipboard message if active
-    if let Some(msg) = &app.clipboard_message {
+    if let Some(msg) = session_tab.clipboard_message() {
         text.push(Line::from(""));
         text.push(Line::from(""));
         text.push(Line::from(vec![Span::styled(
@@ -126,14 +131,14 @@ fn render_session(f: &mut Frame, area: Rect, app: &App) {
     text.push(Line::from(""));
 
     // Connection status
-    if let Some(peer_id) = &app.local_peer_id {
+    if let Some(peer_id) = session_tab.local_peer_id() {
         text.push(Line::from(vec![
             Span::styled("Local Peer ID: ", Style::default().fg(Color::Cyan)),
             Span::raw(peer_id),
         ]));
         text.push(Line::from(vec![
             Span::styled("Connected Peers: ", Style::default().fg(Color::Cyan)),
-            Span::raw(app.peer_count.to_string()),
+            Span::raw(session_tab.peer_count().to_string()),
         ]));
     } else {
         text.push(Line::from(vec![
@@ -154,72 +159,20 @@ fn render_session(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_lobby(f: &mut Frame, area: Rect, app: &App) {
-    let text = if let Some(lobby) = &app.lobby_snapshot {
-        // Find our participant
-        let our_participant = lobby.participants().values().find(|p| {
-            if app.is_host {
-                p.is_host()
-            } else {
-                Some(p.id()) == app.local_participant_id
-            }
-        });
+    let lobby_tab = &app.lobby_tab;
 
-        let mut lines = vec![
+    let text = if let Some(lobby_name) = lobby_tab.lobby_name() {
+        vec![
             Line::from(vec![
                 Span::styled("Lobby: ", Style::default().fg(Color::Cyan)),
-                Span::raw(lobby.name()),
-            ]),
-            Line::from(vec![
-                Span::styled("ID: ", Style::default().fg(Color::Cyan)),
-                Span::raw(lobby.id().to_string()),
+                Span::raw(lobby_name),
             ]),
             Line::from(""),
             Line::from(vec![
                 Span::styled("Participants: ", Style::default().fg(Color::Cyan)),
-                Span::raw(lobby.participants().len().to_string()),
+                Span::raw(lobby_tab.participant_count().to_string()),
             ]),
-            Line::from(""),
-        ];
-
-        if let Some(participant) = our_participant {
-            lines.push(Line::from(vec![
-                Span::styled("Your Role: ", Style::default().fg(Color::Cyan)),
-                Span::styled(
-                    format!("{}", participant.lobby_role()),
-                    if participant.is_host() {
-                        Style::default()
-                            .fg(Color::Green)
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(Color::White)
-                    },
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("Your Mode: ", Style::default().fg(Color::Cyan)),
-                Span::styled(
-                    format!("{}", participant.participation_mode()),
-                    if participant.can_submit_results() {
-                        Style::default().fg(Color::Green)
-                    } else {
-                        Style::default().fg(Color::Yellow)
-                    },
-                ),
-            ]));
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::raw("Press "),
-                Span::styled(
-                    "t",
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(" to toggle between Active/Spectating"),
-            ]));
-        }
-
-        lines
+        ]
     } else {
         vec![
             Line::from("Not in a lobby"),
@@ -234,11 +187,205 @@ fn render_lobby(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(paragraph, area);
 }
 
-fn render_events(f: &mut Frame, area: Rect, app: &App) {
-    let events: Vec<ListItem> = app
-        .event_log
+fn render_activities(f: &mut Frame, area: Rect, app: &App) {
+    let activities_tab = &app.activities_tab;
+
+    if activities_tab.is_host() {
+        render_activities_host(f, area, activities_tab);
+    } else {
+        render_activities_guest(f, area, activities_tab);
+    }
+}
+
+fn render_activities_host(f: &mut Frame, area: Rect, activities_tab: &super::app::ActivitiesTab) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(50), // Available templates
+            Constraint::Percentage(50), // Planned/running activities
+        ])
+        .split(area);
+
+    // Available templates
+    let template_items: Vec<ListItem> = activities_tab
+        .available_activities()
         .iter()
-        .skip(app.scroll_offset)
+        .enumerate()
+        .map(|(idx, template)| {
+            let prefix = if idx == activities_tab.selected_template() {
+                "> "
+            } else {
+                "  "
+            };
+
+            let mut item = ListItem::new(Line::from(vec![
+                Span::raw(prefix),
+                Span::styled(&template.name, Style::default().fg(Color::Cyan)),
+            ]));
+
+            if idx == activities_tab.selected_template() {
+                item = item.style(Style::default().bg(Color::DarkGray));
+            }
+
+            item
+        })
+        .collect();
+
+    let templates_list = List::new(template_items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Available Activities (p: plan, j/k: select)"),
+    );
+
+    f.render_widget(templates_list, chunks[0]);
+
+    // Planned/running activities
+    let mut activity_text = vec![];
+
+    if let Some(current) = activities_tab.current_activity() {
+        activity_text.push(Line::from(vec![Span::styled(
+            "🎮 Current Activity:",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        activity_text.push(Line::from(""));
+        activity_text.push(Line::from(vec![Span::styled(
+            &current.name,
+            Style::default().fg(Color::Yellow),
+        )]));
+        activity_text.push(Line::from(""));
+        activity_text.push(Line::from(vec![
+            Span::raw("Press "),
+            Span::styled("x", Style::default().fg(Color::Red)),
+            Span::raw(" to cancel"),
+        ]));
+    } else if !activities_tab.planned_activities().is_empty() {
+        activity_text.push(Line::from(vec![Span::styled(
+            "📋 Planned Activities:",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        activity_text.push(Line::from(""));
+
+        for activity in activities_tab.planned_activities() {
+            activity_text.push(Line::from(vec![
+                Span::raw("  • "),
+                Span::styled(&activity.name, Style::default().fg(Color::White)),
+            ]));
+        }
+
+        activity_text.push(Line::from(""));
+        activity_text.push(Line::from(vec![
+            Span::raw("Press "),
+            Span::styled("s", Style::default().fg(Color::Green)),
+            Span::raw(" to start first activity"),
+        ]));
+    } else {
+        activity_text.push(Line::from("No activities planned"));
+        activity_text.push(Line::from(""));
+        activity_text.push(Line::from(vec![
+            Span::raw("Press "),
+            Span::styled("p", Style::default().fg(Color::Green)),
+            Span::raw(" to plan selected activity"),
+        ]));
+    }
+
+    let activities_para = Paragraph::new(activity_text).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Activity Queue"),
+    );
+
+    f.render_widget(activities_para, chunks[1]);
+}
+
+fn render_activities_guest(f: &mut Frame, area: Rect, activities_tab: &super::app::ActivitiesTab) {
+    let mut text = vec![];
+
+    if let Some(current) = activities_tab.current_activity() {
+        text.push(Line::from(vec![Span::styled(
+            "🎮 Current Activity:",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        text.push(Line::from(""));
+        text.push(Line::from(vec![Span::styled(
+            &current.name,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        text.push(Line::from(""));
+
+        // Parse activity config to show prompt
+        if let Ok(challenge) = EchoChallenge::from_config(current.config.clone()) {
+            text.push(Line::from(vec![
+                Span::styled("Prompt: ", Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    challenge.prompt.clone(), // 🔧 FIX: Clone instead of borrowing
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            text.push(Line::from(""));
+        }
+
+        text.push(Line::from("─".repeat(50)));
+        text.push(Line::from(""));
+        text.push(Line::from(vec![
+            Span::styled("Your Response: ", Style::default().fg(Color::Cyan)),
+            Span::styled(
+                activities_tab.activity_input(),
+                Style::default().fg(Color::Green),
+            ),
+        ]));
+        text.push(Line::from(""));
+        text.push(Line::from(vec![
+            Span::raw("Press "),
+            Span::styled("Enter", Style::default().fg(Color::Green)),
+            Span::raw(" to submit"),
+        ]));
+    } else if !activities_tab.planned_activities().is_empty() {
+        text.push(Line::from(vec![Span::styled(
+            "📋 Upcoming Activities:",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        text.push(Line::from(""));
+
+        for activity in activities_tab.planned_activities() {
+            text.push(Line::from(vec![
+                Span::raw("  • "),
+                Span::styled(&activity.name, Style::default().fg(Color::White)),
+            ]));
+        }
+
+        text.push(Line::from(""));
+        text.push(Line::from("Waiting for host to start..."));
+    } else {
+        text.push(Line::from("No activities available"));
+        text.push(Line::from(""));
+        text.push(Line::from("Waiting for host to plan activities..."));
+    }
+
+    let paragraph =
+        Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Activities"));
+
+    f.render_widget(paragraph, area);
+}
+
+fn render_events(f: &mut Frame, area: Rect, app: &App) {
+    let events_tab = &app.events_tab;
+
+    let events: Vec<ListItem> = events_tab
+        .event_log()
+        .iter()
+        .skip(events_tab.scroll_offset())
         .map(|e| ListItem::new(e.as_str()))
         .collect();
 
@@ -246,7 +393,7 @@ fn render_events(f: &mut Frame, area: Rect, app: &App) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(format!("Event Log ({})", app.event_log.len())),
+                .title(format!("Event Log ({})", events_tab.event_log().len())),
         )
         .style(Style::default().fg(Color::White));
 
@@ -254,6 +401,8 @@ fn render_events(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_participants(f: &mut Frame, area: Rect, app: &App) {
+    let participants_tab = &app.participants_tab;
+
     let items: Vec<ListItem> = if let Some(lobby) = &app.lobby_snapshot {
         lobby
             .participants()
@@ -262,7 +411,6 @@ fn render_participants(f: &mut Frame, area: Rect, app: &App) {
             .map(|(idx, p)| {
                 let role_icon = if p.is_host() { "👑" } else { "👤" };
 
-                // Color based on participation mode
                 let (mode_text, mode_style) = match p.participation_mode() {
                     konnekt_session_core::ParticipationMode::Active => {
                         ("🎮 Active", Style::default().fg(Color::Green))
@@ -272,14 +420,12 @@ fn render_participants(f: &mut Frame, area: Rect, app: &App) {
                     }
                 };
 
-                // Highlight selected participant (if host)
                 let selected = app.is_host
                     && app.current_tab == Tab::Participants
-                    && idx == app.selected_participant;
+                    && idx == participants_tab.selected_participant();
 
                 let prefix = if selected { "> " } else { "  " };
 
-                // Format: "> 👑 Alice - 🎮 Active"
                 let text = vec![
                     Span::raw(prefix),
                     Span::raw(format!("{} ", role_icon)),
@@ -311,9 +457,9 @@ fn render_participants(f: &mut Frame, area: Rect, app: &App) {
     };
 
     let title = if app.is_host {
-        "Participants (j/k: select, x: kick)"
+        "Participants (j/k: select, t: toggle mode, x: kick)"
     } else {
-        "Participants"
+        "Participants (t: toggle your mode)"
     };
 
     let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
@@ -337,6 +483,44 @@ fn render_help(f: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("  c", Style::default().fg(Color::Yellow)),
             Span::raw("  Copy join command to clipboard"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "Activities Tab (Host):",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![
+            Span::styled("  j/k", Style::default().fg(Color::Yellow)),
+            Span::raw("  Select activity template"),
+        ]),
+        Line::from(vec![
+            Span::styled("  p", Style::default().fg(Color::Yellow)),
+            Span::raw("  Plan selected activity"),
+        ]),
+        Line::from(vec![
+            Span::styled("  s", Style::default().fg(Color::Yellow)),
+            Span::raw("  Start first planned activity"),
+        ]),
+        Line::from(vec![
+            Span::styled("  x", Style::default().fg(Color::Yellow)),
+            Span::raw("  Cancel current activity"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "Activities Tab (Guest):",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![
+            Span::styled("  Type", Style::default().fg(Color::Yellow)),
+            Span::raw("  Enter your response"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Enter", Style::default().fg(Color::Yellow)),
+            Span::raw("  Submit response"),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
@@ -388,21 +572,21 @@ fn render_help(f: &mut Frame, area: Rect) {
     f.render_widget(paragraph, area);
 }
 
-fn render_footer(f: &mut Frame, area: Rect) {
-    let text = Line::from(vec![
-        Span::styled("y", Style::default().fg(Color::Green)),
-        Span::raw(" copy ID | "),
-        Span::styled("c", Style::default().fg(Color::Green)),
-        Span::raw(" copy cmd | "),
-        Span::styled("t", Style::default().fg(Color::Yellow)),
-        Span::raw(" toggle mode | "),
-        Span::styled("x", Style::default().fg(Color::Yellow)),
-        Span::raw(" kick | "),
-        Span::styled("Tab", Style::default().fg(Color::Yellow)),
-        Span::raw(" switch | "),
-        Span::styled("q", Style::default().fg(Color::Yellow)),
-        Span::raw(" quit"),
-    ]);
+fn render_footer(f: &mut Frame, area: Rect, app: &App) {
+    let shortcuts = match app.current_tab {
+        Tab::Session => "y: copy ID | c: copy cmd | Tab: switch | q: quit",
+        Tab::Activities if app.is_host => {
+            "j/k: select | p: plan | s: start | x: cancel | Tab: switch | q: quit"
+        }
+        Tab::Activities => "Type response | Enter: submit | Tab: switch | q: quit",
+        Tab::Participants if app.is_host => {
+            "j/k: select | t: toggle mode | x: kick | Tab: switch | q: quit"
+        }
+        Tab::Participants => "t: toggle mode | Tab: switch | q: quit",
+        _ => "Tab: switch | q: quit",
+    };
+
+    let text = Line::from(shortcuts);
 
     let paragraph = Paragraph::new(text)
         .block(Block::default().borders(Borders::ALL))

@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use konnekt_session_cli::presentation::tui::{self, App, AppEvent, UserAction};
 use konnekt_session_cli::{CliError, Result};
 use konnekt_session_core::DomainCommand;
+use konnekt_session_core::domain::{ActivityMetadata, ActivityResult};
 use konnekt_session_p2p::{IceServer, P2PLoopBuilder, SessionId, SessionLoop};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -50,14 +51,6 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-
     let cli = Cli::parse();
 
     match cli.command {
@@ -219,9 +212,31 @@ async fn run_tui(mut session_loop: SessionLoop, session_id: SessionId) -> Result
 /// Commands from TUI to SessionLoop
 #[derive(Debug, Clone)]
 enum UserCommand {
-    ToggleParticipationMode { participant_id: Uuid },
-    KickGuest { guest_id: Uuid },
-    LeaveSession { participant_id: Uuid },
+    ToggleParticipationMode {
+        participant_id: Uuid,
+    },
+    KickGuest {
+        guest_id: Uuid,
+    },
+    LeaveSession {
+        participant_id: Uuid,
+    },
+
+    // 🆕 Activity commands
+    PlanActivity {
+        metadata: ActivityMetadata,
+    },
+    StartActivity {
+        activity_id: Uuid,
+    },
+    CancelActivity {
+        activity_id: Uuid,
+    },
+    SubmitActivityResult {
+        activity_id: Uuid,
+        participant_id: Uuid,
+        response: String,
+    },
 }
 
 /// Handle user commands (business logic)
@@ -259,6 +274,58 @@ fn handle_user_command(
                 participant_id,
             })?;
             tracing::info!("Submitted leave session command");
+        }
+
+        // 🆕 Activity command handlers
+        UserCommand::PlanActivity { metadata } => {
+            session_loop.submit_command(DomainCommand::PlanActivity { lobby_id, metadata })?;
+            tracing::info!("Submitted plan activity command");
+        }
+        UserCommand::StartActivity { activity_id } => {
+            session_loop.submit_command(DomainCommand::StartActivity {
+                lobby_id,
+                activity_id,
+            })?;
+            tracing::info!("Submitted start activity command");
+        }
+        UserCommand::CancelActivity { activity_id } => {
+            session_loop.submit_command(DomainCommand::CancelActivity {
+                lobby_id,
+                activity_id,
+            })?;
+            tracing::info!("Submitted cancel activity command");
+        }
+        UserCommand::SubmitActivityResult {
+            activity_id,
+            participant_id,
+            response,
+        } => {
+            // Parse current activity to calculate score
+            if let Some(lobby) = session_loop.get_lobby() {
+                if let Some(activity) = lobby.get_activity(activity_id) {
+                    if let Ok(challenge) =
+                        konnekt_session_core::EchoChallenge::from_config(activity.config.clone())
+                    {
+                        let score = challenge.calculate_score(&response);
+                        let echo_result =
+                            konnekt_session_core::EchoResult::new(response.clone(), 1000);
+
+                        let result = ActivityResult::new(activity_id, participant_id)
+                            .with_data(echo_result.to_json())
+                            .with_score(score)
+                            .with_time(1000);
+
+                        session_loop
+                            .submit_command(DomainCommand::SubmitResult { lobby_id, result })?;
+
+                        tracing::info!(
+                            "Submitted activity result: '{}' (score: {})",
+                            response,
+                            score
+                        );
+                    }
+                }
+            }
         }
     }
     Ok(())
@@ -348,6 +415,44 @@ async fn handle_user_action(
                 .await
                 .map_err(|e| CliError::InvalidConfig(format!("Failed to send command: {}", e)))?;
         }
+
+        // 🆕 Activity actions
+        UserAction::PlanActivity(metadata) => {
+            cmd_tx
+                .send(UserCommand::PlanActivity { metadata })
+                .await
+                .map_err(|e| CliError::InvalidConfig(format!("Failed to send command: {}", e)))?;
+        }
+        UserAction::StartActivity(activity_id) => {
+            cmd_tx
+                .send(UserCommand::StartActivity { activity_id })
+                .await
+                .map_err(|e| CliError::InvalidConfig(format!("Failed to send command: {}", e)))?;
+        }
+        UserAction::CancelActivity(activity_id) => {
+            cmd_tx
+                .send(UserCommand::CancelActivity { activity_id })
+                .await
+                .map_err(|e| CliError::InvalidConfig(format!("Failed to send command: {}", e)))?;
+        }
+        UserAction::SubmitActivityResult {
+            activity_id,
+            response,
+        } => {
+            if let Some(participant_id) = app.get_local_participant_id() {
+                cmd_tx
+                    .send(UserCommand::SubmitActivityResult {
+                        activity_id,
+                        participant_id,
+                        response,
+                    })
+                    .await
+                    .map_err(|e| {
+                        CliError::InvalidConfig(format!("Failed to send command: {}", e))
+                    })?;
+            }
+        }
+
         UserAction::Quit => {
             // Send leave command if we're a guest
             if !app.is_host {
