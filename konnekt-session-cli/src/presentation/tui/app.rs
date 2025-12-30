@@ -58,6 +58,7 @@ pub struct App {
     pub toggle_spectator_requested: bool,
     pub kick_requested: Option<uuid::Uuid>,
     pub selected_participant: usize,
+    pub connection_status: String, // 🆕 Added
 }
 
 impl App {
@@ -76,6 +77,7 @@ impl App {
             toggle_spectator_requested: false,
             kick_requested: None,
             selected_participant: 0,
+            connection_status: "Connecting...".to_string(), // 🆕 Default value
         }
     }
 
@@ -256,5 +258,20 @@ impl App {
                 self.add_event(format!("📥 Message from {}: {} bytes", from, data.len()));
             }
         }
+    }
+
+    /// Update lobby state from SessionLoop
+    pub fn update_lobby(&mut self, lobby: konnekt_session_core::Lobby) {
+        self.session_state.set_lobby(lobby);
+    }
+
+    /// Update peer count from SessionLoop
+    pub fn update_peer_count(&mut self, count: usize) {
+        // Update the connection status
+        self.connection_status = if count > 0 {
+            format!("Connected ({} peers)", count)
+        } else {
+            "Waiting for peers...".to_string()
+        };
     }
 }

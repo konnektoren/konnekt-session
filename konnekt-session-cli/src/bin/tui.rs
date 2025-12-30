@@ -1,11 +1,8 @@
 use clap::{Parser, Subcommand};
-use konnekt_session_cli::{
-    domain::SessionState,
-    infrastructure::{CliError, Result},
-    presentation::tui::{self, App, AppEvent},
-};
+use konnekt_session_cli::presentation::tui::{self, App, AppEvent};
+use konnekt_session_cli::{CliError, Result, domain::SessionState}; // 🆕 FIXED: Import from root
 use konnekt_session_core::{DomainCommand, Participant};
-use konnekt_session_p2p::{ConnectionEvent, IceServer, P2PLoopBuilder, SessionId};
+use konnekt_session_p2p::{IceServer, P2PLoopBuilder, SessionId, SessionLoop};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -52,6 +49,14 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize tracing
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     let cli = Cli::parse();
 
     match cli.command {
@@ -105,66 +110,40 @@ fn build_ice_servers(
 }
 
 async fn create_host(server: &str, name: &str, ice_servers: Vec<IceServer>) -> Result<()> {
-    let (mut runtime, session_id, lobby_id) = konnekt_session_cli::RuntimeBuilder::new()
-        .build_host(server, ice_servers)
+    tracing::info!("🎯 Creating host session...");
+
+    // Build SessionLoop as host
+    let (mut session_loop, session_id) = P2PLoopBuilder::new()
+        .build_session_host(
+            server,
+            ice_servers,
+            "TUI Lobby".to_string(),
+            name.to_string(),
+        )
         .await?;
+
+    let lobby_id = session_loop.lobby_id();
 
     tracing::info!("✅ Session created: {}", session_id);
     tracing::info!("📋 Lobby ID: {}", lobby_id);
 
-    wait_for_peer_id(&mut runtime).await?;
+    // Wait for peer ID
+    wait_for_peer_id(&mut session_loop).await?;
 
-    // Create lobby in domain
-    let lobby = {
-        let cmd = DomainCommand::CreateLobby {
-            lobby_id: Some(lobby_id),
-            lobby_name: "TUI Lobby".to_string(),
-            host_name: name.to_string(),
-        };
+    // Get the created lobby
+    let lobby = session_loop
+        .get_lobby()
+        .ok_or_else(|| CliError::P2PConnection("Lobby not created".to_string()))?
+        .clone();
 
-        runtime.domain_loop_mut().submit(cmd)?; // ✅ Now works with From<QueueError>
-        runtime.domain_loop_mut().poll();
+    tracing::info!("✅ Lobby ready: {}", lobby.name());
 
-        match runtime.domain_loop_mut().drain_events().into_iter().next() {
-            Some(konnekt_session_core::DomainEvent::LobbyCreated { lobby }) => {
-                tracing::info!("✅ Lobby created: {}", lobby.name());
-                lobby
-            }
-            _ => {
-                return Err(CliError::InvalidConfig(
-                    "Failed to create lobby".to_string(),
-                ));
-            }
-        }
-    };
+    let host = Participant::new_host(name.to_string())?; // Auto-converts via From<ParticipantError>
 
-    runtime.set_lobby(lobby_id, true);
-
-    // Initial broadcast (for any peers already connected)
-    runtime
-        .p2p_loop_mut()
-        .broadcast_event(konnekt_session_p2p::DomainEvent::LobbyCreated {
-            lobby_id,
-            host_id: lobby.host_id(),
-            name: lobby.name().to_string(),
-        })?;
-
-    tracing::info!("📤 Initial LobbyCreated broadcast");
-
-    let host = Participant::new_host(name.to_string())?; // ✅ Now works with From<ParticipantError>
     let mut state = SessionState::new(host);
-    state.set_lobby(lobby.clone());
+    state.set_lobby(lobby);
 
-    // Create snapshot for peer sync
-    let lobby_snapshot = konnekt_session_p2p::LobbySnapshot {
-        lobby_id,
-        name: lobby.name().to_string(),
-        host_id: lobby.host_id(),
-        participants: lobby.participants().values().cloned().collect(),
-        as_of_sequence: runtime.p2p_loop().current_sequence(),
-    };
-
-    run_tui(runtime, state, session_id, Some(lobby_snapshot)).await
+    run_tui(session_loop, state, session_id, true).await
 }
 
 async fn join_session(
@@ -173,86 +152,105 @@ async fn join_session(
     name: &str,
     ice_servers: Vec<IceServer>,
 ) -> Result<()> {
+    tracing::info!("🎯 Joining session...");
+
     let session_id = SessionId::parse(session_id_str)?;
 
-    let (mut runtime, session_id, lobby_id) = konnekt_session_cli::RuntimeBuilder::new()
-        .build_guest(server, session_id, ice_servers)
+    let (mut session_loop, lobby_id) = P2PLoopBuilder::new()
+        .build_session_guest(server, session_id.clone(), ice_servers)
         .await?;
 
     tracing::info!("✅ Joined session: {}", session_id);
 
-    wait_for_peer_id(&mut runtime).await?;
+    // Wait for peer ID
+    wait_for_peer_id(&mut session_loop).await?;
 
-    // Wait for lobby to sync
-    tracing::info!("⏳ Waiting for lobby sync...");
-    wait_for_lobby_sync(&mut runtime, lobby_id).await?;
+    // Wait for peer connection
+    wait_for_peer_connection(&mut session_loop).await?;
+
+    // Wait for lobby sync (host will send automatically)
+    tracing::info!("⏳ Waiting for lobby sync from host...");
+    wait_for_lobby_sync(&mut session_loop).await?;
+
+    // Submit join command
+    session_loop.submit_command(DomainCommand::JoinLobby {
+        lobby_id,
+        guest_name: name.to_string(),
+    })?;
+
+    tracing::info!("📤 Sent join request");
+
+    // Give it a moment to process
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    session_loop.poll();
 
     let guest = Participant::new_guest(name.to_string())?;
+
     let state = SessionState::new(guest);
 
-    run_tui(runtime, state, session_id, None).await
+    run_tui(session_loop, state, session_id, false).await
 }
 
 async fn run_tui(
-    mut runtime: konnekt_session_cli::DualLoopRuntime,
+    mut session_loop: SessionLoop,
     state: SessionState,
     session_id: SessionId,
-    lobby_snapshot: Option<konnekt_session_p2p::LobbySnapshot>,
+    is_host: bool,
 ) -> Result<()> {
     let mut terminal = tui::setup_terminal()?;
     let session_id_str = session_id.to_string();
     let mut app = App::new(state, session_id_str);
 
-    let (runtime_tx, mut runtime_rx) = mpsc::channel(100);
+    let (state_tx, mut state_rx) = mpsc::channel(100);
 
-    // Spawn background runtime task
-    let runtime_handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_millis(10));
+    // Spawn background session loop task
+    let session_handle = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(100));
 
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    runtime.tick();
+                    // Poll SessionLoop (auto-syncs P2P ↔ Core)
+                    let processed = session_loop.poll();
 
-                    // Handle peer connected - send full sync if host
-                    if let Some(ref snapshot) = lobby_snapshot {
-                        for event in runtime.drain_connection_events() {
-                            if let ConnectionEvent::PeerConnected(peer_id) = &event {
-                                tracing::info!("📤 Sending full sync to new peer {}", peer_id);
-
-                                if let Err(e) = runtime.p2p_loop_mut().send_full_sync_to_peer(*peer_id, snapshot.clone()) {
-                                    tracing::error!("❌ Failed to send full sync: {:?}", e);
-                                }
-                            }
-
-                            let _ = runtime_tx.send(event).await;
-                        }
-                    } else {
-                        // Guest - just forward events
-                        for event in runtime.drain_connection_events() {
-                            let _ = runtime_tx.send(event).await;
-                        }
+                    if processed > 0 {
+                        tracing::trace!("SessionLoop processed {} events", processed);
                     }
+
+                    // Send lobby state to UI
+                    if let Some(lobby) = session_loop.get_lobby() {
+                        let _ = state_tx.send(AppUpdate::LobbyState(lobby.clone())).await;
+                    }
+
+                    // Send peer count
+                    let peer_count = session_loop.connected_peers().len();
+                    let _ = state_tx.send(AppUpdate::PeerCount(peer_count)).await;
                 }
             }
         }
     });
 
     // Run TUI event loop
-    let result = run_app_loop(&mut terminal, &mut app, &mut runtime_rx).await;
+    let result = run_app_loop(&mut terminal, &mut app, &mut state_rx).await;
 
     tui::restore_terminal(terminal)?;
 
     // Cleanup
-    runtime_handle.abort();
+    session_handle.abort();
 
     result
+}
+
+/// Updates sent from SessionLoop to TUI
+enum AppUpdate {
+    LobbyState(konnekt_session_core::Lobby),
+    PeerCount(usize),
 }
 
 async fn run_app_loop(
     terminal: &mut tui::TuiTerminal,
     app: &mut App,
-    runtime_rx: &mut mpsc::Receiver<ConnectionEvent>,
+    state_rx: &mut mpsc::Receiver<AppUpdate>,
 ) -> Result<()> {
     loop {
         terminal.draw(|f| tui::ui::render(f, app))?;
@@ -272,8 +270,15 @@ async fn run_app_loop(
                 }
             }
 
-            Some(event) = runtime_rx.recv() => {
-                app.handle_connection_event(&event);
+            Some(update) = state_rx.recv() => {
+                match update {
+                    AppUpdate::LobbyState(lobby) => {
+                        app.update_lobby(lobby);
+                    }
+                    AppUpdate::PeerCount(count) => {
+                        app.update_peer_count(count);
+                    }
+                }
             }
         }
     }
@@ -281,14 +286,17 @@ async fn run_app_loop(
     Ok(())
 }
 
-async fn wait_for_peer_id(runtime: &mut konnekt_session_cli::DualLoopRuntime) -> Result<()> {
+async fn wait_for_peer_id(session_loop: &mut SessionLoop) -> Result<()> {
     let timeout = Duration::from_secs(5);
     let start = std::time::Instant::now();
 
-    while start.elapsed() < timeout {
-        runtime.tick();
+    tracing::info!("⏳ Waiting for peer ID...");
 
-        if runtime.p2p_loop().local_peer_id().is_some() {
+    while start.elapsed() < timeout {
+        session_loop.poll();
+
+        if session_loop.local_peer_id().is_some() {
+            tracing::info!("✅ Peer ID assigned");
             return Ok(());
         }
 
@@ -300,27 +308,71 @@ async fn wait_for_peer_id(runtime: &mut konnekt_session_cli::DualLoopRuntime) ->
     ))
 }
 
-async fn wait_for_lobby_sync(
-    runtime: &mut konnekt_session_cli::DualLoopRuntime,
-    lobby_id: uuid::Uuid,
-) -> Result<()> {
+/// Wait for at least one peer to connect
+async fn wait_for_peer_connection(session_loop: &mut SessionLoop) -> Result<()> {
     let timeout = Duration::from_secs(10);
     let start = std::time::Instant::now();
 
-    while start.elapsed() < timeout {
-        runtime.tick();
+    tracing::info!("⏳ Waiting for peer connection...");
 
-        // Check if we received lobby via P2P sync
-        if let Some(lobby) = runtime.domain_loop().event_loop().get_lobby(&lobby_id) {
-            tracing::info!("✅ Lobby '{}' synced!", lobby.name());
+    while start.elapsed() < timeout {
+        session_loop.poll();
+
+        if !session_loop.connected_peers().is_empty() {
+            tracing::info!(
+                "✅ Connected to {} peer(s)",
+                session_loop.connected_peers().len()
+            );
+
+            // Give the connection a moment to fully establish
+            tokio::time::sleep(Duration::from_millis(500)).await;
+
+            // Poll again to let host detect the connection
+            session_loop.poll();
+
             return Ok(());
         }
 
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
+    Err(CliError::P2PConnection(
+        "Timeout waiting for peer connection".to_string(),
+    ))
+}
+
+async fn wait_for_lobby_sync(session_loop: &mut SessionLoop) -> Result<()> {
+    let timeout = Duration::from_secs(10);
+    let start = std::time::Instant::now();
+
+    while start.elapsed() < timeout {
+        // Poll to process incoming messages
+        let processed = session_loop.poll();
+
+        if processed > 0 {
+            tracing::debug!("Processed {} events during sync wait", processed);
+        }
+
+        // Check if we received lobby via P2P sync
+        if let Some(lobby) = session_loop.get_lobby() {
+            tracing::info!("✅ Lobby '{}' synced!", lobby.name());
+            tracing::info!("   Host: {:?}", lobby.host_id());
+            tracing::info!("   Participants: {}", lobby.participants().len());
+            return Ok(());
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    tracing::error!("❌ Timeout waiting for lobby sync");
+    tracing::error!("   Lobby ID: {}", session_loop.lobby_id());
+    tracing::error!(
+        "   Connected peers: {}",
+        session_loop.connected_peers().len()
+    );
+
     Err(CliError::P2PConnection(format!(
         "Timeout waiting for lobby {} to sync",
-        lobby_id
+        session_loop.lobby_id()
     )))
 }

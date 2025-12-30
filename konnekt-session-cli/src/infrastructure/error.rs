@@ -35,10 +35,16 @@ pub enum CliError {
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
 
+    #[error("Invalid input: {0}")] // 🆕 From error.rs
+    InvalidInput(String),
+
+    #[error("Session not initialized")] // 🆕 From error.rs
+    NotInitialized,
+
+    // Auto-conversions from dependencies
     #[error("P2P error: {0}")]
     P2P(#[from] konnekt_session_p2p::P2PError),
 
-    // 🆕 ADD: Core domain errors
     #[error("Participant error: {0}")]
     Participant(#[from] konnekt_session_core::ParticipantError),
 
