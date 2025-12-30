@@ -22,6 +22,10 @@ cucumber = { version = "0.22" }
 tokio = { version = "1.37", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
+# Serialization
+serde = { workspace=true }
+serde_json = { workspace=true }
+
 [dev-dependencies]
 tokio = { version = "1.37", features = ["macros", "rt-multi-thread"] }
 

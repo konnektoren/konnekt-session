@@ -22,7 +22,7 @@ pub struct SessionWorld {
     /// Track participant IDs by name
     pub participant_ids: HashMap<String, Uuid>,
 
-    /// Track errors
+    /// Track errors (also used to temporarily store P2P events as JSON)
     pub last_error: Option<String>,
 }
 
@@ -68,5 +68,17 @@ impl SessionWorld {
     /// Get last error message
     pub fn last_error_message(&self) -> Option<&str> {
         self.last_error.as_deref()
+    }
+
+    // 🆕 Helper for P2P integration tests
+    /// Get or create a lobby ID for P2P tests
+    pub fn get_or_create_lobby_id(&mut self) -> Uuid {
+        if self.lobby_ids.is_empty() {
+            let lobby_id = Uuid::new_v4();
+            self.lobby_ids.insert("Test Lobby".to_string(), lobby_id);
+            lobby_id
+        } else {
+            *self.lobby_ids.values().next().unwrap()
+        }
     }
 }
