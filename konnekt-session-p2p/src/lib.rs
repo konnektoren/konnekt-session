@@ -8,6 +8,7 @@ pub mod application;
 pub mod infrastructure;
 
 // Re-exports for convenience
+pub use application::runtime::{MessageQueue, P2PLoop, P2PLoopBuilder, QueueError};
 pub use application::{
     ConnectionEvent, EventSyncManager, LobbySnapshot, P2PSession, SessionConfig, SyncError,
     SyncMessage, SyncResponse,
