@@ -126,10 +126,41 @@ Each ADR in this directory follows the **Michael Nygard format**:
 |✅ Accepted
 |2025-12-29
 
+
 |xref:0017-use-schemars-and-aide-for-schema-generation.adoc[ADR-0017]
 |Use Schemars for Schema Generation with Aide for OpenAPI
 |✅ Accepted
 |2025-12-29
+
+|xref:0018-use-ratatui-for-interactive-cli-development.adoc[ADR-0018]
+|Use Ratatui for Interactive CLI Development
+|✅ Accepted
+|2025-12-29
+
+|xref:0019-use-arboard-for-clipboard-integration-in-tui.adoc[ADR-0019]
+|Use Arboard for Clipboard Integration in TUI
+|✅ Accepted
+|2025-12-29
+
+|xref:0020-use-dual-event-loop-with-acl.adoc[ADR-0020]
+|Dual Event Loop Architecture with Anti-Corruption Layer
+|✅ Accepted
+|2025-12-30
+
+|xref:0021-use-mockall-for-test-doubles.adoc[ADR-0021]
+|Use Mockall for Test Doubles
+|✅ Accepted
+|2025-12-30
+
+|xref:0022-use-tokio-console-for-async-debugging.adoc[ADR-0022]
+|Use tokio-console for Async Runtime Debugging
+|✅ Accepted
+|2025-12-30
+
+|xref:0023-use-tracing-chrome-for-performance-profiling.adoc[ADR-0023]
+|Use tracing-chrome for Performance Profiling
+|✅ Accepted
+|2025-12-30
 |===
 
 == Guidelines for Writing ADRs

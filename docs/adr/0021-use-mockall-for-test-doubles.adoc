@@ -1,0 +1,317 @@
+= ADR-0021: Use Mockall for Test Doubles
+
+**Status**: Accepted +
+**Date**: 2025-12-30 +
+**Deciders**: Core Team
+
+== Context
+
+Konnekt Session uses **hexagonal architecture** (xref:0020-use-dual-event-loop-with-acl.adoc[ADR-0020]) where:
+
+* **Domain layer** is pure business logic (no I/O)
+* **Infrastructure layer** provides adapters (P2P, storage, auth)
+* **Application layer** orchestrates workflows
+
+To test domain logic in isolation, we need **test doubles** for infrastructure dependencies.
+
+=== Testing Challenges
+
+**Without mocking**:
+[source,rust]
+----
+#[tokio::test]
+async fn test_guest_joins_lobby() {
+    // ❌ Requires real P2P connection
+    let p2p = P2PSession::connect("wss://match.example.com").await?;
+
+    // ❌ Requires real WebRTC handshake
+    let lobby = create_lobby_with_p2p(p2p).await?;
+
+    // ❌ Flaky - network dependent
+    assert_eq!(lobby.participants().len(), 1);
+}
+----
+
+**Manual test doubles**:
+[source,rust]
+----
+struct FakeP2PSession {
+    messages: Vec<Vec<u8>>,
+}
+
+impl P2PSession for FakeP2PSession {
+    fn poll_events(&mut self) -> Vec<Event> { /* ... */ }
+    fn broadcast(&mut self, data: Vec<u8>) { /* ... */ }
+    // ... 15 more methods to implement
+}
+----
+
+* ❌ **Boilerplate** - every trait needs manual implementation
+* ❌ **Maintenance** - update mocks when traits change
+* ❌ **Limited assertions** - hard to verify "broadcast called with X"
+
+=== Requirements
+
+* **Trait mocking** - mock infrastructure ports (P2P, storage, auth)
+* **Behavior verification** - assert method calls, arguments, order
+* **Return control** - configure return values per test
+* **Compile-time safety** - catch interface changes
+* **Minimal boilerplate** - auto-generate from traits
+
+=== Alternatives Considered
+
+==== Manual test doubles (current)
+[source,rust]
+----
+struct FakeStorage {
+    data: HashMap<String, Vec<u8>>,
+}
+
+impl Storage for FakeStorage {
+    fn get(&self, key: &str) -> Option<Vec<u8>> {
+        self.data.get(key).cloned()
+    }
+    // ... more methods
+}
+----
+
+* ✅ **No dependencies** - pure Rust
+* ✅ **Full control** - customize behavior
+* ❌ **Boilerplate** - 50+ lines per mock
+* ❌ **No verification** - can't assert "get() called twice"
+* ❌ **Brittle** - breaks when traits change
+
+==== `faux` crate
+[source,rust]
+----
+#[faux::create]
+pub struct P2PSession { /* ... */ }
+
+#[faux::methods]
+impl P2PSession {
+    pub fn broadcast(&mut self, data: Vec<u8>) { /* ... */ }
+}
+----
+
+* ✅ **Struct mocking** - works with concrete types
+* ❌ **Proc macro overhead** - slower compile times
+* ❌ **Less flexible** - harder to mock traits
+* ❌ **Smaller ecosystem** - fewer examples/docs
+
+==== `double` crate
+[source,rust]
+----
+#[double]
+use crate::P2PSession;
+
+impl P2PSession {
+    // Test doubles enabled via feature flag
+}
+----
+
+* ✅ **Feature-gated** - mocks only in tests
+* ❌ **Requires modifications** - original code needs `#[double]`
+* ❌ **Less popular** - smaller community
+
+== Decision
+
+We will use **mockall** for creating test doubles of infrastructure ports.
+
+=== Implementation
+
+**Step 1: Add dependency** (dev-dependencies only):
+[source,toml]
+----
+[dev-dependencies]
+mockall = "0.13"
+----
+
+**Step 2: Make traits mockable**:
+[source,rust]
+----
+#[cfg_attr(test, mockall::automock)]
+pub trait P2PPort {
+    fn broadcast(&mut self, msg: Vec<u8>) -> Result<()>;
+    fn poll_events(&mut self) -> Vec<ConnectionEvent>;
+}
+----
+
+**Step 3: Use in tests**:
+[source,rust]
+----
+#[test]
+fn test_domain_broadcasts_on_guest_join() {
+    let mut mock_p2p = MockP2PPort::new();
+
+    // Arrange: Expect broadcast to be called once
+    mock_p2p
+        .expect_broadcast()
+        .times(1)
+        .withf(|msg: &Vec<u8>| {
+            // Verify message contains GuestJoined event
+            let event: DomainEvent = serde_json::from_slice(msg).unwrap();
+            matches!(event, DomainEvent::GuestJoined { .. })
+        })
+        .returning(|_| Ok(()));
+
+    // Act: Join lobby
+    let mut lobby = Lobby::new("Test".into(), host).unwrap();
+    lobby.add_guest(guest).unwrap();
+
+    // Assert: Mock verifies broadcast was called
+}
+----
+
+=== Rationale
+
+**Most Popular**:
+* 1.5M downloads/month (vs faux: 50k/month)
+* Used by: `tokio`, `hyper`, `sqlx`
+* Mature (v0.13, stable API)
+
+**Powerful Assertions**:
+[source,rust]
+----
+mock.expect_send()
+    .times(2..=5)                    // Called 2-5 times
+    .with(eq("hello"))               // With specific arg
+    .in_sequence(&mut seq)           // In order
+    .returning(|_| Ok(()));          // Return value
+----
+
+**Type Safety**:
+* Compile errors if mock doesn't match trait
+* Auto-complete in IDEs
+* Refactoring-friendly
+
+**Clean Separation**:
+* Mocks only exist in `#[cfg(test)]`
+* Production code unaffected
+* No runtime overhead
+
+== Consequences
+
+=== Positive
+
+* ✅ **Fast tests** - no network I/O, deterministic
+* ✅ **Isolated domain** - test business logic without infrastructure
+* ✅ **Behavior verification** - assert interactions, not just state
+* ✅ **Maintainable** - auto-updates when traits change
+* ✅ **Good errors** - clear messages when expectations fail
+
+=== Negative
+
+* ❌ **Compile time** - proc macros slow down builds (~1-2s)
+* ❌ **Dev dependency** - 200KB+ dependency tree
+* ❌ **Learning curve** - team needs to learn mockall API
+
+=== Neutral
+
+* **Test-only** - never in production binary
+* **Not for everything** - use real implementations when simple (e.g., in-memory storage)
+
+== Usage Patterns
+
+=== Pattern 1: Port Adapter
+[source,rust]
+----
+// Infrastructure port (domain boundary)
+#[cfg_attr(test, mockall::automock)]
+pub trait StoragePort {
+    fn save(&mut self, key: String, value: Vec<u8>) -> Result<()>;
+    fn load(&self, key: &str) -> Result<Option<Vec<u8>>>;
+}
+
+// Real adapter (infrastructure layer)
+pub struct LocalStorageAdapter { /* ... */ }
+
+impl StoragePort for LocalStorageAdapter { /* ... */ }
+
+// Test with mock
+#[test]
+fn test_lobby_persists_state() {
+    let mut mock_storage = MockStoragePort::new();
+    mock_storage.expect_save().returning(|_, _| Ok(()));
+
+    let service = LobbyService::new(mock_storage);
+    service.create_lobby("Test").unwrap();
+}
+----
+
+=== Pattern 2: Sequence Verification
+[source,rust]
+----
+#[test]
+fn test_event_order() {
+    let mut seq = Sequence::new();
+    let mut mock = MockP2PPort::new();
+
+    mock.expect_broadcast()
+        .times(1)
+        .in_sequence(&mut seq)
+        .returning(|_| Ok(()));
+
+    mock.expect_poll_events()
+        .times(1)
+        .in_sequence(&mut seq)
+        .returning(|| vec![]);
+
+    // Must be called in this order
+    domain_loop.poll(&mut mock);
+}
+----
+
+=== Pattern 3: Argument Matching
+[source,rust]
+----
+use mockall::predicate::*;
+
+mock.expect_send()
+    .with(
+        eq(peer_id),                        // Exact match
+        function(|msg: &Vec<u8>| msg.len() > 0)  // Custom predicate
+    )
+    .returning(|_, _| Ok(()));
+----
+
+== Anti-Patterns to Avoid
+
+❌ **Don't mock domain entities**:
+[source,rust]
+----
+// BAD: Domain entities should be real
+#[cfg_attr(test, mockall::automock)]
+pub trait Lobby { /* ... */ }
+
+// GOOD: Domain entities are values
+#[test]
+fn test_lobby() {
+    let lobby = Lobby::new("Test", host)?;  // Real instance
+}
+----
+
+❌ **Don't over-mock**:
+[source,rust]
+----
+// BAD: Mocking everything
+let mock_uuid = MockUuidGenerator::new();
+let mock_time = MockClock::new();
+
+// GOOD: Use real simple types
+let id = Uuid::new_v4();
+let now = Instant::now();
+----
+
+✅ **Mock at architectural boundaries** (ports/adapters only)
+
+== References
+
+* **mockall** – https://docs.rs/mockall/
+* **Repository** – https://github.com/asomers/mockall
+* **Testing Strategies** – https://martinfowler.com/articles/mocksArentStubs.html
+
+=== Related ADRs
+
+* xref:0020-use-dual-event-loop-with-acl.adoc[ADR-0020] – Dual event loop creates ports to mock
+* xref:0007-use-cucumber-for-behavior-driven-testing.adoc[ADR-0007] – Cucumber for integration tests
+* xref:0006-use-cargo-workspace-for-modular-architecture.adoc[ADR-0006] – Clear module boundaries

@@ -1,0 +1,288 @@
+= ADR-0022: Use tokio-console for Async Runtime Debugging
+
+**Status**: Accepted +
+**Date**: 2025-12-30 +
+**Deciders**: Core Team
+
+== Context
+
+Konnekt Session uses **async Rust** extensively:
+
+* **P2P event loop** polls WebRTC connections
+* **Domain event loop** processes commands asynchronously
+* **TUI** runs in separate async tasks
+* **Dual event loops** (xref:0020-use-dual-event-loop-with-acl.adoc[ADR-0020]) coordinate via channels
+
+Async debugging challenges:
+
+* **Task starvation** - one loop blocking others
+* **Channel deadlocks** - queues filling up
+* **Performance** - slow polls causing latency
+* **Instrumentation gaps** - `println!` debugging is insufficient
+
+=== Current Debugging Experience
+
+**Without tokio-console**:
+[source,rust]
+----
+// ❌ Blind debugging
+tokio::spawn(async move {
+    loop {
+        println!("P2P loop tick");  // Spam
+        p2p_loop.poll();            // How long does this take?
+        interval.tick().await;      // Is this task starving?
+    }
+});
+----
+
+* ❌ **No visibility** - can't see task states
+* ❌ **Manual instrumentation** - add logs everywhere
+* ❌ **Post-mortem only** - no live inspection
+* ❌ **Performance blind spots** - can't identify bottlenecks
+
+=== Requirements
+
+* **Live inspection** - see running tasks in real-time
+* **Task metrics** - CPU time, poll duration, wait times
+* **Resource tracking** - channels, mutexes, semaphores
+* **Minimal overhead** - negligible production impact when disabled
+* **Developer UX** - easy to enable during development
+
+=== Alternatives Considered
+
+==== `tracing` with logs (current)
+[source,rust]
+----
+#[instrument]
+async fn poll(&mut self) {
+    debug!("Polling P2P loop");
+    // ...
+}
+----
+
+* ✅ **Already using** - xref:0005-use-tracing-for-logging-and-diagnostics.adoc[ADR-0005]
+* ✅ **Production-safe** - structured logs
+* ❌ **No live view** - must read logs after
+* ❌ **No aggregation** - hard to see task overview
+* ❌ **No resource tracking** - can't see channel state
+
+==== `async-profiler` / Flamegraphs
+[source,bash]
+----
+cargo flamegraph --bin konnekt-cli
+----
+
+* ✅ **Performance profiling** - find CPU hotspots
+* ❌ **No async awareness** - treats tasks as threads
+* ❌ **Sampling only** - misses short-lived tasks
+* ❌ **Post-mortem** - no live debugging
+
+==== Manual instrumentation
+[source,rust]
+----
+static TASK_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+tokio::spawn(async move {
+    TASK_COUNT.fetch_add(1, Ordering::Relaxed);
+    // ...
+    TASK_COUNT.fetch_sub(1, Ordering::Relaxed);
+});
+----
+
+* ✅ **Full control** - track exactly what you need
+* ❌ **Boilerplate** - manual counters everywhere
+* ❌ **Error-prone** - forget to decrement
+* ❌ **Limited** - can't track tokio internals
+
+== Decision
+
+We will use **tokio-console** for async runtime debugging during development.
+
+=== Implementation
+
+**Step 1: Add dependencies** (feature-gated):
+[source,toml]
+----
+[dependencies]
+tokio = { version = "1.42", features = ["macros", "rt-multi-thread"] }
+
+# Feature-gated for debugging
+console-subscriber = { version = "0.4", optional = true }
+
+[features]
+console = ["console-subscriber", "tokio/tracing"]
+----
+
+**Step 2: Initialize subscriber**:
+[source,rust]
+----
+fn init_tracing() {
+    #[cfg(feature = "console")]
+    if std::env::var("TOKIO_CONSOLE").is_ok() {
+        console_subscriber::init();
+        eprintln!("🔍 tokio-console enabled on :6669");
+        return;
+    }
+
+    // Default: tracing-subscriber
+    tracing_subscriber::fmt::init();
+}
+----
+
+**Step 3: Enable in Justfile**:
+[source,just]
+----
+# Run with tokio-console enabled
+host-console NAME="TestHost":
+    @echo "🔍 Starting with tokio-console"
+    @echo "   Run 'tokio-console' in another terminal"
+    TOKIO_CONSOLE=1 RUSTFLAGS="--cfg tokio_unstable" \
+        cargo run --features console -- create-host --name "{{ NAME }}"
+
+# Install tokio-console CLI
+install-tokio-console:
+    cargo install --locked tokio-console
+----
+
+**Step 4: Connect with CLI**:
+[source,bash]
+----
+# Terminal 1: Start app
+$ just host-console Alice
+🔍 Starting with tokio-console
+   Run 'tokio-console' in another terminal
+📡 Console server started on 127.0.0.1:6669
+
+# Terminal 2: Connect console
+$ tokio-console
+----
+
+=== Rationale
+
+**Built by Tokio Team**:
+* First-party tool for `tokio` runtime
+* Deep integration with runtime internals
+* Designed specifically for async debugging
+
+**Live Metrics**:
+```
+┌─────────────────────────────────────────────────┐
+│ Tasks                                           │
+├─────────────┬──────────┬──────────┬────────────┤
+│ Name        │ State    │ CPU Time │ Polls      │
+├─────────────┼──────────┼──────────┼────────────┤
+│ p2p_loop    │ Running  │ 125ms    │ 1,234      │
+│ domain_loop │ Idle     │ 45ms     │ 567        │
+│ tui_render  │ Waiting  │ 10ms     │ 89         │
+└─────────────┴──────────┴──────────┴────────────┘
+```
+
+**Resource Tracking**:
+```
+┌─────────────────────────────────────────────────┐
+│ Resources (Channels)                            │
+├─────────────┬──────────┬──────────┬────────────┤
+│ Type        │ Capacity │ Messages │ Waiting    │
+├─────────────┼──────────┼──────────┼────────────┤
+│ mpsc        │ 100      │ 23       │ 0          │
+│ mpsc        │ 100      │ 98       │ 2 tasks    │ ← Bottleneck!
+└─────────────┴──────────┴──────────┴────────────┘
+```
+
+**Zero Production Cost**:
+* Disabled by default (feature flag)
+* No runtime overhead when not compiled
+* Only in development builds
+
+== Consequences
+
+=== Positive
+
+* ✅ **Live visibility** - see tasks running in real-time
+* ✅ **Performance insights** - identify slow polls instantly
+* ✅ **Deadlock detection** - spot blocked tasks/channels
+* ✅ **Developer productivity** - debug async without guessing
+* ✅ **Official tooling** - maintained by Tokio team
+
+=== Negative
+
+* ❌ **Development only** - not for production monitoring
+* ❌ **Requires unstable features** - `RUSTFLAGS="--cfg tokio_unstable"`
+* ❌ **Extra dependency** - ~500KB in dev builds
+* ❌ **Network port** - console server uses TCP :6669
+
+=== Neutral
+
+* **Feature-gated** - opt-in via `--features console`
+* **Terminal-based** - not a web UI (see alternatives below)
+* **Local only** - doesn't support remote debugging (security)
+
+== Usage Patterns
+
+=== Pattern 1: Task Monitoring
+```bash
+# Start with console enabled
+$ TOKIO_CONSOLE=1 cargo run --features console
+
+# In another terminal
+$ tokio-console
+# Navigate with arrow keys
+# Press 'd' for task details
+# Press 'r' for resource view
+```
+
+=== Pattern 2: Performance Profiling
+[source,rust]
+----
+// Instrument critical sections
+#[instrument(name = "p2p_poll")]
+async fn poll_p2p(&mut self) {
+    // tokio-console shows:
+    // - How long this takes
+    // - How often it's called
+    // - If it's blocking other tasks
+}
+----
+
+=== Pattern 3: Deadlock Debugging
+```
+# Console shows:
+# Task A: Waiting on channel RX (10s)
+# Task B: Waiting on channel TX (10s)
+# → Deadlock detected!
+```
+
+== When to Use
+
+**Use tokio-console for**:
+* ✅ Task starvation issues
+* ✅ Channel backpressure debugging
+* ✅ Async performance profiling
+* ✅ Understanding task spawn patterns
+
+**Don't use for**:
+* ❌ Production monitoring (use metrics/logs)
+* ❌ CPU profiling (use `cargo flamegraph`)
+* ❌ Memory debugging (use `valgrind`/`heaptrack`)
+
+== Future Enhancements
+
+**Web UI Alternative**:
+* Consider `tokio-metrics` + web dashboard for remote debugging
+* Example: https://github.com/tokio-rs/console/issues/172
+
+**Metric Export**:
+* Export console metrics to Prometheus/Grafana
+* https://github.com/tokio-rs/console/issues/89
+
+== References
+
+* **tokio-console** – https://github.com/tokio-rs/console
+* **Documentation** – https://docs.rs/console-subscriber/
+* **Tutorial** – https://tokio.rs/tokio/topics/tracing
+
+=== Related ADRs
+
+* xref:0020-use-dual-event-loop-with-acl.adoc[ADR-0020] – Dual loops benefit from task monitoring
+* xref:0005-use-tracing-for-logging-and-diagnostics.adoc[ADR-0005] – Integrates with tracing
+* xref:0011-use-std-async-for-wasm-compatibility.adoc[ADR-0011] – Async runtime foundation

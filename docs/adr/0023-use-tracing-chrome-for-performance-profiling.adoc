@@ -1,0 +1,366 @@
+= ADR-0023: Use tracing-chrome for Performance Profiling
+
+**Status**: Accepted +
+**Date**: 2025-12-30 +
+**Deciders**: Core Team
+
+== Context
+
+Konnekt Session requires **performance profiling** to:
+
+* **Measure latency** - P2P message round-trips
+* **Identify bottlenecks** - slow event processing
+* **Optimize hot paths** - domain command execution
+* **Visualize timelines** - see event sequences
+
+Traditional profiling tools don't integrate well with `tracing`:
+
+* **`perf`/`flamegraph`** - sampling-based, misses tracing spans
+* **`criterion`** - microbenchmarks, not real workloads
+* **Manual timing** - error-prone, scattered code
+
+=== Current Profiling Experience
+
+**Without tracing-chrome**:
+[source,rust]
+----
+// ❌ Manual timing
+let start = Instant::now();
+p2p_loop.poll();
+let duration = start.elapsed();
+println!("Poll took: {:?}", duration);  // Lost in logs
+----
+
+* ❌ **No visualization** - text output only
+* ❌ **No context** - can't see nested spans
+* ❌ **Manual instrumentation** - add timing everywhere
+* ❌ **No timeline** - can't see parallel execution
+
+=== Requirements
+
+* **Visual timeline** - see spans over time
+* **Nested spans** - understand call hierarchies
+* **Async-aware** - track task switches
+* **Low overhead** - usable in development
+* **Standard format** - works with existing tools
+
+=== Alternatives Considered
+
+==== `tracing-subscriber` with JSON logs
+[source,rust]
+----
+tracing_subscriber::fmt()
+    .json()
+    .init();
+----
+
+* ✅ **Structured output** - machine-readable
+* ❌ **No visualization** - requires custom tooling
+* ❌ **Hard to analyze** - grep/jq not ideal for timelines
+
+==== `tracing-flame` (flamegraphs)
+[source,rust]
+----
+let (flame_layer, _guard) = tracing_flame::FlameLayer::new();
+tracing_subscriber::registry().with(flame_layer).init();
+----
+
+* ✅ **Call stacks** - good for CPU profiling
+* ❌ **No timeline** - aggregates spans
+* ❌ **No concurrency view** - can't see parallel tasks
+* ❌ **Less familiar** - not standard format
+
+==== Custom tracing layer
+[source,rust]
+----
+struct TimingLayer {
+    spans: HashMap<Id, Instant>,
+}
+
+impl<S> Layer<S> for TimingLayer { /* ... */ }
+----
+
+* ✅ **Full control** - track exactly what you need
+* ❌ **Reinventing wheel** - Chrome format already exists
+* ❌ **No tooling** - need to build visualizer
+
+== Decision
+
+We will use **tracing-chrome** to export tracing spans to Chrome's trace format (Perfetto).
+
+=== Implementation
+
+**Step 1: Add dependency** (feature-gated):
+[source,toml]
+----
+[dependencies]
+tracing-chrome = { version = "0.7", optional = true }
+
+[features]
+chrome-trace = ["tracing-chrome"]
+----
+
+**Step 2: Initialize layer**:
+[source,rust]
+----
+fn init_tracing() {
+    #[cfg(feature = "chrome-trace")]
+    {
+        let (chrome_layer, _guard) = tracing_chrome::ChromeLayerBuilder::new()
+            .file("trace.json")
+            .include_args(true)
+            .build();
+
+        tracing_subscriber::registry()
+            .with(chrome_layer)
+            .init();
+
+        eprintln!("📊 Chrome trace enabled: trace.json");
+        eprintln!("   View at: https://ui.perfetto.dev/");
+
+        // Keep guard alive
+        std::mem::forget(_guard);
+        return;
+    }
+
+    // Default: fmt layer
+    tracing_subscriber::fmt::init();
+}
+----
+
+**Step 3: Instrument code** (using existing `tracing`):
+[source,rust]
+----
+#[instrument(skip(self))]
+async fn poll(&mut self) -> usize {
+    let processed = self.process_network_events();
+
+    let _span = info_span!("translate_messages").entered();
+    self.translate_messages();
+
+    processed
+}
+----
+
+**Step 4: Enable in Justfile**:
+[source,just]
+----
+# Run with Chrome tracing
+host-trace NAME="TestHost":
+    @echo "📊 Chrome trace enabled"
+    cargo run --features chrome-trace -- create-host --name "{{ NAME }}"
+    @echo ""
+    @echo "✅ Trace written to: trace.json"
+    @echo "   Open: https://ui.perfetto.dev/"
+    @echo "   Then drag-and-drop trace.json"
+----
+
+**Step 5: View in Perfetto**:
+```bash
+$ just host-trace Alice
+📊 Chrome trace enabled
+# ... run session ...
+✅ Trace written to: trace.json
+
+# Open browser to https://ui.perfetto.dev/
+# Drag trace.json onto page
+```
+
+=== Rationale
+
+**Chrome DevTools Format**:
+* **Standard** - used by Chrome, Firefox, Edge
+* **Perfetto** - advanced UI (https://ui.perfetto.dev/)
+* **Widely supported** - many tools can read it
+
+**Visual Timeline**:
+```
+┌──────────────────────────────────────────────────────┐
+│ p2p_loop::poll           ████████                    │ 10ms
+│   ├─ poll_events         ███                         │ 3ms
+│   ├─ translate_messages  ██                          │ 2ms
+│   └─ send_events         ███                         │ 3ms
+│                                                       │
+│ domain_loop::poll                 █████              │ 5ms
+│   └─ process_commands             █████              │ 5ms
+└──────────────────────────────────────────────────────┘
+         0ms        5ms       10ms      15ms      20ms
+```
+
+**Async Task Tracking**:
+* See task switches
+* Identify blocking operations
+* Visualize concurrent execution
+
+**Zero Production Cost**:
+* Feature-gated (`--features chrome-trace`)
+* No overhead when not enabled
+* File-based (no network overhead)
+
+== Consequences
+
+=== Positive
+
+* ✅ **Visual profiling** - see execution timeline
+* ✅ **Nested spans** - understand call hierarchies
+* ✅ **Async-aware** - track tasks across polls
+* ✅ **Standard tooling** - Perfetto is powerful
+* ✅ **Low overhead** - ~5-10% performance impact
+
+=== Negative
+
+* ❌ **Large traces** - long sessions = big files
+* ❌ **Post-mortem only** - must run to completion
+* ❌ **File I/O** - writes to disk during execution
+* ❌ **Not for production** - debugging tool only
+
+=== Neutral
+
+* **Feature-gated** - opt-in for profiling sessions
+* **Complements other tools** - use with `tokio-console` for full picture
+* **Manual upload** - drag-drop to Perfetto (no auto-upload)
+
+== Usage Patterns
+
+=== Pattern 1: Performance Investigation
+```bash
+# Enable tracing
+$ cargo run --features chrome-trace -- create-host --name Alice
+
+# Simulate workload
+# (join guests, run activities, etc.)
+
+# Ctrl+C to stop
+# Open trace.json in Perfetto
+```
+
+**In Perfetto**:
+* **Zoom** - scroll wheel
+* **Pan** - drag timeline
+* **Details** - click on span
+* **Search** - find specific events
+
+=== Pattern 2: Latency Analysis
+[source,rust]
+----
+#[instrument(name = "handle_message", fields(msg_size = msg.len()))]
+async fn handle_message(&mut self, msg: Vec<u8>) {
+    let _parse = info_span!("parse_message").entered();
+    let command = parse(msg)?;
+    drop(_parse);
+
+    let _execute = info_span!("execute_command").entered();
+    self.domain.execute(command)?;
+}
+----
+
+**In Perfetto**:
+```
+handle_message (12ms total)
+├─ parse_message (1ms)    ← Fast
+└─ execute_command (11ms) ← Bottleneck!
+```
+
+=== Pattern 3: Concurrency Visualization
+```
+Task 1: ██████           ████████
+Task 2:       ████████           ████
+        ├────┼────┼────┼────┼────┼
+        0ms  5ms  10ms 15ms 20ms 25ms
+```
+
+Shows:
+* Which tasks run when
+* Overlapping execution
+* Idle time
+
+== When to Use
+
+**Use tracing-chrome for**:
+* ✅ Performance profiling
+* ✅ Latency investigations
+* ✅ Understanding execution flow
+* ✅ Identifying bottlenecks
+
+**Don't use for**:
+* ❌ Production monitoring (use metrics)
+* ❌ Live debugging (use `tokio-console`)
+* ❌ Memory profiling (use `heaptrack`)
+* ❌ Long-running sessions (traces get huge)
+
+== Comparison: tokio-console vs tracing-chrome
+
+[cols="1,2,2", options="header"]
+|===
+|Aspect
+|tokio-console
+|tracing-chrome
+
+|**Use case**
+|Live async debugging
+|Performance profiling
+
+|**View**
+|Real-time TUI
+|Post-mortem timeline
+
+|**Focus**
+|Task states, resources
+|Span durations, hierarchy
+
+|**When**
+|Debugging deadlocks, starvation
+|Optimizing performance
+
+|**Output**
+|Network stream
+|JSON file
+|===
+
+**Use both together**:
+```bash
+# Terminal 1: Run with both enabled
+$ TOKIO_CONSOLE=1 cargo run \
+    --features "console,chrome-trace" \
+    -- create-host --name Alice
+
+# Terminal 2: Live task monitoring
+$ tokio-console
+
+# After Ctrl+C: Open trace.json in Perfetto
+```
+
+== Perfetto Tips
+
+**Keyboard shortcuts**:
+* `W` - Zoom in
+* `S` - Zoom out
+* `A` - Pan left
+* `D` - Pan right
+* `/` - Search
+
+**Useful views**:
+* **Flame Chart** - aggregated call stacks
+* **Counter Tracks** - memory/CPU over time
+* **Flow Events** - message passing (if instrumented)
+
+**SQL Analysis**:
+```sql
+-- Find slowest spans
+SELECT name, dur/1e6 as duration_ms
+FROM slice
+ORDER BY dur DESC
+LIMIT 10;
+```
+
+== References
+
+* **tracing-chrome** – https://docs.rs/tracing-chrome/
+* **Perfetto UI** – https://ui.perfetto.dev/
+* **Chrome Trace Format** – https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/
+
+=== Related ADRs
+
+* xref:0022-use-tokio-console-for-async-debugging.adoc[ADR-0022] – Complements tokio-console
+* xref:0005-use-tracing-for-logging-and-diagnostics.adoc[ADR-0005] – Uses tracing spans
+* xref:0020-use-dual-event-loop-with-acl.adoc[ADR-0020] – Profile dual loops
