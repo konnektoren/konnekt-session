@@ -1,7 +1,8 @@
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Commands that can be executed on the lobby domain
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DomainCommand {
     /// Create a new lobby with specific ID
     CreateLobby {

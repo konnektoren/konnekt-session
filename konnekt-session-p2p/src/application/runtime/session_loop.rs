@@ -5,37 +5,9 @@ use crate::infrastructure::error::Result;
 use konnekt_session_core::{DomainCommand, DomainEvent as CoreDomainEvent, DomainLoop, Lobby};
 use uuid::Uuid;
 
-/// Unified session loop that automatically coordinates P2P ↔ Core
+/// Unified session loop that coordinates P2P ↔ Core
 ///
-/// This is the main integration point for applications.
-/// It handles:
-/// - P2P event synchronization (ordering, gaps, retries)
-/// - Domain command execution
-/// - Automatic translation between layers
-/// - Peer ↔ Participant mapping (1:1)
-///
-/// # Architecture
-///
-/// ```text
-/// ┌─────────────────────────────────────────┐
-/// │         Application Layer               │
-/// │  (CLI, Yew UI, etc.)                    │
-/// └─────────────────────────────────────────┘
-///                   │
-///                   ↓
-/// ┌─────────────────────────────────────────┐
-/// │         SessionLoop (this)              │
-/// │  - Coordinates P2P ↔ Core               │
-/// │  - Auto-translation via EventTranslator │
-/// │  - 1:1 mappings enforced                │
-/// └─────────────────────────────────────────┘
-///       │                        │
-///       ↓                        ↓
-/// ┌──────────────┐      ┌──────────────┐
-/// │   P2PLoop    │      │  DomainLoop  │
-/// │  (Network)   │      │  (Business)  │
-/// └──────────────┘      └──────────────┘
-/// ```
+/// This is the single integration point between networking and business logic.
 pub struct SessionLoop {
     /// P2P networking layer
     p2p: P2PLoop,
@@ -67,7 +39,7 @@ impl SessionLoop {
     pub fn new_guest(mut p2p: P2PLoop, domain: DomainLoop, lobby_id: Uuid) -> Self {
         tracing::info!("🎯 SessionLoop created as GUEST for lobby {}", lobby_id);
 
-        // 🆕 AUTO-REQUEST: Guest immediately requests full sync from host
+        // Guest immediately requests full sync from host
         tracing::info!("🔄 Guest auto-requesting full sync from host");
 
         if let Err(e) = p2p.request_full_sync() {
@@ -82,36 +54,82 @@ impl SessionLoop {
         }
     }
 
-    /// Submit a domain command directly (for local user actions)
+    /// Submit a domain command
     ///
-    /// This is for commands initiated by the local user (e.g., UI button clicks).
-    /// The resulting events will automatically be broadcast via P2P.
-    ///
-    /// # Example
-    /// ```ignore
-    /// // User clicks "Join Lobby" button
-    /// session_loop.submit_command(DomainCommand::JoinLobby {
-    ///     lobby_id,
-    ///     guest_name: "Alice".to_string(),
-    /// })?;
-    /// ```
+    /// - Host: Processes locally
+    /// - Guest: Sends to host via P2P
     pub fn submit_command(&mut self, cmd: DomainCommand) -> Result<()> {
         tracing::debug!("📝 Submitting domain command: {:?}", cmd);
 
-        self.domain
-            .submit(cmd)
-            .map_err(|e| crate::infrastructure::error::P2PError::SendFailed(e.to_string()))
+        if self.is_host {
+            // Host: Process locally
+            self.domain
+                .submit(cmd)
+                .map_err(|e| crate::infrastructure::error::P2PError::SendFailed(e.to_string()))
+        } else {
+            // Guest: Send to host via P2P
+            self.p2p.send_command_to_host(cmd)
+        }
+    }
+
+    /// Register participant with peer (for tracking disconnections)
+    fn register_participant_for_peer(&mut self, participant_id: Uuid) {
+        if let Some(peer_id) = self.local_peer_id() {
+            if let Some(state) = self.p2p.peer_registry_mut().get_peer_mut(&peer_id) {
+                state.set_participant_info(participant_id, String::new(), self.is_host);
+
+                tracing::debug!(
+                    "📝 Registered participant {} for peer {}",
+                    participant_id,
+                    peer_id
+                );
+            }
+        }
+    }
+
+    /// Map the most recent unregistered peer to a participant
+    /// Call this after GuestJoined event
+    fn map_newest_guest_to_participant(&mut self, participant_id: Uuid, participant_name: &str) {
+        // Find connected peers without participant IDs
+        let unregistered_peers: Vec<PeerId> = self
+            .p2p
+            .connected_peers()
+            .into_iter()
+            .filter(|peer_id| {
+                self.p2p
+                    .peer_registry()
+                    .get_peer(peer_id)
+                    .and_then(|state| state.participant_id)
+                    .is_none()
+            })
+            .collect();
+
+        if let Some(peer_id) = unregistered_peers.first() {
+            tracing::info!(
+                "📝 HOST: Registering peer {} as participant {} ({})",
+                peer_id,
+                participant_id,
+                participant_name
+            );
+
+            if let Some(state) = self.p2p.peer_registry_mut().get_peer_mut(peer_id) {
+                state.set_participant_info(participant_id, participant_name.to_string(), false);
+            }
+        } else {
+            tracing::warn!(
+                "⚠️  No unregistered peer found for participant {}",
+                participant_id
+            );
+        }
     }
 
     /// Main event loop - call this regularly (e.g., every 100ms)
     ///
     /// This AUTOMATICALLY:
     /// 1. Polls P2P for network events
-    /// 2. Translates incoming P2P events → domain commands
-    /// 3. Executes domain commands
-    /// 4. Translates outgoing domain events → P2P broadcasts
-    ///
-    /// Returns number of events processed.
+    /// 2. Gets domain commands (from P2P or translated events)
+    /// 3. Processes commands in domain
+    /// 4. Broadcasts resulting events (HOST ONLY)
     pub fn poll(&mut self) -> usize {
         let mut processed = 0;
 
@@ -120,10 +138,10 @@ impl SessionLoop {
         processed += p2p_processed;
 
         if p2p_processed > 0 {
-            tracing::trace!("P2P processed {} events", p2p_processed);
+            tracing::trace!("📡 P2P processed {} events", p2p_processed);
         }
 
-        // 🆕 AUTO-SEND SYNC: Host automatically sends full sync when new peer connects
+        // ===== Step 1.5: Handle connection events =====
         if self.is_host {
             let connection_events = self.p2p.drain_events();
 
@@ -135,9 +153,8 @@ impl SessionLoop {
                             peer_id
                         );
 
-                        // Get current lobby state
                         if let Some(lobby) = self.get_lobby() {
-                            let snapshot = crate::application::LobbySnapshot {
+                            let snapshot = LobbySnapshot {
                                 lobby_id: lobby.id(),
                                 name: lobby.name().to_string(),
                                 host_id: lobby.host_id(),
@@ -158,39 +175,79 @@ impl SessionLoop {
                             tracing::warn!("⚠️  No lobby to sync to peer {}", peer_id);
                         }
                     }
+
+                    // 🆕 Handle peer timeout → remove participant from lobby
+                    crate::application::ConnectionEvent::PeerTimedOut {
+                        peer_id,
+                        participant_id,
+                        was_host,
+                    } => {
+                        tracing::warn!(
+                            "⏰ HOST: Peer {} timed out (participant: {:?}, was_host: {})",
+                            peer_id,
+                            participant_id,
+                            was_host
+                        );
+
+                        // If peer had a participant, remove them from lobby
+                        if let Some(participant_id) = participant_id {
+                            tracing::info!(
+                                "🔴 HOST: Auto-removing participant {} (peer timed out)",
+                                participant_id
+                            );
+
+                            // Submit LeaveLobby command
+                            let leave_cmd = DomainCommand::LeaveLobby {
+                                lobby_id: self.lobby_id,
+                                participant_id: *participant_id,
+                            };
+
+                            if let Err(e) = self.domain.submit(leave_cmd) {
+                                tracing::error!(
+                                    "Failed to submit LeaveLobby for timed-out peer: {:?}",
+                                    e
+                                );
+                            }
+
+                            // If it was the host who timed out, we need delegation
+                            if *was_host {
+                                tracing::warn!("⚠️  Host timed out! Delegation needed (TODO)");
+                                // TODO: Trigger host delegation
+                            }
+                        }
+                    }
+
                     _ => {}
                 }
             }
+        } else {
+            // Guest: Just drain events (don't process them)
+            self.p2p.drain_events();
         }
 
-        // ===== Step 2: Get domain commands from P2P events =====
+        // ===== Step 2: Get domain commands from P2P =====
         let commands = self.p2p.drain_domain_commands();
 
         if !commands.is_empty() {
-            tracing::debug!("📥 Received {} domain commands from P2P", commands.len());
+            tracing::info!("📥 Received {} domain commands from P2P", commands.len());
         }
 
         for cmd in commands {
-            // Special logging for important commands
             match &cmd {
                 DomainCommand::CreateLobby { lobby_name, .. } => {
-                    tracing::info!("📥 GUEST: Received lobby snapshot via P2P: {}", lobby_name);
+                    tracing::info!("📥 Received lobby creation: {}", lobby_name);
                 }
                 DomainCommand::JoinLobby { guest_name, .. } => {
-                    tracing::info!("📥 Guest '{}' joining via P2P", guest_name);
+                    tracing::info!("📥 Guest '{}' wants to join", guest_name);
                 }
                 DomainCommand::LeaveLobby { participant_id, .. } => {
-                    tracing::info!("📥 Participant {} leaving via P2P", participant_id);
-                }
-                DomainCommand::DelegateHost { new_host_id, .. } => {
-                    tracing::info!("📥 Host delegated to {} via P2P", new_host_id);
+                    tracing::info!("📥 Participant {} leaving", participant_id);
                 }
                 _ => {
                     tracing::debug!("📥 Received command: {:?}", cmd);
                 }
             }
 
-            // Submit to domain loop
             if let Err(e) = self.domain.submit(cmd) {
                 tracing::warn!("Failed to submit command to domain: {:?}", e);
             }
@@ -201,43 +258,56 @@ impl SessionLoop {
         processed += domain_processed;
 
         if domain_processed > 0 {
-            tracing::trace!("Domain processed {} commands", domain_processed);
+            tracing::debug!("🔧 Domain processed {} commands", domain_processed);
         }
 
-        // ===== Step 4: Broadcast domain events via P2P =====
+        // ===== Step 4: Broadcast domain events (HOST ONLY) =====
         let events = self.domain.drain_events();
 
         if !events.is_empty() {
-            tracing::debug!("📤 Broadcasting {} domain events via P2P", events.len());
+            tracing::debug!("📤 Domain emitted {} events", events.len());
         }
 
         for event in events {
-            // Log important events
             match &event {
                 CoreDomainEvent::LobbyCreated { lobby } => {
-                    tracing::info!("📤 Broadcasting LobbyCreated: {}", lobby.name());
+                    tracing::info!("📤 Domain event: LobbyCreated - {}", lobby.name());
                 }
                 CoreDomainEvent::GuestJoined { participant, .. } => {
-                    tracing::info!("📤 Broadcasting GuestJoined: {}", participant.name());
+                    tracing::info!("📤 Domain event: GuestJoined - {}", participant.name());
+
+                    // 🆕 HOST: Register peer → participant mapping
+                    if self.is_host {
+                        self.map_newest_guest_to_participant(participant.id(), participant.name());
+                    }
+
+                    // Guest registers themselves
+                    if !self.is_host {
+                        self.register_participant_for_peer(participant.id());
+                    }
                 }
                 CoreDomainEvent::GuestLeft { participant_id, .. } => {
-                    tracing::info!("📤 Broadcasting GuestLeft: {}", participant_id);
-                }
-                CoreDomainEvent::HostDelegated { to, .. } => {
-                    tracing::info!("📤 Broadcasting HostDelegated to {}", to);
+                    tracing::info!("📤 Domain event: GuestLeft - {}", participant_id);
                 }
                 CoreDomainEvent::CommandFailed { command, reason } => {
                     tracing::warn!("⚠️  Command failed: {} - {}", command, reason);
                 }
                 _ => {
-                    tracing::debug!("📤 Broadcasting event: {:?}", event);
+                    tracing::debug!("📤 Domain event: {:?}", event);
                 }
             }
 
-            // Only broadcast if we should
-            if self.should_broadcast_event(&event) {
-                if let Err(e) = self.p2p.apply_domain_event(event) {
+            // Only host broadcasts to P2P
+            if self.is_host {
+                // Don't broadcast failures
+                if matches!(event, CoreDomainEvent::CommandFailed { .. }) {
+                    continue;
+                }
+
+                if let Err(e) = self.p2p.broadcast_domain_event(event) {
                     tracing::warn!("Failed to broadcast event: {:?}", e);
+                } else {
+                    tracing::debug!("✅ Event broadcast to P2P network");
                 }
             }
         }
@@ -245,60 +315,33 @@ impl SessionLoop {
         processed
     }
 
-    /// Determine if an event should be broadcast
-    ///
-    /// Guests should only broadcast their own actions (e.g., joining, leaving).
-    /// Hosts broadcast everything.
-    fn should_broadcast_event(&self, event: &CoreDomainEvent) -> bool {
-        match event {
-            // These are always broadcast by anyone
-            CoreDomainEvent::GuestJoined { .. } => true,
-            CoreDomainEvent::GuestLeft { .. } => true,
-
-            // Host-only broadcasts
-            CoreDomainEvent::LobbyCreated { .. } => self.is_host,
-            CoreDomainEvent::GuestKicked { .. } => self.is_host,
-            CoreDomainEvent::HostDelegated { .. } => self.is_host,
-            CoreDomainEvent::ParticipationModeChanged { .. } => true, // Anyone can change their own
-
-            // Never broadcast
-            CoreDomainEvent::CommandFailed { .. } => false,
-        }
-    }
-
     /// Get the current lobby state (for rendering UI)
     pub fn get_lobby(&self) -> Option<&Lobby> {
         self.domain.event_loop().get_lobby(&self.lobby_id)
     }
 
-    /// Get lobby ID
     pub fn lobby_id(&self) -> Uuid {
         self.lobby_id
     }
 
-    /// Get local peer ID
     pub fn local_peer_id(&self) -> Option<PeerId> {
         self.p2p.local_peer_id()
     }
 
-    /// Get connected peers
     pub fn connected_peers(&self) -> Vec<PeerId> {
         self.p2p.connected_peers()
     }
 
-    /// Check if we're the host
     pub fn is_host(&self) -> bool {
         self.is_host
     }
 
-    /// Promote to host (after delegation)
     pub fn promote_to_host(&mut self) {
         tracing::info!("👑 Promoting to HOST");
         self.is_host = true;
         self.p2p.promote_to_host();
     }
 
-    /// Send full sync to a new peer (HOST ONLY)
     pub fn send_full_sync_to_peer(&mut self, peer_id: PeerId) -> Result<()> {
         if !self.is_host {
             return Err(crate::infrastructure::error::P2PError::SendFailed(
@@ -308,7 +351,6 @@ impl SessionLoop {
 
         tracing::info!("📤 Sending full sync to peer {}", peer_id);
 
-        // Get current lobby state
         let lobby = self
             .get_lobby()
             .ok_or_else(|| {
@@ -316,7 +358,6 @@ impl SessionLoop {
             })?
             .clone();
 
-        // Create snapshot
         let snapshot = LobbySnapshot {
             lobby_id: lobby.id(),
             name: lobby.name().to_string(),
@@ -328,117 +369,23 @@ impl SessionLoop {
         self.p2p.send_full_sync_to_peer(peer_id, snapshot)
     }
 
-    /// Get reference to P2P loop (for advanced usage)
     pub fn p2p(&self) -> &P2PLoop {
         &self.p2p
     }
 
-    /// Get mutable reference to P2P loop (for advanced usage)
     pub fn p2p_mut(&mut self) -> &mut P2PLoop {
         &mut self.p2p
     }
 
-    /// Get reference to domain loop (for queries)
     pub fn domain(&self) -> &DomainLoop {
         &self.domain
     }
 
-    /// Get pending P2P message count (for debugging)
-    pub fn pending_p2p_messages(&self) -> usize {
-        self.p2p.pending_messages()
-    }
-
-    /// Get pending domain command count (for debugging)
-    pub fn pending_domain_commands(&self) -> usize {
-        self.p2p.pending_domain_commands()
-    }
-
-    /// Get current P2P sequence number (for debugging)
-    pub fn current_sequence(&self) -> u64 {
-        self.p2p.current_sequence()
-    }
-
-    /// Get mutable reference to domain loop (for advanced usage)
     pub fn domain_mut(&mut self) -> &mut DomainLoop {
         &mut self.domain
     }
 
-    /// Check if we need to handle any user commands
-    /// Returns true if there are pending commands to submit
-    pub fn has_pending_input(&self) -> bool {
-        self.domain.pending_commands() > 0
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use konnekt_session_core::Participant;
-
-    #[test]
-    fn test_should_broadcast_event_as_host() {
-        let lobby_id = Uuid::new_v4();
-        let host_id = Uuid::new_v4();
-
-        // Simulate host
-        let is_host = true;
-
-        // Host should broadcast LobbyCreated
-        let event = CoreDomainEvent::LobbyCreated {
-            lobby: Lobby::with_id(
-                lobby_id,
-                "Test".to_string(),
-                Participant::new_host("Host".to_string()).unwrap(),
-            )
-            .unwrap(),
-        };
-
-        // We can test the logic directly
-        assert!(
-            match event {
-                CoreDomainEvent::LobbyCreated { .. } => is_host,
-                _ => false,
-            },
-            "Host should broadcast LobbyCreated"
-        );
-    }
-
-    #[test]
-    fn test_should_broadcast_event_as_guest() {
-        // Guest should NOT broadcast LobbyCreated
-        let is_host = false;
-
-        assert!(!is_host, "Guest should not broadcast LobbyCreated");
-    }
-
-    #[test]
-    fn test_command_failed_never_broadcast() {
-        let event = CoreDomainEvent::CommandFailed {
-            command: "Test".to_string(),
-            reason: "Error".to_string(),
-        };
-
-        // Should never broadcast regardless of role
-        assert!(
-            matches!(event, CoreDomainEvent::CommandFailed { .. }),
-            "CommandFailed should never be broadcast"
-        );
-    }
-
-    #[test]
-    fn test_guest_joins_broadcast() {
-        let lobby_id = Uuid::new_v4();
-        let participant = Participant::new_guest("Alice".to_string()).unwrap();
-
-        let event = CoreDomainEvent::GuestJoined {
-            lobby_id,
-            participant,
-        };
-
-        // Should always broadcast (both host and guest)
-        assert!(
-            matches!(event, CoreDomainEvent::GuestJoined { .. }),
-            "GuestJoined should be broadcast by anyone"
-        );
+    pub fn current_sequence(&self) -> u64 {
+        self.p2p.current_sequence()
     }
 }

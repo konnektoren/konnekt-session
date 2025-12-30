@@ -1,33 +1,25 @@
 use crate::domain::{DomainEvent, EventLog, LobbyEvent, PeerId};
-use std::collections::{HashMap, VecDeque};
+use konnekt_session_core::DomainCommand;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Messages sent over the P2P network for event synchronization
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SyncMessage {
-    /// Host broadcasts an event to all guests
+    /// Guest → Host: Execute this domain command
+    CommandRequest { command: DomainCommand },
+
+    /// Host → All: Domain event happened (with sequence number)
     EventBroadcast { event: LobbyEvent },
 
-    /// Guest requests missing events (detected gap)
-    RequestMissingEvents {
-        lobby_id: Uuid,
-        missing_sequences: Vec<u64>,
-    },
+    /// Guest → Host: I just joined, send me full state
+    RequestFullSync { lobby_id: Uuid },
 
-    /// Host responds with requested events
-    MissingEventsResponse { events: Vec<LobbyEvent> },
-
-    /// Guest requests full sync (just joined)
-    RequestFullSync {
-        lobby_id: Uuid,
-        last_known_sequence: u64, // 0 if just joined
-    },
-
-    /// Host responds with snapshot + recent events
+    /// Host → Guest: Here's the full state
     FullSyncResponse {
         snapshot: LobbySnapshot,
-        events: Vec<LobbyEvent>, // Events after snapshot
+        events: Vec<LobbyEvent>,
     },
 }
 
@@ -38,7 +30,7 @@ pub struct LobbySnapshot {
     pub name: String,
     pub host_id: Uuid,
     pub participants: Vec<konnekt_session_core::Participant>,
-    pub as_of_sequence: u64, // Snapshot represents state at this sequence
+    pub as_of_sequence: u64,
 }
 
 /// Manages event synchronization for a lobby
@@ -54,9 +46,6 @@ pub struct EventSyncManager {
 
     /// Out-of-order events waiting for gaps to be filled
     pending_events: HashMap<u64, LobbyEvent>,
-
-    /// Events we've requested but not received yet
-    requested_sequences: Vec<u64>,
 }
 
 impl EventSyncManager {
@@ -67,7 +56,6 @@ impl EventSyncManager {
             is_host: true,
             event_log: EventLog::new(),
             pending_events: HashMap::new(),
-            requested_sequences: Vec::new(),
         }
     }
 
@@ -78,7 +66,6 @@ impl EventSyncManager {
             is_host: false,
             event_log: EventLog::new(),
             pending_events: HashMap::new(),
-            requested_sequences: Vec::new(),
         }
     }
 
@@ -87,7 +74,7 @@ impl EventSyncManager {
         self.is_host = true;
     }
 
-    /// Get current sequence number (for debugging)
+    /// Get current sequence number
     pub fn current_sequence(&self) -> u64 {
         if self.is_host {
             self.event_log.next_sequence() - 1
@@ -119,30 +106,27 @@ impl EventSyncManager {
         message: SyncMessage,
     ) -> Result<SyncResponse, SyncError> {
         match message {
-            SyncMessage::EventBroadcast { event } => self.handle_event_broadcast(event),
+            SyncMessage::CommandRequest { command } => {
+                if !self.is_host {
+                    tracing::warn!("Guest received CommandRequest from {}, ignoring", from);
+                    return Ok(SyncResponse::None);
+                }
 
-            SyncMessage::RequestMissingEvents {
-                lobby_id,
-                missing_sequences,
-            } => self.handle_request_missing(lobby_id, missing_sequences),
-
-            SyncMessage::MissingEventsResponse { events } => {
-                self.handle_missing_events_response(events)
+                tracing::info!("HOST: Received command request from peer {}", from);
+                Ok(SyncResponse::ProcessCommand { command })
             }
 
-            SyncMessage::RequestFullSync {
-                lobby_id,
-                last_known_sequence,
-            } => {
-                tracing::info!(
-                    "Peer {} requested full sync from sequence {}",
-                    from,
-                    last_known_sequence
-                );
-                // Need snapshot from application layer
+            SyncMessage::EventBroadcast { event } => self.handle_event_broadcast(event),
+
+            SyncMessage::RequestFullSync { lobby_id } => {
+                if lobby_id != self.lobby_id {
+                    return Err(SyncError::WrongLobby);
+                }
+
+                tracing::info!("Peer {} requested full sync", from);
                 Ok(SyncResponse::NeedSnapshot {
                     for_peer: from,
-                    since_sequence: last_known_sequence,
+                    since_sequence: 0,
                 })
             }
 
@@ -171,11 +155,6 @@ impl EventSyncManager {
             // Try to apply any pending events that are now in sequence
             let applied_pending = self.try_apply_pending_events();
 
-            // Check for gaps AFTER applying pending
-            if let Some(response) = self.check_and_request_gaps()? {
-                return Ok(response);
-            }
-
             let mut events = vec![event];
             events.extend(applied_pending);
 
@@ -188,12 +167,6 @@ impl EventSyncManager {
                 expected_sequence
             );
             self.pending_events.insert(event.sequence, event);
-
-            // Check for gaps including pending events
-            if let Some(response) = self.check_and_request_gaps()? {
-                return Ok(response);
-            }
-
             Ok(SyncResponse::None)
         } else {
             // Duplicate or old event - ignore
@@ -204,68 +177,6 @@ impl EventSyncManager {
             );
             Ok(SyncResponse::None)
         }
-    }
-
-    /// Check for gaps and request them if needed
-    fn check_and_request_gaps(&mut self) -> Result<Option<SyncResponse>, SyncError> {
-        // Calculate what sequences we should have based on:
-        // 1. Highest sequence in event log
-        // 2. Highest sequence in pending events
-        let highest_pending = self.pending_events.keys().max().copied().unwrap_or(0);
-        let highest_overall = self.event_log.highest_sequence().max(highest_pending);
-
-        if highest_overall == 0 {
-            return Ok(None); // No events yet
-        }
-
-        // Find the oldest sequence we know about
-        let oldest_in_log = if self.event_log.is_empty() {
-            u64::MAX // No events in log yet
-        } else {
-            self.event_log.all_events()[0].sequence
-        };
-
-        let oldest_pending = self
-            .pending_events
-            .keys()
-            .min()
-            .copied()
-            .unwrap_or(u64::MAX);
-        let oldest = oldest_in_log.min(oldest_pending).min(1); // At minimum, start from 1
-
-        let mut missing = Vec::new();
-        for seq in oldest..=highest_overall {
-            // Check if we have it in event log OR pending
-            if self.event_log.get(seq).is_none() && !self.pending_events.contains_key(&seq) {
-                missing.push(seq);
-            }
-        }
-
-        if missing.is_empty() {
-            return Ok(None);
-        }
-
-        // Only request if we haven't already requested these
-        let new_missing: Vec<u64> = missing
-            .iter()
-            .filter(|seq| !self.requested_sequences.contains(seq))
-            .copied()
-            .collect();
-
-        if new_missing.is_empty() {
-            return Ok(None); // Already requested
-        }
-
-        tracing::warn!("Detected gaps in event log: {:?}", new_missing);
-        self.requested_sequences.extend(&new_missing);
-
-        Ok(Some(SyncResponse::SendMessage {
-            to: None, // Broadcast to all (host will respond)
-            message: SyncMessage::RequestMissingEvents {
-                lobby_id: self.lobby_id,
-                missing_sequences: new_missing,
-            },
-        }))
     }
 
     /// Try to apply pending events that are now in sequence
@@ -294,71 +205,6 @@ impl EventSyncManager {
         applied
     }
 
-    /// Handle request for missing events (host only)
-    fn handle_request_missing(
-        &mut self,
-        lobby_id: Uuid,
-        missing_sequences: Vec<u64>,
-    ) -> Result<SyncResponse, SyncError> {
-        if !self.is_host {
-            return Err(SyncError::NotHost);
-        }
-
-        if lobby_id != self.lobby_id {
-            return Err(SyncError::WrongLobby);
-        }
-
-        tracing::info!("Guest requested missing events: {:?}", missing_sequences);
-
-        let mut events = Vec::new();
-        for seq in missing_sequences {
-            if let Some(event) = self.event_log.get(seq) {
-                events.push(event.clone());
-            } else {
-                tracing::warn!("Guest requested sequence {} but we don't have it", seq);
-            }
-        }
-
-        if events.is_empty() {
-            return Ok(SyncResponse::None);
-        }
-
-        Ok(SyncResponse::SendMessage {
-            to: None, // Will be sent back to requester
-            message: SyncMessage::MissingEventsResponse { events },
-        })
-    }
-
-    /// Handle response with missing events
-    fn handle_missing_events_response(
-        &mut self,
-        events: Vec<LobbyEvent>,
-    ) -> Result<SyncResponse, SyncError> {
-        tracing::info!("Received {} missing events", events.len());
-
-        let mut applied = Vec::new();
-
-        for event in events {
-            // Clear from requested list
-            self.requested_sequences
-                .retain(|&seq| seq != event.sequence);
-
-            // Add to log
-            self.event_log.add_event(event.clone());
-            applied.push(event);
-        }
-
-        // Try to apply pending events
-        let pending_applied = self.try_apply_pending_events();
-        applied.extend(pending_applied);
-
-        if !applied.is_empty() {
-            Ok(SyncResponse::ApplyEvents { events: applied })
-        } else {
-            Ok(SyncResponse::None)
-        }
-    }
-
     /// Handle full sync response (late joiner)
     fn handle_full_sync_response(
         &mut self,
@@ -379,8 +225,7 @@ impl EventSyncManager {
             self.event_log.add_event(event.clone());
         }
 
-        // 🆕 CREATE LOBBY FROM SNAPSHOT
-        // Convert snapshot to CreateLobby command
+        // Create lobby from snapshot
         let create_lobby_event = DomainEvent::LobbyCreated {
             lobby_id: snapshot.lobby_id,
             host_id: snapshot.host_id,
@@ -409,10 +254,8 @@ impl EventSyncManager {
         }
 
         let events = if since_sequence == 0 {
-            // New joiner - send all events we have
             self.event_log.all_events()
         } else {
-            // Reconnecting - send events since last known
             self.event_log.get_since(since_sequence)
         };
 
@@ -433,7 +276,6 @@ impl EventSyncManager {
 
         Ok(SyncMessage::RequestFullSync {
             lobby_id: self.lobby_id,
-            last_known_sequence: self.event_log.highest_sequence(),
         })
     }
 
@@ -467,7 +309,7 @@ pub enum SyncResponse {
 
     /// Send this message to peer(s)
     SendMessage {
-        to: Option<PeerId>, // None = broadcast
+        to: Option<PeerId>,
         message: SyncMessage,
     },
 
@@ -476,6 +318,9 @@ pub enum SyncResponse {
         for_peer: PeerId,
         since_sequence: u64,
     },
+
+    /// Host should process this command locally
+    ProcessCommand { command: DomainCommand },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -498,14 +343,49 @@ mod tests {
     use super::*;
     use konnekt_session_core::Participant;
 
-    fn create_test_event(sequence: u64, lobby_id: Uuid) -> LobbyEvent {
-        LobbyEvent::new(
-            sequence,
-            lobby_id,
-            DomainEvent::GuestLeft {
-                participant_id: Uuid::new_v4(),
-            },
-        )
+    fn create_test_command() -> DomainCommand {
+        DomainCommand::JoinLobby {
+            lobby_id: Uuid::new_v4(),
+            guest_name: "Alice".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_host_receives_command_request() {
+        let lobby_id = Uuid::new_v4();
+        let mut sync = EventSyncManager::new_host(lobby_id);
+        let peer = PeerId::new(matchbox_socket::PeerId(Uuid::new_v4()));
+
+        let msg = SyncMessage::CommandRequest {
+            command: create_test_command(),
+        };
+
+        let response = sync.handle_message(peer, msg).unwrap();
+
+        match response {
+            SyncResponse::ProcessCommand { command } => {
+                assert!(matches!(command, DomainCommand::JoinLobby { .. }));
+            }
+            _ => panic!("Expected ProcessCommand"),
+        }
+    }
+
+    #[test]
+    fn test_guest_ignores_command_request() {
+        let lobby_id = Uuid::new_v4();
+        let mut sync = EventSyncManager::new_guest(lobby_id);
+        let peer = PeerId::new(matchbox_socket::PeerId(Uuid::new_v4()));
+
+        let msg = SyncMessage::CommandRequest {
+            command: create_test_command(),
+        };
+
+        let response = sync.handle_message(peer, msg).unwrap();
+
+        match response {
+            SyncResponse::None => {} // Expected
+            _ => panic!("Guest should ignore CommandRequest"),
+        }
     }
 
     #[test]
@@ -530,32 +410,21 @@ mod tests {
     }
 
     #[test]
-    fn test_guest_cannot_create_events() {
-        let lobby_id = Uuid::new_v4();
-        let mut sync = EventSyncManager::new_guest(lobby_id);
-
-        let result = sync.create_event(DomainEvent::LobbyCreated {
-            lobby_id,
-            host_id: Uuid::new_v4(),
-            name: "Test".to_string(),
-        });
-
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SyncError::NotHost));
-    }
-
-    #[test]
     fn test_guest_applies_in_order_events() {
         let lobby_id = Uuid::new_v4();
         let mut sync = EventSyncManager::new_guest(lobby_id);
         let peer = PeerId::new(matchbox_socket::PeerId(Uuid::new_v4()));
 
-        // Apply events 1, 2, 3 in order
         for seq in 1..=3 {
-            let msg = SyncMessage::EventBroadcast {
-                event: create_test_event(seq, lobby_id),
-            };
+            let event = LobbyEvent::new(
+                seq,
+                lobby_id,
+                DomainEvent::GuestLeft {
+                    participant_id: Uuid::new_v4(),
+                },
+            );
 
+            let msg = SyncMessage::EventBroadcast { event };
             let response = sync.handle_message(peer, msg).unwrap();
 
             match response {
@@ -568,249 +437,5 @@ mod tests {
         }
 
         assert_eq!(sync.current_sequence(), 3);
-    }
-
-    #[test]
-    fn test_guest_buffers_out_of_order_events() {
-        let lobby_id = Uuid::new_v4();
-        let mut sync = EventSyncManager::new_guest(lobby_id);
-        let peer = PeerId::new(matchbox_socket::PeerId(Uuid::new_v4()));
-
-        // Receive event 3 first (out of order)
-        let msg = SyncMessage::EventBroadcast {
-            event: create_test_event(3, lobby_id),
-        };
-
-        let response = sync.handle_message(peer, msg).unwrap();
-
-        // Should request missing events
-        match response {
-            SyncResponse::SendMessage { message, to } => {
-                assert!(to.is_none()); // Broadcast
-                if let SyncMessage::RequestMissingEvents {
-                    missing_sequences, ..
-                } = message
-                {
-                    // Should request 1 and 2
-                    assert_eq!(missing_sequences.len(), 2);
-                    assert!(missing_sequences.contains(&1));
-                    assert!(missing_sequences.contains(&2));
-                } else {
-                    panic!("Expected RequestMissingEvents, got: {:?}", message);
-                }
-            }
-            other => panic!("Expected SendMessage, got: {:?}", other),
-        }
-
-        assert_eq!(sync.pending_count(), 1); // Event 3 is buffered
-        assert_eq!(sync.current_sequence(), 0); // Not applied yet
-    }
-
-    #[test]
-    fn test_guest_applies_pending_after_gap_filled() {
-        let lobby_id = Uuid::new_v4();
-        let mut sync = EventSyncManager::new_guest(lobby_id);
-        let peer = PeerId::new(matchbox_socket::PeerId(Uuid::new_v4()));
-
-        // Receive events 1, 3, 4 (missing 2)
-        sync.handle_message(
-            peer,
-            SyncMessage::EventBroadcast {
-                event: create_test_event(1, lobby_id),
-            },
-        )
-        .unwrap();
-
-        sync.handle_message(
-            peer,
-            SyncMessage::EventBroadcast {
-                event: create_test_event(3, lobby_id),
-            },
-        )
-        .unwrap();
-
-        sync.handle_message(
-            peer,
-            SyncMessage::EventBroadcast {
-                event: create_test_event(4, lobby_id),
-            },
-        )
-        .unwrap();
-
-        assert_eq!(sync.current_sequence(), 1); // Only 1 applied
-        assert_eq!(sync.pending_count(), 2); // 3 and 4 buffered
-
-        // Receive missing event 2
-        let response = sync
-            .handle_message(
-                peer,
-                SyncMessage::EventBroadcast {
-                    event: create_test_event(2, lobby_id),
-                },
-            )
-            .unwrap();
-
-        // Should apply 2, 3, 4
-        match response {
-            SyncResponse::ApplyEvents { events } => {
-                assert_eq!(events.len(), 3);
-                assert_eq!(events[0].sequence, 2);
-                assert_eq!(events[1].sequence, 3);
-                assert_eq!(events[2].sequence, 4);
-            }
-            _ => panic!("Expected ApplyEvents"),
-        }
-
-        assert_eq!(sync.current_sequence(), 4);
-        assert_eq!(sync.pending_count(), 0);
-    }
-
-    #[test]
-    fn test_host_responds_to_missing_events_request() {
-        let lobby_id = Uuid::new_v4();
-        let mut sync = EventSyncManager::new_host(lobby_id);
-        let peer = PeerId::new(matchbox_socket::PeerId(Uuid::new_v4()));
-
-        // Host creates events 1-5
-        for _ in 1..=5 {
-            sync.create_event(DomainEvent::GuestLeft {
-                participant_id: Uuid::new_v4(),
-            })
-            .unwrap();
-        }
-
-        // Guest requests events 2 and 4
-        let request = SyncMessage::RequestMissingEvents {
-            lobby_id,
-            missing_sequences: vec![2, 4],
-        };
-
-        let response = sync.handle_message(peer, request).unwrap();
-
-        match response {
-            SyncResponse::SendMessage { message, .. } => {
-                if let SyncMessage::MissingEventsResponse { events } = message {
-                    assert_eq!(events.len(), 2);
-                    assert_eq!(events[0].sequence, 2);
-                    assert_eq!(events[1].sequence, 4);
-                } else {
-                    panic!("Expected MissingEventsResponse");
-                }
-            }
-            _ => panic!("Expected SendMessage"),
-        }
-    }
-
-    #[test]
-    fn test_full_sync_response() {
-        let lobby_id = Uuid::new_v4();
-        let host_id = Uuid::new_v4();
-
-        let snapshot = LobbySnapshot {
-            lobby_id,
-            name: "Test Lobby".to_string(),
-            host_id,
-            participants: vec![Participant::new_host("Host".to_string()).unwrap()],
-            as_of_sequence: 10,
-        };
-
-        let events = vec![
-            create_test_event(11, lobby_id),
-            create_test_event(12, lobby_id),
-        ];
-
-        let mut sync = EventSyncManager::new_guest(lobby_id);
-        let peer = PeerId::new(matchbox_socket::PeerId(Uuid::new_v4()));
-
-        let msg = SyncMessage::FullSyncResponse {
-            snapshot: snapshot.clone(),
-            events: events.clone(),
-        };
-
-        let response = sync.handle_message(peer, msg).unwrap();
-
-        match response {
-            SyncResponse::ApplySnapshot {
-                snapshot: recv_snapshot,
-                events: recv_events,
-            } => {
-                assert_eq!(recv_snapshot.as_of_sequence, 10);
-                assert_eq!(recv_events.len(), 2);
-            }
-            _ => panic!("Expected ApplySnapshot"),
-        }
-
-        assert_eq!(sync.current_sequence(), 12);
-    }
-
-    #[test]
-    fn test_promote_to_host() {
-        let lobby_id = Uuid::new_v4();
-        let mut sync = EventSyncManager::new_guest(lobby_id);
-
-        assert!(!sync.is_host);
-
-        // Try to create event as guest - should fail
-        assert!(
-            sync.create_event(DomainEvent::GuestLeft {
-                participant_id: Uuid::new_v4()
-            })
-            .is_err()
-        );
-
-        // Promote to host
-        sync.promote_to_host();
-
-        assert!(sync.is_host);
-
-        // Now should be able to create events
-        assert!(
-            sync.create_event(DomainEvent::GuestLeft {
-                participant_id: Uuid::new_v4()
-            })
-            .is_ok()
-        );
-    }
-
-    #[test]
-    fn test_gap_detection_with_pending() {
-        let lobby_id = Uuid::new_v4();
-        let mut sync = EventSyncManager::new_guest(lobby_id);
-        let peer = PeerId::new(matchbox_socket::PeerId(Uuid::new_v4()));
-
-        // Apply event 1
-        sync.handle_message(
-            peer,
-            SyncMessage::EventBroadcast {
-                event: create_test_event(1, lobby_id),
-            },
-        )
-        .unwrap();
-
-        // Buffer event 5 (missing 2, 3, 4)
-        let response = sync
-            .handle_message(
-                peer,
-                SyncMessage::EventBroadcast {
-                    event: create_test_event(5, lobby_id),
-                },
-            )
-            .unwrap();
-
-        // Should detect gaps 2, 3, 4
-        match response {
-            SyncResponse::SendMessage { message, .. } => {
-                if let SyncMessage::RequestMissingEvents {
-                    missing_sequences, ..
-                } = message
-                {
-                    assert_eq!(missing_sequences.len(), 3);
-                    assert_eq!(missing_sequences, vec![2, 3, 4]);
-                } else {
-                    panic!("Expected RequestMissingEvents");
-                }
-            }
-            _ => panic!("Expected SendMessage"),
-        }
     }
 }

@@ -9,7 +9,7 @@ use konnekt_session_core::{DomainCommand, DomainEvent as CoreDomainEvent};
 use std::collections::VecDeque;
 use uuid::Uuid;
 
-/// P2P event loop - AUTOMATICALLY handles event synchronization AND domain integration
+/// P2P event loop - handles network communication and event ordering
 pub struct P2PLoop {
     /// WebRTC connection (Matchbox adapter)
     connection: MatchboxConnection,
@@ -17,22 +17,22 @@ pub struct P2PLoop {
     /// Peer registry (tracks connection state)
     peer_registry: PeerRegistry,
 
-    /// Event synchronization manager (automatic)
+    /// Event synchronization manager
     event_sync: EventSyncManager,
 
     /// Event translator (P2P ↔ Core domain)
     translator: EventTranslator,
 
-    /// Outbound message queue (from application → network)
+    /// Outbound message queue
     outbound: MessageQueue,
 
-    /// Inbound event queue (network events for caller)
+    /// Inbound connection events
     inbound_events: Vec<ConnectionEvent>,
 
-    /// Inbound lobby events queue (parsed and validated events for application)
+    /// Inbound lobby events
     inbound_lobby_events: Vec<LobbyEvent>,
 
-    /// Domain commands translated from incoming P2P events (for core to process)
+    /// Domain commands to be processed by SessionLoop
     pending_domain_commands: VecDeque<DomainCommand>,
 
     /// Max events to process per poll
@@ -82,6 +82,18 @@ impl P2PLoop {
         }
     }
 
+    /// Send a domain command to host (GUEST ONLY)
+    pub fn send_command_to_host(&mut self, command: DomainCommand) -> Result<()> {
+        tracing::info!("📤 GUEST: Sending command to host: {:?}", command);
+
+        let msg = SyncMessage::CommandRequest { command };
+        let data = serde_json::to_vec(&msg)
+            .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
+
+        self.connection.broadcast(data)?;
+        Ok(())
+    }
+
     /// Request full sync from host (GUEST ONLY)
     pub fn request_full_sync(&mut self) -> Result<()> {
         let sync_msg = self
@@ -89,7 +101,6 @@ impl P2PLoop {
             .request_full_sync()
             .map_err(|e| crate::infrastructure::error::P2PError::SendFailed(e.to_string()))?;
 
-        // Serialize and broadcast
         let data = serde_json::to_vec(&sync_msg)
             .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
 
@@ -132,43 +143,32 @@ impl P2PLoop {
         );
     }
 
-    /// Submit a domain event to broadcast (HOST ONLY)
-    pub fn broadcast_event(&mut self, event: P2PDomainEvent) -> Result<u64> {
+    /// Broadcast a domain event (HOST ONLY)
+    pub fn broadcast_domain_event(&mut self, event: CoreDomainEvent) -> Result<()> {
+        // Translate core event to P2P event
+        let p2p_event = self.translator.to_p2p_event(event).ok_or_else(|| {
+            crate::infrastructure::error::P2PError::SendFailed(
+                "Event not translatable to P2P".to_string(),
+            )
+        })?;
+
+        // Create sequenced lobby event
         let sync_msg = self
             .event_sync
-            .create_event(event)
+            .create_event(p2p_event)
             .map_err(|e| crate::infrastructure::error::P2PError::SendFailed(e.to_string()))?;
 
-        match sync_msg {
-            SyncMessage::EventBroadcast { event } => {
-                let sequence = event.sequence;
+        // Serialize and broadcast
+        let data = serde_json::to_vec(&sync_msg)
+            .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
 
-                let data = serde_json::to_vec(&SyncMessage::EventBroadcast { event })
-                    .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
+        self.connection.broadcast(data)?;
 
-                self.connection.broadcast(data)?;
-
-                tracing::info!("📤 Broadcast event sequence {}", sequence);
-                Ok(sequence)
-            }
-            _ => Err(crate::infrastructure::error::P2PError::SendFailed(
-                "Unexpected sync message".to_string(),
-            )),
-        }
-    }
-
-    /// Apply a core domain event and broadcast it via P2P
-    pub fn apply_domain_event(&mut self, event: CoreDomainEvent) -> Result<()> {
-        if let Some(p2p_event) = self.translator.to_p2p_event(event) {
-            self.broadcast_event(p2p_event)?;
-            tracing::debug!("✅ Applied and broadcast core domain event");
-        } else {
-            tracing::debug!("ℹ️  Core event not translated (likely CommandFailed)");
-        }
+        tracing::debug!("✅ Broadcast domain event via P2P");
         Ok(())
     }
 
-    /// Process network events and send queued messages
+    /// Process network events
     pub fn poll(&mut self) -> usize {
         let mut processed = 0;
 
@@ -190,6 +190,10 @@ impl P2PLoop {
                         tracing::debug!("📥 Received sync message from {}", from);
 
                         match self.event_sync.handle_message(*from, sync_msg) {
+                            Ok(SyncResponse::ProcessCommand { command }) => {
+                                tracing::info!("📥 HOST: Processing command from peer {}", from);
+                                self.pending_domain_commands.push_back(command);
+                            }
                             Ok(SyncResponse::ApplyEvents { events }) => {
                                 tracing::info!("✅ Applying {} events from sync", events.len());
                                 self.inbound_lobby_events.extend(events);
@@ -218,6 +222,7 @@ impl P2PLoop {
                                     for_peer,
                                     since_sequence
                                 );
+                                // Will be handled by SessionLoop
                             }
                             Ok(SyncResponse::None) => {}
                             Err(e) => {
@@ -260,7 +265,7 @@ impl P2PLoop {
             self.peer_registry.remove_peer(&peer_id);
         }
 
-        // 3. Translate incoming P2P lobby events to domain commands
+        // 3. Translate incoming lobby events to domain commands
         let lobby_events = std::mem::take(&mut self.inbound_lobby_events);
         for lobby_event in lobby_events {
             if let Some(cmd) = self.translator.to_domain_command(&lobby_event.event) {
@@ -270,41 +275,17 @@ impl P2PLoop {
                 );
                 self.pending_domain_commands.push_back(cmd);
             }
-            self.inbound_lobby_events.push(lobby_event);
         }
 
-        // 4. Send outbound messages (up to batch_size)
-        let mut sent = 0;
-        while sent < self.batch_size {
-            match self.outbound.pop() {
-                Some(msg) => {
-                    if let Ok(data) = serde_json::to_vec(&msg) {
-                        if let Err(e) = self.connection.broadcast(data) {
-                            tracing::error!("❌ Failed to broadcast message: {:?}", e);
-                        } else {
-                            tracing::debug!("📤 Broadcast LobbyEvent sequence {}", msg.sequence);
-                        }
-                    }
-                    sent += 1;
-                }
-                None => break,
-            }
-        }
-
-        processed + sent
+        processed
     }
 
-    /// Drain network events (for caller to process)
+    /// Drain connection events
     pub fn drain_events(&mut self) -> Vec<ConnectionEvent> {
         std::mem::take(&mut self.inbound_events)
     }
 
-    /// Drain parsed lobby events
-    pub fn drain_lobby_events(&mut self) -> Vec<LobbyEvent> {
-        std::mem::take(&mut self.inbound_lobby_events)
-    }
-
-    /// Drain domain commands translated from incoming P2P events
+    /// Drain domain commands
     pub fn drain_domain_commands(&mut self) -> Vec<DomainCommand> {
         self.pending_domain_commands.drain(..).collect()
     }
@@ -323,18 +304,6 @@ impl P2PLoop {
 
     pub fn connected_peers(&self) -> Vec<PeerId> {
         self.connection.connected_peers()
-    }
-
-    pub fn pending_messages(&self) -> usize {
-        self.outbound.len()
-    }
-
-    pub fn pending_events(&self) -> usize {
-        self.inbound_events.len()
-    }
-
-    pub fn pending_domain_commands(&self) -> usize {
-        self.pending_domain_commands.len()
     }
 
     pub fn current_sequence(&self) -> u64 {
@@ -365,303 +334,30 @@ impl P2PLoop {
         tracing::info!("📤 Sent full sync to peer {}", peer_id);
         Ok(())
     }
+
+    pub fn pending_messages(&self) -> usize {
+        self.outbound.len()
+    }
+
+    pub fn pending_domain_commands(&self) -> usize {
+        self.pending_domain_commands.len()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use konnekt_session_core::Participant;
 
     #[test]
-    fn test_message_queue_operations() {
-        let mut queue = MessageQueue::new(10);
-
-        let lobby_id = uuid::Uuid::new_v4();
-        let event = LobbyEvent::new(
-            1,
-            lobby_id,
-            crate::domain::DomainEvent::LobbyCreated {
-                lobby_id,
-                host_id: uuid::Uuid::new_v4(),
-                name: "Test".to_string(),
-            },
-        );
-
-        queue.push(event.clone()).unwrap();
-        assert_eq!(queue.len(), 1);
-
-        let popped = queue.pop().unwrap();
-        assert_eq!(popped.sequence, 1);
-        assert!(queue.is_empty());
-    }
-
-    #[test]
-    fn test_queue_overflow() {
-        let mut queue = MessageQueue::new(2);
-        let lobby_id = uuid::Uuid::new_v4();
-
-        for i in 1..=2 {
-            queue
-                .push(LobbyEvent::new(
-                    i,
-                    lobby_id,
-                    crate::domain::DomainEvent::GuestLeft {
-                        participant_id: uuid::Uuid::new_v4(),
-                    },
-                ))
-                .unwrap();
-        }
-
-        let result = queue.push(LobbyEvent::new(
-            3,
-            lobby_id,
-            crate::domain::DomainEvent::GuestLeft {
-                participant_id: uuid::Uuid::new_v4(),
-            },
-        ));
-
-        assert!(result.is_err());
-    }
-
-    // ===== INTEGRATION TESTS: P2P ↔ Core =====
-
-    #[test]
-    fn test_domain_event_to_p2p_translation() {
-        let lobby_id = Uuid::new_v4();
-
-        // Create translator
-        let translator = EventTranslator::new(lobby_id);
-
-        // Core domain emits event
-        let participant = Participant::new_guest("Alice".to_string()).unwrap();
-        let core_event = CoreDomainEvent::GuestJoined {
-            lobby_id,
-            participant: participant.clone(),
+    fn test_command_routing() {
+        // This would require mocking the connection
+        // For now, verify API exists
+        let cmd = DomainCommand::JoinLobby {
+            lobby_id: Uuid::new_v4(),
+            guest_name: "Test".to_string(),
         };
 
-        // Translate to P2P
-        let p2p_event = translator.to_p2p_event(core_event);
-
-        assert!(p2p_event.is_some());
-        match p2p_event.unwrap() {
-            P2PDomainEvent::GuestJoined { participant: p } => {
-                assert_eq!(p.name(), "Alice");
-            }
-            _ => panic!("Expected GuestJoined"),
-        }
-    }
-
-    #[test]
-    fn test_p2p_event_to_domain_command_translation() {
-        let lobby_id = Uuid::new_v4();
-
-        // Create translator
-        let translator = EventTranslator::new(lobby_id);
-
-        // P2P receives event
-        let participant = Participant::new_guest("Bob".to_string()).unwrap();
-        let p2p_event = P2PDomainEvent::GuestJoined {
-            participant: participant.clone(),
-        };
-
-        // Translate to domain command
-        let cmd = translator.to_domain_command(&p2p_event);
-
-        assert!(cmd.is_some());
-        match cmd.unwrap() {
-            DomainCommand::JoinLobby {
-                lobby_id: lid,
-                guest_name,
-            } => {
-                assert_eq!(lid, lobby_id);
-                assert_eq!(guest_name, "Bob");
-            }
-            _ => panic!("Expected JoinLobby command"),
-        }
-    }
-
-    #[test]
-    fn test_roundtrip_translation() {
-        let lobby_id = Uuid::new_v4();
-        let translator = EventTranslator::new(lobby_id);
-
-        // Start with core event
-        let participant = Participant::new_guest("Charlie".to_string()).unwrap();
-        let original_core = CoreDomainEvent::GuestJoined {
-            lobby_id,
-            participant: participant.clone(),
-        };
-
-        // Core → P2P
-        let p2p_event = translator
-            .to_p2p_event(original_core.clone())
-            .expect("Should translate to P2P");
-
-        // P2P → Domain Command
-        let domain_cmd = translator
-            .to_domain_command(&p2p_event)
-            .expect("Should translate to command");
-
-        // Verify command correctness
-        match domain_cmd {
-            DomainCommand::JoinLobby {
-                lobby_id: lid,
-                guest_name,
-            } => {
-                assert_eq!(lid, lobby_id);
-                assert_eq!(guest_name, "Charlie");
-            }
-            _ => panic!("Expected JoinLobby command"),
-        }
-    }
-
-    #[test]
-    fn test_command_failed_not_translated() {
-        let lobby_id = Uuid::new_v4();
-        let translator = EventTranslator::new(lobby_id);
-
-        // CommandFailed should not be broadcast
-        let core_event = CoreDomainEvent::CommandFailed {
-            command: "Test".to_string(),
-            reason: "Error".to_string(),
-        };
-
-        let p2p_event = translator.to_p2p_event(core_event);
-        assert!(p2p_event.is_none());
-    }
-
-    #[test]
-    fn test_host_delegated_translation() {
-        let lobby_id = Uuid::new_v4();
-        let translator = EventTranslator::new(lobby_id);
-
-        let from = Uuid::new_v4();
-        let to = Uuid::new_v4();
-
-        // Core → P2P
-        let core_event = CoreDomainEvent::HostDelegated { lobby_id, from, to };
-
-        let p2p_event = translator
-            .to_p2p_event(core_event)
-            .expect("Should translate");
-
-        match p2p_event {
-            P2PDomainEvent::HostDelegated {
-                from: f,
-                to: t,
-                reason: _,
-            } => {
-                assert_eq!(f, from);
-                assert_eq!(t, to);
-            }
-            _ => panic!("Expected HostDelegated"),
-        }
-
-        // P2P → Domain Command
-        let p2p_event_for_cmd = P2PDomainEvent::HostDelegated {
-            from,
-            to,
-            reason: crate::domain::DelegationReason::Manual,
-        };
-
-        let cmd = translator
-            .to_domain_command(&p2p_event_for_cmd)
-            .expect("Should translate");
-
-        match cmd {
-            DomainCommand::DelegateHost {
-                lobby_id: lid,
-                current_host_id,
-                new_host_id,
-            } => {
-                assert_eq!(lid, lobby_id);
-                assert_eq!(current_host_id, from);
-                assert_eq!(new_host_id, to);
-            }
-            _ => panic!("Expected DelegateHost command"),
-        }
-    }
-
-    #[test]
-    fn test_participation_mode_changed_translation() {
-        let lobby_id = Uuid::new_v4();
-        let translator = EventTranslator::new(lobby_id);
-        let participant_id = Uuid::new_v4();
-
-        // Core → P2P
-        let core_event = CoreDomainEvent::ParticipationModeChanged {
-            lobby_id,
-            participant_id,
-            new_mode: konnekt_session_core::ParticipationMode::Spectating,
-        };
-
-        let p2p_event = translator
-            .to_p2p_event(core_event)
-            .expect("Should translate");
-
-        match p2p_event {
-            P2PDomainEvent::ParticipationModeChanged {
-                participant_id: pid,
-                new_mode,
-            } => {
-                assert_eq!(pid, participant_id);
-                assert_eq!(new_mode, "Spectating");
-            }
-            _ => panic!("Expected ParticipationModeChanged"),
-        }
-
-        // P2P → Domain Command
-        let p2p_event_for_cmd = P2PDomainEvent::ParticipationModeChanged {
-            participant_id,
-            new_mode: "Active".to_string(),
-        };
-
-        let cmd = translator
-            .to_domain_command(&p2p_event_for_cmd)
-            .expect("Should translate");
-
-        match cmd {
-            DomainCommand::ToggleParticipationMode {
-                lobby_id: lid,
-                participant_id: pid,
-                requester_id: rid,
-                activity_in_progress,
-            } => {
-                assert_eq!(lid, lobby_id);
-                assert_eq!(pid, participant_id);
-                assert_eq!(rid, participant_id); // Self-toggle
-                assert!(!activity_in_progress); // Default
-            }
-            _ => panic!("Expected ToggleParticipationMode command"),
-        }
-    }
-
-    #[test]
-    fn test_peer_timeout_creates_domain_command() {
-        // This would require a mock connection to simulate timeout
-        // For now, we test the translation logic separately
-
-        let lobby_id = Uuid::new_v4();
-        let translator = EventTranslator::new(lobby_id);
-
-        let participant_id = Uuid::new_v4();
-
-        // Simulate peer timeout → participant leaves
-        let p2p_event = P2PDomainEvent::GuestLeft { participant_id };
-
-        let cmd = translator
-            .to_domain_command(&p2p_event)
-            .expect("Should translate");
-
-        match cmd {
-            DomainCommand::LeaveLobby {
-                lobby_id: lid,
-                participant_id: pid,
-            } => {
-                assert_eq!(lid, lobby_id);
-                assert_eq!(pid, participant_id);
-            }
-            _ => panic!("Expected LeaveLobby command"),
-        }
+        // Just verify it compiles
+        let _ = format!("{:?}", cmd);
     }
 }

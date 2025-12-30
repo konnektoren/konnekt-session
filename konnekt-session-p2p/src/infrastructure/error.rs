@@ -21,6 +21,9 @@ pub enum P2PError {
 
     #[error("Channel closed")]
     ChannelClosed,
+
+    #[error("Participant error: {0}")]
+    ParticipantError(#[from] konnekt_session_core::ParticipantError),
 }
 
 pub type Result<T> = std::result::Result<T, P2PError>;
