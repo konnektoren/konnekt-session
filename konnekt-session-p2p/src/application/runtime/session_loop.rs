@@ -357,6 +357,17 @@ impl SessionLoop {
     pub fn current_sequence(&self) -> u64 {
         self.p2p.current_sequence()
     }
+
+    /// Get mutable reference to domain loop (for advanced usage)
+    pub fn domain_mut(&mut self) -> &mut DomainLoop {
+        &mut self.domain
+    }
+
+    /// Check if we need to handle any user commands
+    /// Returns true if there are pending commands to submit
+    pub fn has_pending_input(&self) -> bool {
+        self.domain.pending_commands() > 0
+    }
 }
 
 #[cfg(test)]
