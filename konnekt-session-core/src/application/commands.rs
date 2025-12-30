@@ -41,6 +41,30 @@ pub enum DomainCommand {
         current_host_id: Uuid,
         new_host_id: Uuid,
     },
+
+    /// Plan an activity
+    PlanActivity {
+        lobby_id: Uuid,
+        metadata: crate::domain::ActivityMetadata,
+    },
+
+    /// Start a planned activity
+    StartActivity {
+        lobby_id: Uuid,
+        activity_id: crate::domain::ActivityId,
+    },
+
+    /// Submit activity result
+    SubmitResult {
+        lobby_id: Uuid,
+        result: crate::domain::ActivityResult,
+    },
+
+    /// Cancel activity
+    CancelActivity {
+        lobby_id: Uuid,
+        activity_id: crate::domain::ActivityId,
+    },
 }
 
 #[cfg(test)]

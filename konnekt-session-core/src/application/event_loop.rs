@@ -1,5 +1,7 @@
 use crate::application::{DomainCommand, DomainEvent};
-use crate::domain::{Lobby, LobbyError, Participant};
+use crate::domain::{
+    ActivityId, ActivityMetadata, ActivityResult, ActivityStatus, Lobby, LobbyError, Participant,
+};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -60,6 +62,24 @@ impl DomainEventLoop {
                 current_host_id,
                 new_host_id,
             } => self.handle_delegate_host(lobby_id, current_host_id, new_host_id),
+
+            DomainCommand::PlanActivity { lobby_id, metadata } => {
+                self.handle_plan_activity(lobby_id, metadata)
+            }
+
+            DomainCommand::StartActivity {
+                lobby_id,
+                activity_id,
+            } => self.handle_start_activity(lobby_id, activity_id),
+
+            DomainCommand::SubmitResult { lobby_id, result } => {
+                self.handle_submit_result(lobby_id, result)
+            }
+
+            DomainCommand::CancelActivity {
+                lobby_id,
+                activity_id,
+            } => self.handle_cancel_activity(lobby_id, activity_id),
         }
     }
 
@@ -228,6 +248,106 @@ impl DomainEventLoop {
             },
             Err(e) => DomainEvent::CommandFailed {
                 command: "DelegateHost".to_string(),
+                reason: e.to_string(),
+            },
+        }
+    }
+
+    fn handle_plan_activity(&mut self, lobby_id: Uuid, metadata: ActivityMetadata) -> DomainEvent {
+        let lobby = match self.lobbies.get_mut(&lobby_id) {
+            Some(l) => l,
+            None => {
+                return DomainEvent::CommandFailed {
+                    command: "PlanActivity".to_string(),
+                    reason: format!("Lobby {} not found", lobby_id),
+                };
+            }
+        };
+
+        match lobby.plan_activity(metadata.clone()) {
+            Ok(_) => DomainEvent::ActivityPlanned { lobby_id, metadata },
+            Err(e) => DomainEvent::CommandFailed {
+                command: "PlanActivity".to_string(),
+                reason: e.to_string(),
+            },
+        }
+    }
+
+    fn handle_start_activity(&mut self, lobby_id: Uuid, activity_id: ActivityId) -> DomainEvent {
+        let lobby = match self.lobbies.get_mut(&lobby_id) {
+            Some(l) => l,
+            None => {
+                return DomainEvent::CommandFailed {
+                    command: "StartActivity".to_string(),
+                    reason: format!("Lobby {} not found", lobby_id),
+                };
+            }
+        };
+
+        match lobby.start_activity(activity_id) {
+            Ok(_) => DomainEvent::ActivityStarted {
+                lobby_id,
+                activity_id,
+            },
+            Err(e) => DomainEvent::CommandFailed {
+                command: "StartActivity".to_string(),
+                reason: e.to_string(),
+            },
+        }
+    }
+
+    fn handle_submit_result(&mut self, lobby_id: Uuid, result: ActivityResult) -> DomainEvent {
+        let lobby = match self.lobbies.get_mut(&lobby_id) {
+            Some(l) => l,
+            None => {
+                return DomainEvent::CommandFailed {
+                    command: "SubmitResult".to_string(),
+                    reason: format!("Lobby {} not found", lobby_id),
+                };
+            }
+        };
+
+        match lobby.submit_result(result.clone()) {
+            Ok(_) => {
+                // Check if activity completed
+                if lobby.get_activity(result.activity_id).unwrap().status
+                    == ActivityStatus::Completed
+                {
+                    let results = lobby.get_results(result.activity_id);
+                    DomainEvent::ActivityCompleted {
+                        lobby_id,
+                        activity_id: result.activity_id,
+                        results: results.into_iter().cloned().collect(),
+                    }
+                } else {
+                    DomainEvent::ResultSubmitted { lobby_id, result }
+                }
+            }
+            Err(e) => DomainEvent::CommandFailed {
+                command: "SubmitResult".to_string(),
+                reason: e.to_string(),
+            },
+        }
+    }
+
+    fn handle_cancel_activity(&mut self, lobby_id: Uuid, activity_id: ActivityId) -> DomainEvent {
+        let lobby = match self.lobbies.get_mut(&lobby_id) {
+            Some(l) => l,
+            None => {
+                return DomainEvent::CommandFailed {
+                    command: "CancelActivity".to_string(),
+                    reason: format!("Lobby {} not found", lobby_id),
+                };
+            }
+        };
+
+        match lobby.cancel_activity(activity_id) {
+            Ok(_) => DomainEvent::ActivityCancelled {
+                lobby_id,
+                activity_id,
+            },
+            Err(e) => DomainEvent::CommandFailed {
+                command: "CancelActivity".to_string(),
                 reason: e.to_string(),
             },
         }

@@ -1,4 +1,7 @@
-use crate::domain::{Participant, ParticipantError, ParticipationMode, Timestamp};
+use crate::domain::{
+    ActivityId, ActivityMetadata, ActivityResult, ActivityStatus, Participant, ParticipantError,
+    ParticipationMode, Timestamp,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -18,6 +21,14 @@ pub struct Lobby {
 
     /// Current host's participant ID
     host_id: Uuid,
+
+    /// Planned and in-progress activities
+    #[serde(default)]
+    activities: Vec<ActivityMetadata>,
+
+    /// Submitted results (for current/recent activities)
+    #[serde(default)]
+    activity_results: Vec<ActivityResult>,
 }
 
 /// Errors that can occur in lobby operations
@@ -46,13 +57,51 @@ pub enum LobbyError {
 
     #[error("Participant error: {0}")]
     ParticipantError(#[from] ParticipantError),
+
+    // Activity errors
+    #[error("Activity not found: {0}")]
+    ActivityNotFound(ActivityId),
+
+    #[error("Activity already exists: {0}")]
+    ActivityAlreadyExists(ActivityId),
+
+    #[error("Activity not in progress")]
+    ActivityNotInProgress,
+
+    #[error("Activity already in progress")]
+    ActivityAlreadyInProgress,
+
+    #[error("Spectator cannot submit results")]
+    SpectatorCannotSubmit,
 }
 
 impl Lobby {
-    // Keep existing new() for backward compatibility
+    /// Create a new lobby with random ID
     pub fn new(name: String, host: Participant) -> Result<Self, LobbyError> {
         Self::with_id(Uuid::new_v4(), name, host)
     }
+
+    /// Create a new lobby with a specific ID
+    pub fn with_id(id: Uuid, name: String, host: Participant) -> Result<Self, LobbyError> {
+        if !host.is_host() {
+            return Err(LobbyError::NoHost);
+        }
+
+        let host_id = host.id();
+        let mut participants = HashMap::new();
+        participants.insert(host_id, host);
+
+        Ok(Lobby {
+            id,
+            name,
+            participants,
+            host_id,
+            activities: Vec::new(),
+            activity_results: Vec::new(),
+        })
+    }
+
+    // ===== Getters =====
 
     /// Get lobby ID
     pub fn id(&self) -> Uuid {
@@ -78,6 +127,38 @@ impl Lobby {
     pub fn participants(&self) -> &HashMap<Uuid, Participant> {
         &self.participants
     }
+
+    /// Get mutable access to participants (for removing timed out peers)
+    pub fn participants_mut(&mut self) -> &mut HashMap<Uuid, Participant> {
+        &mut self.participants
+    }
+
+    /// Get all activities
+    pub fn activities(&self) -> &[ActivityMetadata] {
+        &self.activities
+    }
+
+    /// Get activity by ID
+    pub fn get_activity(&self, activity_id: ActivityId) -> Option<&ActivityMetadata> {
+        self.activities.iter().find(|a| a.id == activity_id)
+    }
+
+    /// Get current in-progress activity
+    pub fn current_activity(&self) -> Option<&ActivityMetadata> {
+        self.activities
+            .iter()
+            .find(|a| a.status == ActivityStatus::InProgress)
+    }
+
+    /// Get results for an activity
+    pub fn get_results(&self, activity_id: ActivityId) -> Vec<&ActivityResult> {
+        self.activity_results
+            .iter()
+            .filter(|r| r.activity_id == activity_id)
+            .collect()
+    }
+
+    // ===== Participant Management =====
 
     /// Add a guest to the lobby
     pub fn add_guest(&mut self, guest: Participant) -> Result<(), LobbyError> {
@@ -111,10 +192,48 @@ impl Lobby {
         Ok(was_host)
     }
 
-    /// Get mutable access to participants (for removing timed out peers)
-    pub fn participants_mut(&mut self) -> &mut HashMap<Uuid, Participant> {
-        &mut self.participants
+    /// Kick a guest from the lobby (host only)
+    pub fn kick_guest(&mut self, guest_id: Uuid, host_id: Uuid) -> Result<Participant, LobbyError> {
+        // First, verify requester is host (immutable borrow)
+        let requester = self
+            .participants
+            .get(&host_id)
+            .ok_or(LobbyError::ParticipantNotFound(host_id))?;
+
+        if !requester.is_host() {
+            return Err(LobbyError::PermissionDenied);
+        }
+
+        // Cannot kick yourself (host)
+        if guest_id == host_id {
+            return Err(LobbyError::CannotKickHost);
+        }
+
+        // Drop immutable borrow before getting mutable borrow
+
+        // Now remove the guest (mutable borrow)
+        let kicked_participant = self
+            .participants
+            .remove(&guest_id)
+            .ok_or(LobbyError::ParticipantNotFound(guest_id))?;
+
+        // Verify they were actually a guest
+        if kicked_participant.is_host() {
+            // Put them back if we accidentally tried to remove host
+            self.participants
+                .insert(guest_id, kicked_participant.clone());
+            return Err(LobbyError::CannotKickHost);
+        }
+
+        Ok(kicked_participant)
     }
+
+    /// Check if there are any guests in the lobby
+    pub fn has_guests(&self) -> bool {
+        self.participants.values().any(|p| !p.is_host())
+    }
+
+    // ===== Host Delegation =====
 
     /// Manually delegate host role to a guest
     pub fn delegate_host(&mut self, new_host_id: Uuid) -> Result<(), LobbyError> {
@@ -168,10 +287,7 @@ impl Lobby {
         }
     }
 
-    /// Check if there are any guests in the lobby
-    pub fn has_guests(&self) -> bool {
-        self.participants.values().any(|p| !p.is_host())
-    }
+    // ===== Participation Mode Management =====
 
     /// Toggle participation mode for a guest (self-requested)
     pub fn toggle_guest_participation_mode(
@@ -285,58 +401,146 @@ impl Lobby {
             .collect()
     }
 
-    /// Kick a guest from the lobby (host only)
-    pub fn kick_guest(&mut self, guest_id: Uuid, host_id: Uuid) -> Result<Participant, LobbyError> {
-        // First, verify requester is host (immutable borrow)
-        let requester = self
-            .participants
-            .get(&host_id)
-            .ok_or(LobbyError::ParticipantNotFound(host_id))?;
+    // ===== Activity Management =====
 
-        if !requester.is_host() {
-            return Err(LobbyError::PermissionDenied);
+    /// Host plans an activity
+    pub fn plan_activity(&mut self, metadata: ActivityMetadata) -> Result<(), LobbyError> {
+        // Validate
+        if self.activities.iter().any(|a| a.id == metadata.id) {
+            return Err(LobbyError::ActivityAlreadyExists(metadata.id));
         }
 
-        // Cannot kick yourself (host)
-        if guest_id == host_id {
-            return Err(LobbyError::CannotKickHost);
-        }
-
-        // Drop immutable borrow before getting mutable borrow
-
-        // Now remove the guest (mutable borrow)
-        let kicked_participant = self
-            .participants
-            .remove(&guest_id)
-            .ok_or(LobbyError::ParticipantNotFound(guest_id))?;
-
-        // Verify they were actually a guest
-        if kicked_participant.is_host() {
-            // Put them back if we accidentally tried to remove host
-            self.participants
-                .insert(guest_id, kicked_participant.clone());
-            return Err(LobbyError::CannotKickHost);
-        }
-
-        Ok(kicked_participant)
+        // Add to queue
+        self.activities.push(metadata);
+        Ok(())
     }
 
-    /// Create a new lobby with a specific ID
-    pub fn with_id(id: Uuid, name: String, host: Participant) -> Result<Self, LobbyError> {
-        if !host.is_host() {
-            return Err(LobbyError::NoHost);
+    /// Host starts a planned activity
+    pub fn start_activity(&mut self, activity_id: ActivityId) -> Result<(), LobbyError> {
+        // Check only one activity can be in-progress (immutable borrow)
+        let has_in_progress = self
+            .activities
+            .iter()
+            .any(|a| a.status == ActivityStatus::InProgress);
+
+        if has_in_progress {
+            return Err(LobbyError::ActivityAlreadyInProgress);
         }
 
-        let host_id = host.id();
-        let mut participants = HashMap::new();
-        participants.insert(host_id, host);
+        // Now we can safely get mutable borrow
+        let activity = self
+            .activities
+            .iter_mut()
+            .find(|a| a.id == activity_id)
+            .ok_or(LobbyError::ActivityNotFound(activity_id))?;
 
-        Ok(Lobby {
-            id, // 🆕 Use provided ID
-            name,
-            participants,
-            host_id,
-        })
+        // Transition state
+        activity.status = ActivityStatus::InProgress;
+        self.clear_results_for_activity(activity_id);
+
+        Ok(())
+    }
+
+    /// Participant submits result
+    pub fn submit_result(&mut self, result: ActivityResult) -> Result<(), LobbyError> {
+        // Find activity
+        let activity = self
+            .activities
+            .iter()
+            .find(|a| a.id == result.activity_id)
+            .ok_or(LobbyError::ActivityNotFound(result.activity_id))?;
+
+        // Check activity is in progress
+        if activity.status != ActivityStatus::InProgress {
+            return Err(LobbyError::ActivityNotInProgress);
+        }
+
+        // Check participant is Active (not Spectating)
+        let participant = self
+            .participants()
+            .get(&result.participant_id)
+            .ok_or(LobbyError::ParticipantNotFound(result.participant_id))?;
+
+        if !participant.can_submit_results() {
+            return Err(LobbyError::SpectatorCannotSubmit);
+        }
+
+        // Store result
+        self.activity_results.push(result);
+
+        // Check if all active participants submitted
+        if self.all_active_participants_submitted(activity.id) {
+            self.complete_activity(activity.id)?;
+        }
+
+        Ok(())
+    }
+
+    /// Cancel an in-progress activity
+    pub fn cancel_activity(&mut self, activity_id: ActivityId) -> Result<(), LobbyError> {
+        let activity = self
+            .activities
+            .iter_mut()
+            .find(|a| a.id == activity_id)
+            .ok_or(LobbyError::ActivityNotFound(activity_id))?;
+
+        if activity.status != ActivityStatus::InProgress {
+            return Err(LobbyError::ActivityNotInProgress);
+        }
+
+        activity.status = ActivityStatus::Cancelled;
+        self.clear_results_for_activity(activity_id);
+
+        Ok(())
+    }
+
+    /// Remove a planned activity
+    pub fn remove_planned_activity(&mut self, activity_id: ActivityId) -> Result<(), LobbyError> {
+        let index = self
+            .activities
+            .iter()
+            .position(|a| a.id == activity_id)
+            .ok_or(LobbyError::ActivityNotFound(activity_id))?;
+
+        let activity = &self.activities[index];
+        if activity.status != ActivityStatus::Planned {
+            return Err(LobbyError::ActivityAlreadyInProgress);
+        }
+
+        self.activities.remove(index);
+        Ok(())
+    }
+
+    // ===== Private Helper Methods =====
+
+    /// Clear results for an activity
+    fn clear_results_for_activity(&mut self, activity_id: ActivityId) {
+        self.activity_results
+            .retain(|r| r.activity_id != activity_id);
+    }
+
+    /// Check if all active participants have submitted results
+    fn all_active_participants_submitted(&self, activity_id: ActivityId) -> bool {
+        let active_count = self.active_participants().len();
+        let submitted_count = self
+            .activity_results
+            .iter()
+            .filter(|r| r.activity_id == activity_id)
+            .count();
+
+        active_count > 0 && submitted_count >= active_count
+    }
+
+    /// Complete an activity
+    fn complete_activity(&mut self, activity_id: ActivityId) -> Result<(), LobbyError> {
+        let activity = self
+            .activities
+            .iter_mut()
+            .find(|a| a.id == activity_id)
+            .ok_or(LobbyError::ActivityNotFound(activity_id))?;
+
+        activity.status = ActivityStatus::Completed;
+        Ok(())
     }
 }
 
@@ -344,6 +548,8 @@ impl Lobby {
 mod tests {
     use super::*;
     use crate::domain::LobbyRole;
+
+    // ===== Existing Participant Tests =====
 
     #[test]
     fn test_create_lobby() {
@@ -538,9 +744,6 @@ mod tests {
 
     #[test]
     fn test_auto_delegate_after_host_removed() {
-        // Reproduce the bug: host is removed from participants map,
-        // then auto_delegate tries to find them
-
         let host = Participant::with_timestamp(
             "Host".to_string(),
             LobbyRole::Host,
@@ -571,19 +774,14 @@ mod tests {
         lobby.add_guest(bob).unwrap();
 
         // Simulate host timeout: remove host from participants
-        // This is what happens in handle_peer_timed_out
         lobby.participants_mut().remove(&host_id);
 
         // Now try to auto-delegate
-        // This should work - promote Alice (oldest guest)
         let result = lobby.auto_delegate_host();
 
-        assert!(
-            result.is_ok(),
-            "auto_delegate should succeed even if host is removed"
-        );
+        assert!(result.is_ok());
         let new_host_id = result.unwrap();
-        assert_eq!(new_host_id, alice_id, "Alice should become host");
+        assert_eq!(new_host_id, alice_id);
 
         // Verify Alice is now host
         assert!(lobby.participants().get(&alice_id).unwrap().is_host());
@@ -592,8 +790,6 @@ mod tests {
 
     #[test]
     fn test_delegate_host_with_removed_old_host() {
-        // Test that delegate_host works when old host is already removed
-
         let host = Participant::with_timestamp(
             "Host".to_string(),
             LobbyRole::Host,
@@ -620,68 +816,9 @@ mod tests {
         // Try to delegate to Alice
         let result = lobby.delegate_host(alice_id);
 
-        // This SHOULD succeed - we handle missing old host gracefully
-        assert!(
-            result.is_ok(),
-            "Should succeed even when old host is removed"
-        );
+        assert!(result.is_ok());
         assert_eq!(lobby.host_id(), alice_id);
         assert!(lobby.participants().get(&alice_id).unwrap().is_host());
-    }
-
-    #[test]
-    fn test_lobby_state_after_host_timeout() {
-        // Reproduce the exact scenario from the error
-
-        let host = Participant::new_host("OriginalHost".to_string()).unwrap();
-        let host_id = host.id();
-
-        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
-
-        let guest1 = Participant::new_guest("Guest1".to_string()).unwrap();
-        let guest1_id = guest1.id();
-
-        let guest2 = Participant::new_guest("Guest2".to_string()).unwrap();
-
-        lobby.add_guest(guest1).unwrap();
-        lobby.add_guest(guest2).unwrap();
-
-        println!("Before timeout:");
-        println!("  Host ID: {}", lobby.host_id());
-        println!("  Participants: {}", lobby.participants().len());
-        println!(
-            "  Host exists in map: {}",
-            lobby.participants().contains_key(&host_id)
-        );
-
-        // Simulate host timeout:
-        // 1. Remove host from participants
-        let removed = lobby.participants_mut().remove(&host_id);
-        assert!(removed.is_some(), "Host should be in participants");
-
-        println!("\nAfter removing host:");
-        println!("  Host ID (still): {}", lobby.host_id());
-        println!("  Participants: {}", lobby.participants().len());
-        println!(
-            "  Host exists in map: {}",
-            lobby.participants().contains_key(&host_id)
-        );
-
-        // 2. Try to delegate
-        let result = lobby.auto_delegate_host();
-
-        println!("\nDelegation result: {:?}", result);
-
-        if let Ok(new_host_id) = result {
-            println!("New host ID: {}", new_host_id);
-            println!("New host is Guest1: {}", new_host_id == guest1_id);
-
-            // Verify state
-            assert_eq!(lobby.host_id(), new_host_id);
-            assert!(lobby.participants().get(&new_host_id).unwrap().is_host());
-        } else {
-            panic!("Delegation should succeed");
-        }
     }
 
     #[test]
@@ -845,5 +982,241 @@ mod tests {
         let result = lobby.kick_guest(fake_id, host_id);
 
         assert_eq!(result, Err(LobbyError::ParticipantNotFound(fake_id)));
+    }
+
+    // ===== Activity Tests =====
+
+    #[test]
+    fn test_plan_activity() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let metadata = ActivityMetadata::new(
+            "trivia-quiz".to_string(),
+            "Quiz 1".to_string(),
+            serde_json::json!({}),
+        );
+        let activity_id = metadata.id;
+
+        lobby.plan_activity(metadata).unwrap();
+
+        assert_eq!(lobby.activities().len(), 1);
+        assert_eq!(lobby.get_activity(activity_id).unwrap().name, "Quiz 1");
+    }
+
+    #[test]
+    fn test_start_activity() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let metadata = ActivityMetadata::new(
+            "trivia-quiz".to_string(),
+            "Quiz 1".to_string(),
+            serde_json::json!({}),
+        );
+        let activity_id = metadata.id;
+        lobby.plan_activity(metadata).unwrap();
+
+        lobby.start_activity(activity_id).unwrap();
+
+        let activity = lobby.get_activity(activity_id).unwrap();
+        assert_eq!(activity.status, ActivityStatus::InProgress);
+    }
+
+    #[test]
+    fn test_cannot_start_two_activities() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let activity1 =
+            ActivityMetadata::new("quiz".to_string(), "Q1".to_string(), serde_json::json!({}));
+        let activity2 =
+            ActivityMetadata::new("quiz".to_string(), "Q2".to_string(), serde_json::json!({}));
+
+        lobby.plan_activity(activity1.clone()).unwrap();
+        lobby.plan_activity(activity2.clone()).unwrap();
+
+        lobby.start_activity(activity1.id).unwrap();
+
+        let result = lobby.start_activity(activity2.id);
+        assert_eq!(result, Err(LobbyError::ActivityAlreadyInProgress));
+    }
+
+    #[test]
+    fn test_submit_result() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let host_id = host.id();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let metadata =
+            ActivityMetadata::new("quiz".to_string(), "Q1".to_string(), serde_json::json!({}));
+        let activity_id = metadata.id;
+
+        lobby.plan_activity(metadata).unwrap();
+        lobby.start_activity(activity_id).unwrap();
+
+        let result = ActivityResult::new(activity_id, host_id).with_score(42);
+        lobby.submit_result(result).unwrap();
+
+        let results = lobby.get_results(activity_id);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].score, Some(42));
+    }
+
+    #[test]
+    fn test_activity_completes_when_all_submit() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let host_id = host.id();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let guest = Participant::new_guest("Bob".to_string()).unwrap();
+        let guest_id = guest.id();
+        lobby.add_guest(guest).unwrap();
+
+        let metadata =
+            ActivityMetadata::new("quiz".to_string(), "Q1".to_string(), serde_json::json!({}));
+        let activity_id = metadata.id;
+
+        lobby.plan_activity(metadata).unwrap();
+        lobby.start_activity(activity_id).unwrap();
+
+        // Host submits
+        lobby
+            .submit_result(ActivityResult::new(activity_id, host_id))
+            .unwrap();
+        assert_eq!(
+            lobby.get_activity(activity_id).unwrap().status,
+            ActivityStatus::InProgress
+        );
+
+        // Guest submits → should complete
+        lobby
+            .submit_result(ActivityResult::new(activity_id, guest_id))
+            .unwrap();
+        assert_eq!(
+            lobby.get_activity(activity_id).unwrap().status,
+            ActivityStatus::Completed
+        );
+    }
+
+    #[test]
+    fn test_spectator_cannot_submit() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let guest = Participant::new_guest("Bob".to_string()).unwrap();
+        let guest_id = guest.id();
+        lobby.add_guest(guest).unwrap();
+
+        // Make Bob a spectator
+        lobby
+            .toggle_guest_participation_mode(guest_id, false)
+            .unwrap();
+
+        let metadata =
+            ActivityMetadata::new("quiz".to_string(), "Q1".to_string(), serde_json::json!({}));
+        let activity_id = metadata.id;
+
+        lobby.plan_activity(metadata).unwrap();
+        lobby.start_activity(activity_id).unwrap();
+
+        let result = ActivityResult::new(activity_id, guest_id);
+        assert_eq!(
+            lobby.submit_result(result),
+            Err(LobbyError::SpectatorCannotSubmit)
+        );
+    }
+
+    #[test]
+    fn test_cancel_activity() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let metadata =
+            ActivityMetadata::new("quiz".to_string(), "Q1".to_string(), serde_json::json!({}));
+        let activity_id = metadata.id;
+
+        lobby.plan_activity(metadata).unwrap();
+        lobby.start_activity(activity_id).unwrap();
+
+        lobby.cancel_activity(activity_id).unwrap();
+
+        assert_eq!(
+            lobby.get_activity(activity_id).unwrap().status,
+            ActivityStatus::Cancelled
+        );
+    }
+
+    #[test]
+    fn test_remove_planned_activity() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let metadata =
+            ActivityMetadata::new("quiz".to_string(), "Q1".to_string(), serde_json::json!({}));
+        let activity_id = metadata.id;
+
+        lobby.plan_activity(metadata).unwrap();
+        lobby.remove_planned_activity(activity_id).unwrap();
+
+        assert_eq!(lobby.activities().len(), 0);
+    }
+
+    #[test]
+    fn test_cannot_remove_started_activity() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let metadata =
+            ActivityMetadata::new("quiz".to_string(), "Q1".to_string(), serde_json::json!({}));
+        let activity_id = metadata.id;
+
+        lobby.plan_activity(metadata).unwrap();
+        lobby.start_activity(activity_id).unwrap();
+
+        let result = lobby.remove_planned_activity(activity_id);
+        assert_eq!(result, Err(LobbyError::ActivityAlreadyInProgress));
+    }
+
+    #[test]
+    fn test_echo_activity_flow() {
+        use crate::activities::{EchoChallenge, EchoResult};
+
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let host_id = host.id();
+        let mut lobby = Lobby::new("Test".to_string(), host).unwrap();
+
+        // Create echo challenge
+        let challenge = EchoChallenge::new("Hello Rust".to_string());
+        let metadata = ActivityMetadata::new(
+            EchoChallenge::activity_type().to_string(),
+            "Echo Challenge".to_string(),
+            challenge.to_config(),
+        );
+        let activity_id = metadata.id;
+
+        // Plan and start
+        lobby.plan_activity(metadata).unwrap();
+        lobby.start_activity(activity_id).unwrap();
+
+        // Submit result
+        let result = EchoResult::new("Hello Rust".to_string(), 1500);
+        let score = challenge.calculate_score(&result.response);
+
+        lobby
+            .submit_result(
+                ActivityResult::new(activity_id, host_id)
+                    .with_data(result.to_json())
+                    .with_score(score)
+                    .with_time(result.time_ms),
+            )
+            .unwrap();
+
+        // Verify
+        assert_eq!(
+            lobby.get_activity(activity_id).unwrap().status,
+            ActivityStatus::Completed
+        );
+        assert_eq!(lobby.get_results(activity_id)[0].score, Some(100));
     }
 }

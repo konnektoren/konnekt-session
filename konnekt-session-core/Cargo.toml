@@ -12,10 +12,10 @@ categories.workspace = true
 
 [dependencies]
 uuid = { version = "1.0", features = ["v4", "serde"] }
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace=true }
+serde_json = { workspace=true }
 thiserror = "1.0"
 instant = { version = "0.1", features = ["wasm-bindgen"] }
 schemars = { version = "1.2", features = ["uuid1", "preserve_order"] }
 
 [dev-dependencies]
-serde_json = "1.0"

@@ -1,49 +1,72 @@
-use konnekt_session_core::{Participant, Timestamp};
+use konnekt_session_core::{
+    Participant, Timestamp,
+    domain::{ActivityId, ActivityMetadata, ActivityResult},
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Domain event in the lobby
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type")]
 pub enum DomainEvent {
-    /// Lobby was created
+    // Existing events...
     LobbyCreated {
         lobby_id: Uuid,
         host_id: Uuid,
         name: String,
     },
 
-    /// Guest joined the lobby
-    GuestJoined { participant: Participant },
+    GuestJoined {
+        participant: Participant,
+    },
 
-    /// Guest left the lobby
-    GuestLeft { participant_id: Uuid },
+    GuestLeft {
+        participant_id: Uuid,
+    },
 
-    /// Guest was kicked by host
     GuestKicked {
         participant_id: Uuid,
         kicked_by: Uuid,
     },
 
-    /// Host role was delegated
     HostDelegated {
         from: Uuid,
         to: Uuid,
         reason: DelegationReason,
     },
 
-    /// Participant changed participation mode
     ParticipationModeChanged {
         participant_id: Uuid,
-        new_mode: String, // "Active" | "Spectating"
+        new_mode: String,
+    },
+
+    // ✅ ADD: Activity events
+    ActivityPlanned {
+        metadata: ActivityMetadata,
+    },
+
+    ActivityStarted {
+        activity_id: ActivityId,
+    },
+
+    ResultSubmitted {
+        result: ActivityResult,
+    },
+
+    ActivityCompleted {
+        activity_id: ActivityId,
+        results: Vec<ActivityResult>,
+    },
+
+    ActivityCancelled {
+        activity_id: ActivityId,
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum DelegationReason {
     Manual,
     Timeout,
+    Disconnect,
 }
 
 /// An event with metadata for ordering and synchronization

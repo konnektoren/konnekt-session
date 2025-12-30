@@ -42,6 +42,37 @@ pub enum DomainEvent {
 
     /// Command failed
     CommandFailed { command: String, reason: String },
+
+    /// Activity was planned
+    ActivityPlanned {
+        lobby_id: Uuid,
+        metadata: crate::domain::ActivityMetadata,
+    },
+
+    /// Activity was started
+    ActivityStarted {
+        lobby_id: Uuid,
+        activity_id: crate::domain::ActivityId,
+    },
+
+    /// Result was submitted
+    ResultSubmitted {
+        lobby_id: Uuid,
+        result: crate::domain::ActivityResult,
+    },
+
+    /// Activity completed
+    ActivityCompleted {
+        lobby_id: Uuid,
+        activity_id: crate::domain::ActivityId,
+        results: Vec<crate::domain::ActivityResult>,
+    },
+
+    /// Activity cancelled
+    ActivityCancelled {
+        lobby_id: Uuid,
+        activity_id: crate::domain::ActivityId,
+    },
 }
 
 #[cfg(test)]
