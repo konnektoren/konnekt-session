@@ -11,11 +11,13 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-uuid = { version = "1.0", features = ["v4", "serde"] }
-serde = { workspace=true }
-serde_json = { workspace=true }
-thiserror = "1.0"
-instant = { version = "0.1", features = ["wasm-bindgen"] }
-schemars = { version = "1.2", features = ["uuid1", "preserve_order"] }
+uuid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+instant = { workspace = true }
+schemars = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
+tracing-subscriber = { workspace = true, features = ["env-filter", "json", "fmt"] }
