@@ -1,20 +1,10 @@
-use konnekt_session_yew::{LobbyView, SessionProvider};
-use yew::prelude::*;
-
-#[function_component(App)]
-fn app() -> Html {
-    html! {
-        <div class="app">
-            <SessionProvider signalling_server="wss://match.konnektoren.help">
-                <LobbyView />
-            </SessionProvider>
-        </div>
-    }
-}
+use konnekt_session_yew::App;
 
 fn main() {
-    // Initialize tracing
+    // Initialize tracing for WASM
     tracing_wasm::set_as_global_default();
+
+    tracing::info!("Starting Konnekt Session Yew Example");
 
     yew::Renderer::<App>::new().render();
 }

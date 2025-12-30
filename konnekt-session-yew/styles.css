@@ -137,6 +137,13 @@ body {
     color: #333;
 }
 
+.konnekt-participant-list__role {
+    color: #999;
+    font-size: 0.875rem;
+    font-weight: normal;
+    margin-left: 0.5rem;
+}
+
 .konnekt-participant-list__mode {
     font-size: 0.875rem;
     color: #666;
@@ -241,4 +248,462 @@ body {
 .loading {
     opacity: 0.6;
     pointer-events: none;
+}
+
+.konnekt-login {
+    max-width: 500px;
+    margin: 4rem auto;
+    background: white;
+    border-radius: 8px;
+    padding: 2rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.konnekt-login__title {
+    text-align: center;
+    font-size: 2rem;
+    margin-bottom: 2rem;
+    color: #333;
+}
+
+.konnekt-login__tabs {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    border-bottom: 2px solid #eee;
+}
+
+.konnekt-login__tab {
+    flex: 1;
+    padding: 1rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 500;
+    color: #666;
+    transition: all 0.2s;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+}
+
+.konnekt-login__tab.active {
+    color: #2196f3;
+    border-bottom-color: #2196f3;
+}
+
+.konnekt-login__tab:hover {
+    color: #333;
+}
+
+.konnekt-login__form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.konnekt-login__label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    font-weight: 500;
+    color: #333;
+}
+
+.konnekt-login__input {
+    padding: 0.75rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 1rem;
+    transition: border-color 0.2s;
+}
+
+.konnekt-login__input:focus {
+    outline: none;
+    border-color: #2196f3;
+}
+
+.konnekt-login__button {
+    padding: 1rem;
+    background: #2196f3;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.konnekt-login__button:hover {
+    background: #1976d2;
+}
+
+.konnekt-login__button:active {
+    transform: translateY(1px);
+}
+
+/* Session Screen */
+.konnekt-session-screen {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+
+.konnekt-session-screen__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.konnekt-session-screen__title {
+    font-size: 2rem;
+    color: #333;
+}
+
+.konnekt-session-screen__leave-btn {
+    padding: 0.75rem 1.5rem;
+    background: #f44336;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background-color 0.2s;
+}
+
+.konnekt-session-screen__leave-btn:hover {
+    background: #d32f2f;
+}
+
+.konnekt-session-screen__content {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 2rem;
+}
+
+.konnekt-session-screen__column {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.konnekt-session-screen__loading {
+    text-align: center;
+    padding: 4rem;
+    color: #666;
+}
+
+/* Activity Planner (Host Only) */
+.konnekt-session-screen__activity-planner {
+    background: white;
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.konnekt-activity-templates {
+    list-style: none;
+    margin: 1rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.konnekt-activity-template {
+    padding: 0.75rem;
+    background: #f5f5f5;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 2px solid transparent;
+}
+
+.konnekt-activity-template:hover {
+    background: #e0e0e0;
+}
+
+.konnekt-activity-template.selected {
+    background: #e3f2fd;
+    border-color: #2196f3;
+    font-weight: 600;
+}
+
+/* Buttons */
+.konnekt-btn {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.konnekt-btn--primary {
+    background: #2196f3;
+    color: white;
+}
+
+.konnekt-btn--primary:hover {
+    background: #1976d2;
+}
+
+/* Spinner */
+.konnekt-spinner {
+    margin: 2rem auto;
+    width: 50px;
+    height: 50px;
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #2196f3;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+/* Session Info Copy Message */
+.konnekt-session-info__message {
+    padding: 0.5rem;
+    background: #e8f5e9;
+    color: #2e7d32;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    margin-top: 0.5rem;
+    text-align: center;
+}
+
+/* Activity Screen (In Progress) */
+.konnekt-activity-screen {
+    max-width: 800px;
+    margin: 2rem auto;
+    background: white;
+    border-radius: 8px;
+    padding: 2rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.konnekt-activity-screen__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid #eee;
+}
+
+.konnekt-activity-screen__title {
+    font-size: 1.75rem;
+    color: #333;
+}
+
+.konnekt-activity-screen__error {
+    padding: 1rem;
+    background: #ffebee;
+    color: #c62828;
+    border-radius: 4px;
+    margin: 1rem 0;
+}
+
+.konnekt-activity-screen__content {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.konnekt-activity-screen__prompt {
+    text-align: center;
+}
+
+.konnekt-activity-screen__prompt h3 {
+    font-size: 1.25rem;
+    color: #666;
+    margin-bottom: 1rem;
+}
+
+.konnekt-activity-screen__prompt-text {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #2196f3;
+    padding: 2rem;
+    background: #e3f2fd;
+    border-radius: 8px;
+    font-family: "Courier New", monospace;
+}
+
+.konnekt-activity-screen__form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.konnekt-activity-screen__label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    font-weight: 500;
+    color: #333;
+}
+
+.konnekt-activity-screen__input {
+    padding: 1rem;
+    border: 2px solid #ddd;
+    border-radius: 4px;
+    font-size: 1.125rem;
+    transition: border-color 0.2s;
+}
+
+.konnekt-activity-screen__input:focus {
+    outline: none;
+    border-color: #2196f3;
+    box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
+}
+
+.konnekt-activity-screen__participants {
+    padding: 1rem;
+    background: #f5f5f5;
+    border-radius: 4px;
+}
+
+.konnekt-activity-screen__participants h4 {
+    margin-bottom: 0.5rem;
+    color: #666;
+}
+
+.konnekt-activity-screen__participants ul {
+    list-style: none;
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.konnekt-activity-screen__participants li {
+    padding: 0.5rem 1rem;
+    background: white;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+}
+
+/* Results Screen */
+.konnekt-results-screen {
+    max-width: 900px;
+    margin: 2rem auto;
+    background: white;
+    border-radius: 8px;
+    padding: 2rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.konnekt-results-screen h2 {
+    font-size: 1.75rem;
+    margin-bottom: 2rem;
+    color: #333;
+}
+
+.konnekt-results-screen__activity {
+    margin-bottom: 2rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid #eee;
+}
+
+.konnekt-results-screen__activity:last-child {
+    border-bottom: none;
+}
+
+.konnekt-results-screen__activity h3 {
+    font-size: 1.25rem;
+    margin-bottom: 1rem;
+    color: #2196f3;
+}
+
+.konnekt-results-screen__list {
+    list-style: none;
+}
+
+.konnekt-results-screen__item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    background: #f5f5f5;
+    border-radius: 4px;
+}
+
+.konnekt-results-screen__name {
+    font-weight: 500;
+    color: #333;
+}
+
+.konnekt-results-screen__score {
+    color: #4caf50;
+    font-weight: 600;
+}
+
+/* Button variants */
+.konnekt-btn--secondary {
+    background: #757575;
+    color: white;
+}
+
+.konnekt-btn--secondary:hover {
+    background: #616161;
+}
+
+.konnekt-btn--success {
+    background: #4caf50;
+    color: white;
+    margin-top: 1rem;
+}
+
+.konnekt-btn--success:hover {
+    background: #45a049;
+}
+
+.konnekt-btn--danger {
+    background: #f44336;
+    color: white;
+}
+
+.konnekt-btn--danger:hover {
+    background: #d32f2f;
+}
+
+.konnekt-btn--large {
+    padding: 1rem 2rem;
+    font-size: 1.125rem;
+}
+
+/* Waiting message */
+.konnekt-session-screen__waiting {
+    text-align: center;
+    padding: 3rem;
+    color: #999;
+    font-style: italic;
+}
+
+.konnekt-session-screen__participation {
+    background: white;
+    border-radius: 8px;
+    padding: 1rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .konnekt-activity-screen__prompt-text {
+        font-size: 1.5rem;
+        padding: 1.5rem;
+    }
+
+    .konnekt-session-screen__content {
+        grid-template-columns: 1fr;
+    }
 }
