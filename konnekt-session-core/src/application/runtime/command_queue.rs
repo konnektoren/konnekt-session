@@ -19,7 +19,7 @@ impl CommandQueue {
     /// Push a command (returns error if full)
     pub fn push(&mut self, cmd: DomainCommand) -> Result<(), QueueError> {
         if self.queue.len() >= self.max_size {
-            return Err(QueueError::Full);
+            return Err(QueueError::Full { max: self.max_size });
         }
         self.queue.push_back(cmd);
         Ok(())
@@ -42,12 +42,22 @@ impl CommandQueue {
     pub fn is_empty(&self) -> bool {
         self.queue.is_empty()
     }
+
+    pub fn capacity(&self) -> usize {
+        self.max_size
+    }
 }
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum QueueError {
-    #[error("Queue is full")]
-    Full,
+    #[error("Queue is full (max size: {max})")]
+    Full { max: usize },
+}
+
+impl Default for CommandQueue {
+    fn default() -> Self {
+        Self::new(100) // Default max size
+    }
 }
 
 #[cfg(test)]
@@ -96,7 +106,7 @@ mod tests {
             host_name: "C".to_string(),
         });
 
-        assert_eq!(result, Err(QueueError::Full));
+        assert!(matches!(result, Err(QueueError::Full { max: 2 })));
     }
 
     #[test]
@@ -114,6 +124,35 @@ mod tests {
 
         let drained = queue.drain();
         assert_eq!(drained.len(), 3);
+        assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn test_fifo_order() {
+        let mut queue = CommandQueue::new(10);
+
+        for i in 0..5 {
+            queue
+                .push(DomainCommand::CreateLobby {
+                    lobby_name: format!("L{}", i),
+                    host_name: "Host".to_string(),
+                })
+                .unwrap();
+        }
+
+        // Should pop in FIFO order
+        for i in 0..5 {
+            let cmd = queue.pop().unwrap();
+            if let DomainCommand::CreateLobby { lobby_name, .. } = cmd {
+                assert_eq!(lobby_name, format!("L{}", i));
+            }
+        }
+    }
+
+    #[test]
+    fn test_default() {
+        let queue = CommandQueue::default();
+        assert_eq!(queue.capacity(), 100);
         assert!(queue.is_empty());
     }
 }

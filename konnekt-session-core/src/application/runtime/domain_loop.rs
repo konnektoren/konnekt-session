@@ -17,6 +17,11 @@ pub struct DomainLoop {
 }
 
 impl DomainLoop {
+    /// Create a new domain loop
+    ///
+    /// # Arguments
+    /// * `batch_size` - Max commands to process per `poll()` call
+    /// * `max_queue_size` - Max commands that can be queued
     pub fn new(batch_size: usize, max_queue_size: usize) -> Self {
         Self {
             event_loop: DomainEventLoop::new(),
@@ -27,6 +32,8 @@ impl DomainLoop {
     }
 
     /// Submit a command (non-blocking)
+    ///
+    /// Returns error if queue is full (backpressure)
     pub fn submit(
         &mut self,
         cmd: DomainCommand,
@@ -35,6 +42,7 @@ impl DomainLoop {
     }
 
     /// Process up to `batch_size` commands
+    ///
     /// Returns number of commands processed
     pub fn poll(&mut self) -> usize {
         let mut processed = 0;
@@ -53,7 +61,7 @@ impl DomainLoop {
         processed
     }
 
-    /// Drain all emitted events (caller's responsibility)
+    /// Drain all emitted events (caller's responsibility to handle)
     pub fn drain_events(&mut self) -> Vec<DomainEvent> {
         std::mem::take(&mut self.outbound)
     }
@@ -62,12 +70,27 @@ impl DomainLoop {
     pub fn event_loop(&self) -> &DomainEventLoop {
         &self.event_loop
     }
+
+    /// Get pending command count
+    pub fn pending_commands(&self) -> usize {
+        self.inbound.len()
+    }
+
+    /// Get pending event count
+    pub fn pending_events(&self) -> usize {
+        self.outbound.len()
+    }
+}
+
+impl Default for DomainLoop {
+    fn default() -> Self {
+        Self::new(10, 100) // batch_size: 10, max_queue: 100
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::Lobby;
 
     #[test]
     fn test_submit_and_poll() {
@@ -81,13 +104,18 @@ mod tests {
             })
             .unwrap();
 
+        assert_eq!(loop_.pending_commands(), 1);
+
         // Process it
         let count = loop_.poll();
         assert_eq!(count, 1);
+        assert_eq!(loop_.pending_commands(), 0);
+        assert_eq!(loop_.pending_events(), 1);
 
         // Drain events
         let events = loop_.drain_events();
         assert_eq!(events.len(), 1);
+        assert_eq!(loop_.pending_events(), 0);
 
         match &events[0] {
             DomainEvent::LobbyCreated { lobby } => {
@@ -111,14 +139,18 @@ mod tests {
                 .unwrap();
         }
 
+        assert_eq!(loop_.pending_commands(), 5);
+
         // First poll: process 3
         let count = loop_.poll();
         assert_eq!(count, 3);
+        assert_eq!(loop_.pending_commands(), 2);
         assert_eq!(loop_.drain_events().len(), 3);
 
         // Second poll: process remaining 2
         let count = loop_.poll();
         assert_eq!(count, 2);
+        assert_eq!(loop_.pending_commands(), 0);
         assert_eq!(loop_.drain_events().len(), 2);
     }
 
@@ -184,5 +216,72 @@ mod tests {
         });
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_poll_empty_queue() {
+        let mut loop_ = DomainLoop::new(10, 100);
+
+        let count = loop_.poll();
+        assert_eq!(count, 0);
+        assert!(loop_.drain_events().is_empty());
+    }
+
+    #[test]
+    fn test_multiple_lobbies() {
+        let mut loop_ = DomainLoop::new(10, 100);
+
+        // Create two lobbies
+        loop_
+            .submit(DomainCommand::CreateLobby {
+                lobby_name: "Lobby 1".to_string(),
+                host_name: "Alice".to_string(),
+            })
+            .unwrap();
+
+        loop_
+            .submit(DomainCommand::CreateLobby {
+                lobby_name: "Lobby 2".to_string(),
+                host_name: "Bob".to_string(),
+            })
+            .unwrap();
+
+        loop_.poll();
+        let events = loop_.drain_events();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(loop_.event_loop().lobby_count(), 2);
+    }
+
+    #[test]
+    fn test_default() {
+        let loop_ = DomainLoop::default();
+        assert_eq!(loop_.pending_commands(), 0);
+        assert_eq!(loop_.pending_events(), 0);
+    }
+
+    #[test]
+    fn test_event_query() {
+        let mut loop_ = DomainLoop::new(10, 100);
+
+        loop_
+            .submit(DomainCommand::CreateLobby {
+                lobby_name: "Test".to_string(),
+                host_name: "Alice".to_string(),
+            })
+            .unwrap();
+
+        loop_.poll();
+        let events = loop_.drain_events();
+
+        let lobby_id = match &events[0] {
+            DomainEvent::LobbyCreated { lobby } => lobby.id(),
+            _ => panic!("Expected LobbyCreated"),
+        };
+
+        // Query via event loop
+        let lobby = loop_.event_loop().get_lobby(&lobby_id);
+        assert!(lobby.is_some());
+        assert_eq!(lobby.unwrap().name(), "Test");
     }
 }
