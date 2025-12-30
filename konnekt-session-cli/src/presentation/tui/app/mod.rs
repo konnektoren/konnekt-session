@@ -8,6 +8,7 @@ mod events_tab;
 mod help_tab;
 mod lobby_tab;
 mod participants_tab;
+mod results_tab;
 mod session_tab;
 
 pub use activities_tab::ActivitiesTab;
@@ -15,6 +16,7 @@ pub use events_tab::EventsTab;
 pub use help_tab::HelpTab;
 pub use lobby_tab::LobbyTab;
 pub use participants_tab::ParticipantsTab;
+pub use results_tab::ResultsTab;
 pub use session_tab::SessionTab;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +25,7 @@ pub enum Tab {
     Lobby,
     Activities,
     Participants,
+    Results, // 🆕 NEW
     Events,
     Help,
 }
@@ -33,7 +36,8 @@ impl Tab {
             Tab::Session => Tab::Lobby,
             Tab::Lobby => Tab::Activities,
             Tab::Activities => Tab::Participants,
-            Tab::Participants => Tab::Events,
+            Tab::Participants => Tab::Results, // 🆕
+            Tab::Results => Tab::Events,       // 🆕
             Tab::Events => Tab::Help,
             Tab::Help => Tab::Session,
         }
@@ -45,7 +49,8 @@ impl Tab {
             Tab::Lobby => Tab::Session,
             Tab::Activities => Tab::Lobby,
             Tab::Participants => Tab::Activities,
-            Tab::Events => Tab::Participants,
+            Tab::Results => Tab::Participants, // 🆕
+            Tab::Events => Tab::Results,       // 🆕
             Tab::Help => Tab::Events,
         }
     }
@@ -56,6 +61,7 @@ impl Tab {
             Tab::Lobby => "Lobby",
             Tab::Activities => "Activities",
             Tab::Participants => "Participants",
+            Tab::Results => "Results", // 🆕
             Tab::Events => "Events",
             Tab::Help => "Help",
         }
@@ -93,6 +99,7 @@ pub struct App {
     pub session_tab: SessionTab,
     pub lobby_tab: LobbyTab,
     pub activities_tab: ActivitiesTab,
+    pub results_tab: ResultsTab,
     pub participants_tab: ParticipantsTab,
     pub events_tab: EventsTab,
     pub help_tab: HelpTab,
@@ -117,6 +124,7 @@ impl App {
             session_tab: SessionTab::new(session_id),
             lobby_tab: LobbyTab::new(),
             activities_tab: ActivitiesTab::new(),
+            results_tab: ResultsTab::new(),
             participants_tab: ParticipantsTab::new(),
             events_tab: EventsTab::new(),
             help_tab: HelpTab::new(),
@@ -162,6 +170,7 @@ impl App {
                 self.participants_tab
                     .handle_key(key, self.is_host, &self.lobby_snapshot)
             }
+            Tab::Results => self.results_tab.handle_key(key), // 🆕 NEW
             Tab::Events => self.events_tab.handle_key(key),
             Tab::Help => None,
         }
@@ -186,7 +195,7 @@ impl App {
         self.lobby_tab.update_lobby(&lobby);
         self.activities_tab.update_lobby(&lobby);
         self.participants_tab.update_lobby(&lobby);
-
+        self.results_tab.update_lobby(&lobby);
         self.lobby_snapshot = Some(lobby);
     }
 

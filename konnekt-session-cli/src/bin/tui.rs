@@ -317,6 +317,7 @@ fn handle_user_command(
 
                         session_loop
                             .submit_command(DomainCommand::SubmitResult { lobby_id, result })?;
+                        // ☝️ This goes to SessionLoop
 
                         tracing::info!(
                             "Submitted activity result: '{}' (score: {})",
