@@ -5,7 +5,7 @@ members = [
     "konnekt-session-core",
     "konnekt-session-tests",
     "konnekt-session"  # Legacy - to be deprecated
-, "konnekt-session-cli", "konnekt-session-p2p"]
+, "konnekt-session-cli", "konnekt-session-p2p", "konnekt-session-yew"]
 
 # Shared workspace metadata
 [workspace.package]
@@ -19,14 +19,13 @@ readme = "README.adoc"
 keywords = ["p2p", "lobby", "multiplayer", "webrtc", "wasm"]
 categories = ["game-development", "network-programming", "wasm", "web-programming"]
 
-
 [workspace.dependencies]
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Async runtime
-tokio = { version = "1.47", default-features = false }
+tokio = { version = "1.48", default-features = false }
 futures = "0.3"
 
 # Utilities
@@ -43,7 +42,7 @@ console-subscriber = { version = "0.5" }
 schemars = { version = "1.2", features = ["uuid1", "preserve_order"] }
 
 # P2P networking
-matchbox_socket = "0.10"
+matchbox_socket = "0.13.0"
 
 # CLI
 clap = { version = "4.5", features = ["derive"] }

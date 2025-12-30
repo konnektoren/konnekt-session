@@ -16,7 +16,7 @@ impl MatchboxConnection {
         Self::connect(signalling_url, IceServer::default_stun_servers()).await
     }
 
-    //// Connect to Matchbox signalling server with custom ICE servers
+    /// Connect to Matchbox signalling server with custom ICE servers
     pub async fn connect(signalling_url: &str, ice_servers: Vec<IceServer>) -> Result<Self> {
         tracing::info!("Connecting to signalling server: {}", signalling_url);
         tracing::info!("Configured with {} ICE servers", ice_servers.len());
@@ -40,12 +40,26 @@ impl MatchboxConnection {
             .add_channel(matchbox_socket::ChannelConfig::reliable())
             .build();
 
-        // 🔧 FIX: Simple spawn with instrument span
+        // 🔧 Platform-agnostic async spawn
         let matchbox_span = tracing::info_span!("matchbox::webrtc_loop");
-        tokio::spawn(async move {
+
+        #[cfg(target_arch = "wasm32")]
+        wasm_bindgen_futures::spawn_local(async move {
             let _enter = matchbox_span.enter();
             let _ = loop_fut.await;
         });
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            #[cfg(feature = "native")]
+            tokio::spawn(async move {
+                let _enter = matchbox_span.enter();
+                let _ = loop_fut.await;
+            });
+
+            #[cfg(not(feature = "native"))]
+            compile_error!("Non-WASM builds require the 'native' feature to be enabled");
+        }
 
         // Wait for peer ID to be assigned
         let peer_id = wait_for_peer_id(&mut socket).await?;
@@ -72,7 +86,10 @@ impl MatchboxConnection {
     /// Send data to a specific peer
     pub fn send_to(&mut self, peer: PeerId, data: Vec<u8>) -> Result<()> {
         let mut socket = self.socket.lock().unwrap();
-        socket.send(data.clone().into_boxed_slice(), peer.inner());
+
+        // 🔧 FIX: Get mutable reference to channel
+        let channel = socket.channel_mut(0);
+        channel.send(data.clone().into_boxed_slice(), peer.inner());
 
         tracing::debug!("Sent {} bytes to peer {}", data.len(), peer);
         Ok(())
@@ -112,7 +129,9 @@ impl MatchboxConnection {
         }
 
         // Check for messages
-        for (peer_id, packet) in socket.receive() {
+        // 🔧 FIX: Use channel_mut(0).receive() for mutable access
+        let channel = socket.channel_mut(0);
+        for (peer_id, packet) in channel.receive() {
             let peer = PeerId::new(peer_id);
             tracing::debug!("Received {} bytes from peer {}", packet.len(), peer);
 
@@ -145,25 +164,46 @@ fn build_ice_server_config(ice_servers: &[IceServer]) -> RtcIceServerConfig {
 
 /// Wait for the socket to receive a peer ID from the signalling server
 async fn wait_for_peer_id(socket: &mut WebRtcSocket) -> Result<PeerId> {
-    use tokio::time::{Duration, timeout};
+    use instant::Duration;
 
-    let wait_duration = Duration::from_secs(5);
+    let start = instant::Instant::now();
+    let timeout = Duration::from_secs(5);
 
-    timeout(wait_duration, async {
-        loop {
-            // Update peers to process signalling messages
-            socket.update_peers();
+    loop {
+        socket.update_peers();
 
-            if let Some(id) = socket.id() {
-                return Ok(PeerId::new(id));
-            }
-
-            // Small delay between checks
-            tokio::time::sleep(Duration::from_millis(10)).await;
+        if let Some(id) = socket.id() {
+            return Ok(PeerId::new(id));
         }
-    })
-    .await
-    .map_err(|_| P2PError::ConnectionFailed("Timeout waiting for peer ID".to_string()))?
+
+        if start.elapsed() > timeout {
+            return Err(P2PError::ConnectionFailed(
+                "Timeout waiting for peer ID".to_string(),
+            ));
+        }
+
+        // Platform-agnostic sleep
+        platform_sleep(10).await;
+    }
+}
+
+/// Platform-agnostic sleep function
+#[cfg(target_arch = "wasm32")]
+async fn platform_sleep(millis: u32) {
+    use gloo_timers::future::TimeoutFuture;
+    TimeoutFuture::new(millis).await;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn platform_sleep(millis: u32) {
+    #[cfg(feature = "native")]
+    {
+        use instant::Duration;
+        tokio::time::sleep(Duration::from_millis(millis as u64)).await;
+    }
+
+    #[cfg(not(feature = "native"))]
+    compile_error!("Non-WASM builds require the 'native' feature to be enabled");
 }
 
 #[cfg(test)]
@@ -215,5 +255,13 @@ mod tests {
 
         // Should return default config
         assert!(!config.urls.is_empty());
+    }
+
+    // 🆕 NEW: Test WASM compilation
+    #[cfg(target_arch = "wasm32")]
+    #[test]
+    fn test_wasm_compilation() {
+        // This test just needs to compile
+        let _ = IceServer::default_stun_servers();
     }
 }

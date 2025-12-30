@@ -1,4 +1,4 @@
-use crate::application::runtime::{MessageQueue, QueueError};
+use crate::application::runtime::MessageQueue;
 use crate::application::sync_manager::{EventSyncManager, SyncMessage, SyncResponse};
 use crate::application::{ConnectionEvent, EventTranslator, LobbySnapshot};
 use crate::domain::{DomainEvent as P2PDomainEvent, LobbyEvent, PeerId, PeerRegistry};
@@ -10,7 +10,7 @@ use std::collections::VecDeque;
 use uuid::Uuid;
 
 // 🆕 Add tracing
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
 /// P2P event loop - handles network communication and event ordering
 pub struct P2PLoop {

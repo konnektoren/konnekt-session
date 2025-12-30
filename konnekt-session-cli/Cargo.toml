@@ -24,7 +24,7 @@ required-features = ["tui"]
 
 [dependencies]
 konnekt-session-core = { path = "../konnekt-session-core" }
-konnekt-session-p2p = { path = "../konnekt-session-p2p" }
+konnekt-session-p2p = { path = "../konnekt-session-p2p", features = ["native"] }
 
 # CLI
 clap = { workspace = true }
