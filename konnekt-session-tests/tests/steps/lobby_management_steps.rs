@@ -12,11 +12,12 @@ async fn user_wants_to_create_lobby(_world: &mut SessionWorld) {
 #[given(expr = "a lobby exists with password {string}")]
 async fn lobby_exists_with_password(world: &mut SessionWorld, password: String) {
     let cmd = DomainCommand::CreateLobby {
+        lobby_id: None, // 🔧 FIX: Add lobby_id field (None = auto-generate)
         lobby_name: "Test Lobby".to_string(),
         host_name: "Host".to_string(),
     };
 
-    let event = world.execute(cmd).clone(); // ← Clone to release borrow
+    let event = world.execute(cmd).clone();
 
     if let DomainEvent::LobbyCreated { lobby } = event {
         let lobby_id = lobby.id();
@@ -70,11 +71,12 @@ async fn create_lobby_with_password(
     _password: String,
 ) {
     let cmd = DomainCommand::CreateLobby {
+        lobby_id: None, // 🔧 FIX: Add lobby_id field
         lobby_name: lobby_name.clone(),
         host_name: "Alice".to_string(),
     };
 
-    let event = world.execute(cmd).clone(); // ← Clone
+    let event = world.execute(cmd).clone();
 
     if let DomainEvent::LobbyCreated { lobby } = event {
         let lobby_id = lobby.id();

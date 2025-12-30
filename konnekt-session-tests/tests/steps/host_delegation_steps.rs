@@ -17,6 +17,7 @@ async fn lobby_exists_with_host_name(world: &mut SessionWorld, name: String) {
 // Helper function to reduce duplication
 async fn lobby_exists_with_named_host(world: &mut SessionWorld, host_name: String) {
     let cmd = DomainCommand::CreateLobby {
+        lobby_id: None, // 🔧 FIX: Add lobby_id field
         lobby_name: "Test Lobby".to_string(),
         host_name: host_name.clone(),
     };
