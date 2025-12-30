@@ -19,6 +19,12 @@ pub enum DomainEvent {
     /// Guest left the lobby
     GuestLeft { participant_id: Uuid },
 
+    /// Guest was kicked by host
+    GuestKicked {
+        participant_id: Uuid,
+        kicked_by: Uuid,
+    },
+
     /// Host role was delegated
     HostDelegated {
         from: Uuid,

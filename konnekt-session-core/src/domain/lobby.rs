@@ -38,6 +38,9 @@ pub enum LobbyError {
     #[error("Cannot remove host without delegation")]
     CannotRemoveHost,
 
+    #[error("Cannot kick the host")]
+    CannotKickHost,
+
     #[error("Permission denied")]
     PermissionDenied,
 
@@ -294,6 +297,42 @@ impl Lobby {
             .values()
             .filter(|p| !p.can_submit_results())
             .collect()
+    }
+
+    /// Kick a guest from the lobby (host only)
+    pub fn kick_guest(&mut self, guest_id: Uuid, host_id: Uuid) -> Result<Participant, LobbyError> {
+        // First, verify requester is host (immutable borrow)
+        let requester = self
+            .participants
+            .get(&host_id)
+            .ok_or(LobbyError::ParticipantNotFound(host_id))?;
+
+        if !requester.is_host() {
+            return Err(LobbyError::PermissionDenied);
+        }
+
+        // Cannot kick yourself (host)
+        if guest_id == host_id {
+            return Err(LobbyError::CannotKickHost);
+        }
+
+        // Drop immutable borrow before getting mutable borrow
+
+        // Now remove the guest (mutable borrow)
+        let kicked_participant = self
+            .participants
+            .remove(&guest_id)
+            .ok_or(LobbyError::ParticipantNotFound(guest_id))?;
+
+        // Verify they were actually a guest
+        if kicked_participant.is_host() {
+            // Put them back if we accidentally tried to remove host
+            self.participants
+                .insert(guest_id, kicked_participant.clone());
+            return Err(LobbyError::CannotKickHost);
+        }
+
+        Ok(kicked_participant)
     }
 }
 
@@ -738,6 +777,68 @@ mod tests {
 
         let fake_id = Uuid::new_v4();
         let result = lobby.toggle_guest_participation_mode(fake_id, false);
+
+        assert_eq!(result, Err(LobbyError::ParticipantNotFound(fake_id)));
+    }
+
+    #[test]
+    fn test_kick_guest() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let host_id = host.id();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let guest = Participant::new_guest("Bob".to_string()).unwrap();
+        let guest_id = guest.id();
+        lobby.add_guest(guest.clone()).unwrap();
+
+        // Host kicks guest
+        let kicked = lobby.kick_guest(guest_id, host_id).unwrap();
+
+        assert_eq!(kicked.name(), "Bob");
+        assert_eq!(lobby.participants().len(), 1); // Only host remains
+        assert!(!lobby.participants().contains_key(&guest_id));
+    }
+
+    #[test]
+    fn test_guest_cannot_kick() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let guest1 = Participant::new_guest("Bob".to_string()).unwrap();
+        let guest1_id = guest1.id();
+        lobby.add_guest(guest1).unwrap();
+
+        let guest2 = Participant::new_guest("Carol".to_string()).unwrap();
+        let guest2_id = guest2.id();
+        lobby.add_guest(guest2).unwrap();
+
+        // Guest1 tries to kick Guest2
+        let result = lobby.kick_guest(guest2_id, guest1_id);
+
+        assert_eq!(result, Err(LobbyError::PermissionDenied));
+        assert_eq!(lobby.participants().len(), 3); // No one was kicked
+    }
+
+    #[test]
+    fn test_cannot_kick_host() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let host_id = host.id();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let result = lobby.kick_guest(host_id, host_id);
+
+        assert_eq!(result, Err(LobbyError::CannotKickHost));
+        assert_eq!(lobby.participants().len(), 1);
+    }
+
+    #[test]
+    fn test_kick_nonexistent_participant() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let host_id = host.id();
+        let mut lobby = Lobby::new("Test Lobby".to_string(), host).unwrap();
+
+        let fake_id = Uuid::new_v4();
+        let result = lobby.kick_guest(fake_id, host_id);
 
         assert_eq!(result, Err(LobbyError::ParticipantNotFound(fake_id)));
     }
