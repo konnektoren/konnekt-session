@@ -155,6 +155,13 @@ impl P2PSession {
         }
     }
 
+    /// Find participant ID for a given peer ID
+    pub fn find_participant_by_peer(&self, peer_id: &PeerId) -> Option<uuid::Uuid> {
+        self.peer_registry
+            .get_peer(peer_id)
+            .and_then(|state| state.participant_id)
+    }
+
     /// Find peer ID by participant UUID
     pub fn find_peer_by_participant(&self, participant_id: Uuid) -> Option<PeerId> {
         self.peer_registry.find_by_participant_id(participant_id)
