@@ -240,7 +240,8 @@ fn render_participants(f: &mut Frame, area: Rect, app: &App) {
         lobby
             .participants()
             .values()
-            .map(|p| {
+            .enumerate()
+            .map(|(idx, p)| {
                 let role_icon = if p.is_host() { "👑" } else { "👤" };
 
                 // Color based on participation mode
@@ -253,8 +254,16 @@ fn render_participants(f: &mut Frame, area: Rect, app: &App) {
                     }
                 };
 
-                // Format: "👑 Alice - 🎮 Active"
+                // Highlight selected participant (if host)
+                let selected = app.session_state.is_host()
+                    && app.current_tab == Tab::Participants
+                    && idx == app.selected_participant;
+
+                let prefix = if selected { "> " } else { "  " };
+
+                // Format: "> 👑 Alice - 🎮 Active"
                 let text = vec![
+                    Span::raw(prefix),
                     Span::raw(format!("{} ", role_icon)),
                     Span::styled(
                         p.name(),
@@ -270,16 +279,26 @@ fn render_participants(f: &mut Frame, area: Rect, app: &App) {
                     Span::styled(mode_text, mode_style),
                 ];
 
-                ListItem::new(Line::from(text))
+                let mut item = ListItem::new(Line::from(text));
+
+                if selected {
+                    item = item.style(Style::default().bg(Color::DarkGray));
+                }
+
+                item
             })
             .collect()
     } else {
         vec![ListItem::new("No participants")]
     };
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Participants"))
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+    let title = if app.session_state.is_host() {
+        "Participants (j/k: select, x: kick)" // Changed from 'k: kick'
+    } else {
+        "Participants"
+    };
+
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
 
     f.render_widget(list, area);
 }
@@ -303,21 +322,22 @@ fn render_help(f: &mut Frame, area: Rect) {
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
-            "Lobby Tab:",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
             "Participants Tab:",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(vec![
-            Span::styled("  s", Style::default().fg(Color::Yellow)),
+            Span::styled("  t", Style::default().fg(Color::Yellow)),
             Span::raw("  Toggle Active ↔ Spectating mode"),
+        ]),
+        Line::from(vec![
+            Span::styled("  j/k", Style::default().fg(Color::Yellow)),
+            Span::raw("  Navigate participants (host only)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  x", Style::default().fg(Color::Yellow)),
+            Span::raw("  Kick selected guest (host only)"),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
@@ -333,15 +353,6 @@ fn render_help(f: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("  Shift+Tab / ←", Style::default().fg(Color::Yellow)),
             Span::raw("  Previous tab"),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("  j / ↓", Style::default().fg(Color::Yellow)),
-            Span::raw("  Scroll down"),
-        ]),
-        Line::from(vec![
-            Span::styled("  k / ↑", Style::default().fg(Color::Yellow)),
-            Span::raw("  Scroll up"),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -364,9 +375,11 @@ fn render_footer(f: &mut Frame, area: Rect) {
         Span::styled("y", Style::default().fg(Color::Green)),
         Span::raw(" copy ID | "),
         Span::styled("c", Style::default().fg(Color::Green)),
-        Span::raw(" copy command | "),
+        Span::raw(" copy cmd | "),
         Span::styled("t", Style::default().fg(Color::Yellow)),
         Span::raw(" toggle mode | "),
+        Span::styled("x", Style::default().fg(Color::Yellow)),
+        Span::raw(" kick | "),
         Span::styled("Tab", Style::default().fg(Color::Yellow)),
         Span::raw(" switch | "),
         Span::styled("q", Style::default().fg(Color::Yellow)),

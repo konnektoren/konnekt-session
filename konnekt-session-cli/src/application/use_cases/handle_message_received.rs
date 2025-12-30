@@ -124,6 +124,23 @@ async fn handle_lobby_event(
                 tracing::info!("✓ Guest {} left lobby", participant_id);
             }
         }
+        DomainEvent::GuestKicked {
+            participant_id,
+            kicked_by,
+        } => {
+            if let Some(lobby) = state.lobby_mut() {
+                if let Some(removed) = lobby.participants_mut().remove(&participant_id) {
+                    tracing::info!("✓ Guest '{}' was kicked by {}", removed.name(), kicked_by);
+
+                    // If we were kicked, clear our lobby
+                    if participant_id == state.participant().id() {
+                        tracing::warn!("⚠️  You were kicked from the lobby!");
+                        // Clear lobby state (we're no longer in it)
+                        // Note: We keep the participant but lose lobby access
+                    }
+                }
+            }
+        }
         DomainEvent::ParticipationModeChanged {
             participant_id,
             new_mode,

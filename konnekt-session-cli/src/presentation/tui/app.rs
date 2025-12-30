@@ -56,6 +56,8 @@ pub struct App {
     pub clipboard_message_timer: usize,
     pub max_events: usize,
     pub toggle_spectator_requested: bool,
+    pub kick_requested: Option<uuid::Uuid>,
+    pub selected_participant: usize,
 }
 
 impl App {
@@ -72,6 +74,8 @@ impl App {
             clipboard_message_timer: 0,
             max_events: 100,
             toggle_spectator_requested: false,
+            kick_requested: None,
+            selected_participant: 0,
         }
     }
 
@@ -178,19 +182,48 @@ impl App {
                 // Toggle participation mode (works on any tab)
                 self.toggle_spectator_requested = true;
             }
+            KeyCode::Char('x') if self.current_tab == Tab::Participants => {
+                // Kick selected participant (host only)
+                if self.session_state.is_host() {
+                    if let Some(lobby) = self.session_state.lobby() {
+                        let participants: Vec<_> = lobby.participants().values().collect();
+                        if self.selected_participant < participants.len() {
+                            let selected = participants[self.selected_participant];
+                            if !selected.is_host() {
+                                self.kick_requested = Some(selected.id());
+                            }
+                        }
+                    }
+                }
+            }
             KeyCode::Tab | KeyCode::Right => {
                 self.current_tab = self.current_tab.next();
                 self.scroll_offset = 0;
+                self.selected_participant = 0; // Reset selection
             }
             KeyCode::BackTab | KeyCode::Left => {
                 self.current_tab = self.current_tab.previous();
                 self.scroll_offset = 0;
+                self.selected_participant = 0; // Reset selection
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                self.scroll_offset = self.scroll_offset.saturating_add(1);
+                if self.current_tab == Tab::Participants {
+                    // Navigate participants
+                    if let Some(lobby) = self.session_state.lobby() {
+                        let max = lobby.participants().len().saturating_sub(1);
+                        self.selected_participant = (self.selected_participant + 1).min(max);
+                    }
+                } else {
+                    self.scroll_offset = self.scroll_offset.saturating_add(1);
+                }
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                if self.current_tab == Tab::Participants {
+                    // Navigate participants
+                    self.selected_participant = self.selected_participant.saturating_sub(1);
+                } else {
+                    self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                }
             }
             _ => {}
         }

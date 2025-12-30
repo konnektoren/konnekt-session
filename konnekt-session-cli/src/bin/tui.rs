@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use konnekt_session_cli::{
     application::use_cases::{
         handle_message_received, handle_peer_connected, handle_peer_disconnected,
-        handle_peer_timed_out, toggle_participation_mode,
+        handle_peer_timed_out, kick_guest, toggle_participation_mode,
     },
     domain::SessionState,
     infrastructure::{CliError, Result},
@@ -232,11 +232,22 @@ async fn run_app_loop(
                     break;
                 }
 
+                // Handle kick request
+                if let Some(guest_id) = app.kick_requested.take() {
+                    match kick_guest(session, &mut app.session_state, guest_id).await {
+                        Ok(_) => {
+                            app.add_event("✓ Guest kicked".to_string());
+                        }
+                        Err(e) => {
+                            app.add_event(format!("✗ Failed to kick: {}", e));
+                        }
+                    }
+                }
+
                 // Handle spectator toggle request
                 if app.toggle_spectator_requested {
                     app.toggle_spectator_requested = false;
 
-                    // TODO: Track activity_in_progress properly
                     let activity_in_progress = false;
 
                     match toggle_participation_mode(
