@@ -1,6 +1,6 @@
 use crate::application::runtime::{MessageQueue, QueueError};
 use crate::application::sync_manager::{EventSyncManager, SyncMessage, SyncResponse};
-use crate::application::{ConnectionEvent, EventTranslator};
+use crate::application::{ConnectionEvent, EventTranslator, LobbySnapshot};
 use crate::domain::{DomainEvent as P2PDomainEvent, LobbyEvent, PeerId, PeerRegistry};
 use crate::infrastructure::connection::MatchboxConnection;
 use crate::infrastructure::error::Result;
@@ -82,12 +82,57 @@ impl P2PLoop {
         }
     }
 
+    /// Request full sync from host (GUEST ONLY)
+    pub fn request_full_sync(&mut self) -> Result<()> {
+        let sync_msg = self
+            .event_sync
+            .request_full_sync()
+            .map_err(|e| crate::infrastructure::error::P2PError::SendFailed(e.to_string()))?;
+
+        // Serialize and broadcast
+        let data = serde_json::to_vec(&sync_msg)
+            .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
+
+        self.connection.broadcast(data)?;
+
+        tracing::info!("📤 Sent full sync request to host");
+        Ok(())
+    }
+
+    /// Apply snapshot to domain layer (converts snapshot to domain commands)
+    fn apply_snapshot_to_domain(&mut self, snapshot: LobbySnapshot, events: Vec<LobbyEvent>) {
+        tracing::info!("📥 Received lobby snapshot: {}", snapshot.name);
+        tracing::info!("   Host: {}", snapshot.host_id);
+        tracing::info!("   Participants: {}", snapshot.participants.len());
+
+        // Create lobby from snapshot
+        let create_lobby_cmd = DomainCommand::CreateLobby {
+            lobby_id: Some(snapshot.lobby_id),
+            lobby_name: snapshot.name,
+            host_name: snapshot
+                .participants
+                .iter()
+                .find(|p| p.is_host())
+                .map(|p| p.name().to_string())
+                .unwrap_or_else(|| "Host".to_string()),
+        };
+
+        self.pending_domain_commands.push_back(create_lobby_cmd);
+
+        // Translate subsequent events to commands
+        for event in events {
+            if let Some(cmd) = self.translator.to_domain_command(&event.event) {
+                self.pending_domain_commands.push_back(cmd);
+            }
+        }
+
+        tracing::info!(
+            "✅ Queued {} commands from snapshot",
+            self.pending_domain_commands.len()
+        );
+    }
+
     /// Submit a domain event to broadcast (HOST ONLY)
-    ///
-    /// This automatically:
-    /// - Assigns sequence number
-    /// - Wraps in LobbyEvent
-    /// - Queues for broadcast
     pub fn broadcast_event(&mut self, event: P2PDomainEvent) -> Result<u64> {
         let sync_msg = self
             .event_sync
@@ -98,7 +143,6 @@ impl P2PLoop {
             SyncMessage::EventBroadcast { event } => {
                 let sequence = event.sequence;
 
-                // Serialize before broadcasting
                 let data = serde_json::to_vec(&SyncMessage::EventBroadcast { event })
                     .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
 
@@ -114,23 +158,8 @@ impl P2PLoop {
     }
 
     /// Apply a core domain event and broadcast it via P2P
-    ///
-    /// This is the bridge from Core → P2P:
-    /// - Translates CoreDomainEvent → P2PDomainEvent
-    /// - Broadcasts to all peers
-    ///
-    /// # Example
-    /// ```ignore
-    /// // Core emits event
-    /// let core_event = CoreDomainEvent::GuestJoined { lobby_id, participant };
-    ///
-    /// // P2P broadcasts it
-    /// p2p_loop.apply_domain_event(core_event)?;
-    /// ```
     pub fn apply_domain_event(&mut self, event: CoreDomainEvent) -> Result<()> {
-        // Translate core event → P2P event
         if let Some(p2p_event) = self.translator.to_p2p_event(event) {
-            // Broadcast to all peers
             self.broadcast_event(p2p_event)?;
             tracing::debug!("✅ Applied and broadcast core domain event");
         } else {
@@ -140,14 +169,6 @@ impl P2PLoop {
     }
 
     /// Process network events and send queued messages
-    ///
-    /// This AUTOMATICALLY handles:
-    /// - Event ordering
-    /// - Gap detection
-    /// - State reconciliation
-    /// - Translation of P2P events → Domain commands
-    ///
-    /// Returns number of events processed
     pub fn poll(&mut self) -> usize {
         let mut processed = 0;
 
@@ -165,7 +186,6 @@ impl P2PLoop {
                 ConnectionEvent::MessageReceived { from, data } => {
                     self.peer_registry.update_last_seen(from);
 
-                    // Try to parse as SyncMessage
                     if let Ok(sync_msg) = serde_json::from_slice::<SyncMessage>(data) {
                         tracing::debug!("📥 Received sync message from {}", from);
 
@@ -175,21 +195,19 @@ impl P2PLoop {
                                 self.inbound_lobby_events.extend(events);
                             }
                             Ok(SyncResponse::SendMessage { to, message }) => {
-                                // Auto-respond to sync requests
                                 if let Ok(data) = serde_json::to_vec(&message) {
                                     if let Some(peer) = to {
+                                        tracing::info!("📤 Sending sync response to {}", peer);
                                         let _ = self.connection.send_to(PeerId(peer.inner()), data);
                                     } else {
+                                        tracing::info!("📤 Broadcasting sync response");
                                         let _ = self.connection.broadcast(data);
                                     }
                                 }
                             }
-                            Ok(SyncResponse::ApplySnapshot {
-                                snapshot: _,
-                                events,
-                            }) => {
+                            Ok(SyncResponse::ApplySnapshot { snapshot, events }) => {
                                 tracing::info!("✅ Applying snapshot + {} events", events.len());
-                                self.inbound_lobby_events.extend(events);
+                                self.apply_snapshot_to_domain(snapshot, events);
                             }
                             Ok(SyncResponse::NeedSnapshot {
                                 for_peer,
@@ -200,11 +218,8 @@ impl P2PLoop {
                                     for_peer,
                                     since_sequence
                                 );
-                                // Application layer will need to provide snapshot
                             }
-                            Ok(SyncResponse::None) => {
-                                // No action needed
-                            }
+                            Ok(SyncResponse::None) => {}
                             Err(e) => {
                                 tracing::warn!("❌ Failed to handle sync message: {:?}", e);
                             }
@@ -221,7 +236,6 @@ impl P2PLoop {
                 }
             }
 
-            // Store event for caller
             self.inbound_events.push(event);
         }
 
@@ -256,7 +270,6 @@ impl P2PLoop {
                 );
                 self.pending_domain_commands.push_back(cmd);
             }
-            // Put back for application to drain separately if needed
             self.inbound_lobby_events.push(lobby_event);
         }
 
@@ -286,77 +299,58 @@ impl P2PLoop {
         std::mem::take(&mut self.inbound_events)
     }
 
-    /// Drain parsed lobby events (AUTOMATIC - already ordered and validated)
+    /// Drain parsed lobby events
     pub fn drain_lobby_events(&mut self) -> Vec<LobbyEvent> {
         std::mem::take(&mut self.inbound_lobby_events)
     }
 
     /// Drain domain commands translated from incoming P2P events
-    ///
-    /// Application should poll these and submit to DomainLoop:
-    /// ```ignore
-    /// for cmd in p2p_loop.drain_domain_commands() {
-    ///     domain_loop.submit(cmd)?;
-    /// }
-    /// domain_loop.poll();
-    /// ```
     pub fn drain_domain_commands(&mut self) -> Vec<DomainCommand> {
         self.pending_domain_commands.drain(..).collect()
     }
 
-    /// Get reference to peer registry
     pub fn peer_registry(&self) -> &PeerRegistry {
         &self.peer_registry
     }
 
-    /// Get mutable reference to peer registry
     pub fn peer_registry_mut(&mut self) -> &mut PeerRegistry {
         &mut self.peer_registry
     }
 
-    /// Get local peer ID
     pub fn local_peer_id(&self) -> Option<PeerId> {
         self.connection.local_peer_id()
     }
 
-    /// Get connected peers
     pub fn connected_peers(&self) -> Vec<PeerId> {
         self.connection.connected_peers()
     }
 
-    /// Get pending message count
     pub fn pending_messages(&self) -> usize {
         self.outbound.len()
     }
 
-    /// Get pending event count
     pub fn pending_events(&self) -> usize {
         self.inbound_events.len()
     }
 
-    /// Get pending domain command count
     pub fn pending_domain_commands(&self) -> usize {
         self.pending_domain_commands.len()
     }
 
-    /// Get current sequence number (for debugging)
     pub fn current_sequence(&self) -> u64 {
         self.event_sync.current_sequence()
     }
 
-    /// Promote to host (after delegation)
     pub fn promote_to_host(&mut self) {
         self.event_sync.promote_to_host();
         tracing::info!("👑 Promoted to HOST in P2P layer");
     }
 
     /// Send full sync to a specific peer (HOST ONLY)
-    ///
-    /// This should be called when a new peer connects
     pub fn send_full_sync_to_peer(
         &mut self,
         peer_id: PeerId,
-        snapshot: crate::application::LobbySnapshot,
+        snapshot: LobbySnapshot,
     ) -> Result<()> {
         let sync_msg = self
             .event_sync
@@ -377,13 +371,6 @@ impl P2PLoop {
 mod tests {
     use super::*;
     use konnekt_session_core::Participant;
-
-    // Helper: Create a test P2P event
-    fn create_test_p2p_event(lobby_id: Uuid) -> P2PDomainEvent {
-        P2PDomainEvent::GuestLeft {
-            participant_id: Uuid::new_v4(),
-        }
-    }
 
     #[test]
     fn test_message_queue_operations() {
@@ -646,6 +633,35 @@ mod tests {
                 assert!(!activity_in_progress); // Default
             }
             _ => panic!("Expected ToggleParticipationMode command"),
+        }
+    }
+
+    #[test]
+    fn test_peer_timeout_creates_domain_command() {
+        // This would require a mock connection to simulate timeout
+        // For now, we test the translation logic separately
+
+        let lobby_id = Uuid::new_v4();
+        let translator = EventTranslator::new(lobby_id);
+
+        let participant_id = Uuid::new_v4();
+
+        // Simulate peer timeout → participant leaves
+        let p2p_event = P2PDomainEvent::GuestLeft { participant_id };
+
+        let cmd = translator
+            .to_domain_command(&p2p_event)
+            .expect("Should translate");
+
+        match cmd {
+            DomainCommand::LeaveLobby {
+                lobby_id: lid,
+                participant_id: pid,
+            } => {
+                assert_eq!(lid, lobby_id);
+                assert_eq!(pid, participant_id);
+            }
+            _ => panic!("Expected LeaveLobby command"),
         }
     }
 }

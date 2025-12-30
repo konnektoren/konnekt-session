@@ -379,9 +379,22 @@ impl EventSyncManager {
             self.event_log.add_event(event.clone());
         }
 
+        // 🆕 CREATE LOBBY FROM SNAPSHOT
+        // Convert snapshot to CreateLobby command
+        let create_lobby_event = DomainEvent::LobbyCreated {
+            lobby_id: snapshot.lobby_id,
+            host_id: snapshot.host_id,
+            name: snapshot.name.clone(),
+        };
+
+        let lobby_event = LobbyEvent::new(0, snapshot.lobby_id, create_lobby_event);
+
+        let mut all_events = vec![lobby_event];
+        all_events.extend(events.clone());
+
         Ok(SyncResponse::ApplySnapshot {
             snapshot,
-            events: events.clone(),
+            events: all_events,
         })
     }
 

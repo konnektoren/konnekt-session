@@ -1,0 +1,627 @@
+= Konnekt Session P2P - Decentralized Lobby Synchronization
+:icons: font
+:toc: left
+:toclevels: 3
+:sectnums:
+
+== Overview
+
+`konnekt-session-p2p` is a **peer-to-peer lobby synchronization library** built on WebRTC. It provides automatic state synchronization between a host and multiple guests without requiring a central game server.
+
+=== Key Features
+
+* ✅ **Zero server costs** - Only WebRTC signalling required (Matchbox)
+* ✅ **Automatic synchronization** - Host state automatically synced to all guests
+* ✅ **Event ordering** - Guaranteed ordered delivery with gap detection
+* ✅ **Host delegation** - Seamless host migration on disconnect
+* ✅ **Resilient** - 30-second grace period for reconnection
+* ✅ **Type-safe** - Full Rust type safety with `serde` serialization
+
+=== Architecture
+
+[plantuml, architecture-overview, svg]
+----
+@startuml
+skinparam componentStyle rectangle
+
+package "Host Client" {
+    [SessionLoop] as HostSL
+    [P2PLoop] as HostP2P
+    [DomainLoop] as HostDomain
+}
+
+package "Guest Client" {
+    [SessionLoop] as GuestSL
+    [P2PLoop] as GuestP2P
+    [DomainLoop] as GuestDomain
+}
+
+cloud "Matchbox\nSignalling" as Matchbox
+
+HostSL -down-> HostP2P : manages
+HostSL -down-> HostDomain : manages
+
+GuestSL -down-> GuestP2P : manages
+GuestSL -down-> GuestDomain : manages
+
+HostP2P <--> Matchbox : WebRTC\nsignalling
+GuestP2P <--> Matchbox : WebRTC\nsignalling
+
+HostP2P <--> GuestP2P : Direct P2P\ndata channel
+
+note right of HostP2P
+  Handles:
+  - Event ordering
+  - Gap detection
+  - Snapshot sync
+end note
+
+note right of HostDomain
+  Core business logic:
+  - Lobby state
+  - Participants
+  - Activities
+end note
+
+@enduml
+----
+
+== Quick Start
+
+=== Add Dependency
+
+[source,toml]
+----
+[dependencies]
+konnekt-session-p2p = "0.4"
+konnekt-session-core = "0.4"
+----
+
+=== Create Host
+
+[source,rust]
+----
+use konnekt_session_p2p::{P2PLoopBuilder, IceServer};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Build SessionLoop as host
+    let (mut session_loop, session_id) = P2PLoopBuilder::new()
+        .build_session_host(
+            "wss://match.konnektoren.help",
+            IceServer::default_stun_servers(),
+            "My Lobby".to_string(),
+            "Alice".to_string(),
+        )
+        .await?;
+
+    println!("Session ID: {}", session_id);
+    println!("Share this ID with guests to join!");
+
+    // Main event loop (poll every 100ms)
+    let mut interval = tokio::time::interval(Duration::from_millis(100));
+    loop {
+        interval.tick().await;
+
+        // Automatically syncs P2P ↔ Core
+        session_loop.poll();
+
+        // Get lobby state
+        if let Some(lobby) = session_loop.get_lobby() {
+            println!("Participants: {}", lobby.participants().len());
+        }
+    }
+}
+----
+
+=== Join as Guest
+
+[source,rust]
+----
+use konnekt_session_p2p::{P2PLoopBuilder, SessionId, IceServer};
+use konnekt_session_core::DomainCommand;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let session_id = SessionId::parse("your-session-id-here")?;
+
+    // Build SessionLoop as guest
+    let (mut session_loop, lobby_id) = P2PLoopBuilder::new()
+        .build_session_guest(
+            "wss://match.konnektoren.help",
+            session_id,
+            IceServer::default_stun_servers(),
+        )
+        .await?;
+
+    // Wait for lobby to sync from host
+    while session_loop.get_lobby().is_none() {
+        session_loop.poll();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    println!("Lobby synced!");
+
+    // Submit join command
+    session_loop.submit_command(DomainCommand::JoinLobby {
+        lobby_id,
+        guest_name: "Bob".to_string(),
+    })?;
+
+    // Main event loop
+    let mut interval = tokio::time::interval(Duration::from_millis(100));
+    loop {
+        interval.tick().await;
+        session_loop.poll();
+    }
+}
+----
+
+== Guest Join Flow
+
+=== Overview
+
+When a guest joins, the following happens automatically:
+
+[plantuml, guest-join-flow, svg]
+----
+@startuml
+autonumber
+
+participant "Guest" as G
+participant "Guest\nSessionLoop" as GSL
+participant "Host\nSessionLoop" as HSL
+
+== Connection ==
+
+G -> GSL: build_session_guest()
+note right: Creates P2P + Domain loops
+
+GSL <-> HSL: WebRTC handshake
+note over GSL, HSL: Via Matchbox signalling
+
+GSL -> GSL: PeerConnected event
+
+== Automatic Sync ==
+
+HSL -> HSL: poll() detects PeerConnected
+note right
+  **Automatic!**
+  Host detects connection
+  and auto-sends snapshot
+end note
+
+HSL -> GSL: FullSyncResponse
+note right
+  Contains:
+  - Lobby state
+  - All participants
+  - Current sequence
+end note
+
+GSL -> GSL: Apply snapshot
+GSL -> GSL: Create lobby in domain
+
+G -> GSL: get_lobby()
+GSL --> G: Some(Lobby) ✅
+
+== Join Lobby ==
+
+G -> GSL: submit(JoinLobby)
+GSL -> HSL: Broadcast GuestJoined
+HSL -> HSL: Update lobby state
+
+@enduml
+----
+
+=== Detailed Steps
+
+1. **Guest connects to Matchbox**
+   - Receives unique peer ID
+   - Establishes WebRTC data channel with host
+
+2. **Host detects connection** (automatic)
+   - `SessionLoop::poll()` detects `PeerConnected` event
+   - Creates `LobbySnapshot` from current state
+   - Sends `FullSyncResponse` to guest
+
+3. **Guest receives snapshot** (automatic)
+   - `P2PLoop` receives and validates message
+   - Converts snapshot to `CreateLobby` command
+   - Domain creates local copy of lobby
+
+4. **Guest joins lobby** (manual)
+   - Application submits `JoinLobby` command
+   - Event broadcast to all peers
+   - Host updates lobby state
+
+== Message Types
+
+=== SyncMessage
+
+[plantuml, sync-messages, svg]
+----
+@startuml
+
+class SyncMessage <<enum>> {
+  EventBroadcast
+  RequestMissingEvents
+  MissingEventsResponse
+  RequestFullSync
+  FullSyncResponse
+}
+
+class EventBroadcast {
+  + event: LobbyEvent
+}
+
+class RequestFullSync {
+  + lobby_id: Uuid
+  + last_known_sequence: u64
+}
+
+class FullSyncResponse {
+  + snapshot: LobbySnapshot
+  + events: Vec<LobbyEvent>
+}
+
+class LobbySnapshot {
+  + lobby_id: Uuid
+  + name: String
+  + host_id: Uuid
+  + participants: Vec<Participant>
+  + as_of_sequence: u64
+}
+
+class LobbyEvent {
+  + sequence: u64
+  + lobby_id: Uuid
+  + timestamp: Timestamp
+  + event: DomainEvent
+}
+
+SyncMessage <|-- EventBroadcast
+SyncMessage <|-- RequestFullSync
+SyncMessage <|-- FullSyncResponse
+
+FullSyncResponse --> LobbySnapshot
+FullSyncResponse --> LobbyEvent
+EventBroadcast --> LobbyEvent
+
+@enduml
+----
+
+=== Message Flow
+
+[source]
+----
+Host                           Guest
+ │                              │
+ │  1. PeerConnected event      │
+ │◄─────────────────────────────│
+ │                              │
+ │  2. FullSyncResponse         │
+ ├─────────────────────────────►│
+ │     {snapshot, events[]}     │
+ │                              │
+ │  3. EventBroadcast           │
+ │     {GuestJoined}            │
+ │◄─────────────────────────────│
+ │                              │
+----
+
+== API Reference
+
+=== P2PLoopBuilder
+
+Main entry point for creating P2P sessions.
+
+[source,rust]
+----
+pub struct P2PLoopBuilder;
+
+impl P2PLoopBuilder {
+    /// Create builder with default settings
+    pub fn new() -> Self;
+
+    /// Set batch size (events per poll)
+    pub fn batch_size(self, size: usize) -> Self;
+
+    /// Set max queue size
+    pub fn queue_size(self, size: usize) -> Self;
+
+    /// Build host session
+    pub async fn build_session_host(
+        self,
+        signalling_server: &str,
+        ice_servers: Vec<IceServer>,
+        lobby_name: String,
+        host_name: String,
+    ) -> Result<(SessionLoop, SessionId)>;
+
+    /// Build guest session
+    pub async fn build_session_guest(
+        self,
+        signalling_server: &str,
+        session_id: SessionId,
+        ice_servers: Vec<IceServer>,
+    ) -> Result<(SessionLoop, Uuid)>;
+}
+----
+
+=== SessionLoop
+
+Unified event loop that coordinates P2P ↔ Core.
+
+[source,rust]
+----
+pub struct SessionLoop;
+
+impl SessionLoop {
+    /// Main event loop - call every 100ms
+    /// Automatically:
+    /// - Polls P2P for network events
+    /// - Translates P2P events → domain commands
+    /// - Executes domain commands
+    /// - Broadcasts domain events via P2P
+    pub fn poll(&mut self) -> usize;
+
+    /// Submit a domain command (for user actions)
+    pub fn submit_command(&mut self, cmd: DomainCommand) -> Result<()>;
+
+    /// Get current lobby state
+    pub fn get_lobby(&self) -> Option<&Lobby>;
+
+    /// Get lobby ID
+    pub fn lobby_id(&self) -> Uuid;
+
+    /// Get local peer ID
+    pub fn local_peer_id(&self) -> Option<PeerId>;
+
+    /// Get connected peers
+    pub fn connected_peers(&self) -> Vec<PeerId>;
+
+    /// Check if this client is the host
+    pub fn is_host(&self) -> bool;
+}
+----
+
+=== P2PLoop
+
+Low-level P2P networking (usually accessed via SessionLoop).
+
+[source,rust]
+----
+pub struct P2PLoop;
+
+impl P2PLoop {
+    /// Process network events
+    pub fn poll(&mut self) -> usize;
+
+    /// Request full sync (guest only)
+    pub fn request_full_sync(&mut self) -> Result<()>;
+
+    /// Send full sync to peer (host only)
+    pub fn send_full_sync_to_peer(
+        &mut self,
+        peer_id: PeerId,
+        snapshot: LobbySnapshot,
+    ) -> Result<()>;
+
+    /// Drain domain commands translated from P2P
+    pub fn drain_domain_commands(&mut self) -> Vec<DomainCommand>;
+
+    /// Get current event sequence number
+    pub fn current_sequence(&self) -> u64;
+}
+----
+
+== Configuration
+
+=== ICE Servers
+
+By default, Google STUN servers are used. You can customize:
+
+[source,rust]
+----
+use konnekt_session_p2p::IceServer;
+
+let ice_servers = vec![
+    // STUN server
+    IceServer::stun("stun:stun.l.google.com:19302".to_string()),
+
+    // TURN server with auth
+    IceServer::turn(
+        "turn:turn.example.com:3478".to_string(),
+        "username".to_string(),
+        "password".to_string(),
+    ),
+];
+
+let (session_loop, session_id) = P2PLoopBuilder::new()
+    .build_session_host(
+        "wss://match.konnektoren.help",
+        ice_servers, // Custom ICE servers
+        "My Lobby".to_string(),
+        "Host".to_string(),
+    )
+    .await?;
+----
+
+=== Polling Interval
+
+Recommended: **100ms** for responsive UI
+
+[source,rust]
+----
+let mut interval = tokio::time::interval(Duration::from_millis(100));
+
+loop {
+    interval.tick().await;
+    session_loop.poll(); // Process P2P + domain events
+}
+----
+
+== Error Handling
+
+=== Common Errors
+
+[source,rust]
+----
+pub enum P2PError {
+    /// WebRTC connection failed
+    ConnectionFailed(String),
+
+    /// Invalid session ID format
+    InvalidSessionId(String),
+
+    /// Failed to send message
+    SendFailed(String),
+
+    /// Serialization error
+    Serialization(serde_json::Error),
+}
+----
+
+=== Timeout Scenarios
+
+[plantuml, timeout-handling, svg]
+----
+@startuml
+start
+
+:Guest connects;
+
+if (Peer ID assigned\nwithin 5s?) then (no)
+  :Error: Timeout\nwaiting for peer ID;
+  stop
+endif
+
+if (Peer connected\nwithin 10s?) then (no)
+  :Error: Timeout\nwaiting for connection;
+  stop
+endif
+
+:Host auto-sends snapshot;
+
+if (Snapshot received\nwithin 10s?) then (no)
+  :Error: Timeout\nwaiting for sync;
+  note right
+    Check:
+    - Host is running
+    - Firewall allows WebRTC
+    - ICE servers reachable
+  end note
+  stop
+else (yes)
+  :Success! ✅;
+  stop
+endif
+
+@enduml
+----
+
+== Debugging
+
+=== Enable Logging
+
+[source,rust]
+----
+tracing_subscriber::fmt()
+    .with_env_filter(
+        tracing_subscriber::EnvFilter::new("debug")
+    )
+    .init();
+----
+
+=== Expected Guest Logs
+
+[source]
+----
+INFO  🎯 Joining session...
+INFO  ✅ Joined session: <session-id>
+INFO  ⏳ Waiting for peer ID...
+INFO  ✅ Peer ID assigned
+INFO  ⏳ Waiting for peer connection...
+INFO  ✅ Connected to 1 peer(s)
+INFO  ⏳ Waiting for lobby sync from host...
+INFO  📥 GUEST: Received lobby snapshot via P2P: My Lobby
+INFO  ✅ Lobby 'My Lobby' synced!
+----
+
+=== Expected Host Logs
+
+[source]
+----
+INFO  🎯 Creating host session...
+INFO  ✅ Session created: <session-id>
+INFO  🟢 HOST: Peer <peer-id> connected - auto-sending full sync
+INFO  ✅ Sent full sync to <peer-id>
+INFO  📥 Guest 'Bob' joining via P2P
+INFO  📤 Broadcasting GuestJoined: Bob
+----
+
+=== Common Issues
+
+==== Guest times out waiting for sync
+
+*Symptom:* `Error: Timeout waiting for lobby sync`
+
+*Causes:*
+- Host not polling regularly
+- Firewall blocking WebRTC
+- ICE servers unreachable
+
+*Fix:*
+1. Ensure host calls `session_loop.poll()` every 100ms
+2. Check firewall settings
+3. Try different ICE servers (add TURN)
+
+==== Messages not received
+
+*Symptom:* Events not syncing between peers
+
+*Causes:*
+- Not calling `poll()` regularly
+- Queue overflow (too many events)
+
+*Fix:*
+1. Call `poll()` at 100ms intervals
+2. Increase queue size: `.queue_size(1000)`
+
+== Advanced Usage
+
+=== Custom Event Handling
+
+[source,rust]
+----
+// Process domain events
+for event in session_loop.domain().drain_events() {
+    match event {
+        DomainEvent::GuestJoined { participant, .. } => {
+            println!("Welcome {}!", participant.name());
+        }
+        DomainEvent::GuestLeft { participant_id, .. } => {
+            println!("Goodbye {}!", participant_id);
+        }
+        _ => {}
+    }
+}
+----
+
+=== Host Delegation
+
+[source,rust]
+----
+// Delegate host to another participant
+session_loop.submit_command(DomainCommand::DelegateHost {
+    lobby_id,
+    current_host_id: my_id,
+    new_host_id: guest_id,
+})?;
+
+// After delegation, original host becomes guest
+if !session_loop.is_host() {
+    println!("I'm now a guest");
+}
+----
