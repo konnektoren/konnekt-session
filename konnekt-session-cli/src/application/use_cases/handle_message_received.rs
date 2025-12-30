@@ -118,26 +118,40 @@ async fn handle_lobby_event(
                 tracing::info!("✓ Guest '{}' joined lobby", participant.name());
             }
         }
-        DomainEvent::GuestLeft { participant_id } => {
-            if let Some(lobby) = state.lobby_mut() {
-                lobby.participants_mut().remove(&participant_id);
-                tracing::info!("✓ Guest {} left lobby", participant_id);
-            }
-        }
         DomainEvent::GuestKicked {
             participant_id,
             kicked_by,
         } => {
+            tracing::info!(
+                "🔨 Processing GuestKicked: {} kicked by {}",
+                participant_id,
+                kicked_by
+            );
+
             if let Some(lobby) = state.lobby_mut() {
                 if let Some(removed) = lobby.participants_mut().remove(&participant_id) {
-                    tracing::info!("✓ Guest '{}' was kicked by {}", removed.name(), kicked_by);
+                    tracing::info!("✅ Removed '{}' from lobby", removed.name());
 
-                    // If we were kicked, clear our lobby
+                    // If we were kicked, show notification
                     if participant_id == state.participant().id() {
-                        tracing::warn!("⚠️  You were kicked from the lobby!");
-                        // Clear lobby state (we're no longer in it)
-                        // Note: We keep the participant but lose lobby access
+                        tracing::warn!("⚠️  YOU WERE KICKED FROM THE LOBBY!");
                     }
+                } else {
+                    tracing::warn!("⚠️  Participant {} not found in lobby", participant_id);
+                }
+            } else {
+                tracing::warn!("⚠️  No lobby to remove participant from");
+            }
+        }
+
+        DomainEvent::GuestLeft { participant_id } => {
+            tracing::info!("👋 Processing GuestLeft: {}", participant_id);
+
+            if let Some(lobby) = state.lobby_mut() {
+                if let Some(removed) = lobby.participants_mut().remove(&participant_id) {
+                    tracing::info!("✅ Removed '{}' from lobby (left)", removed.name());
+                } else {
+                    tracing::warn!("⚠️  Participant {} not found in lobby", participant_id);
                 }
             }
         }

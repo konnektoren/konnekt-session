@@ -27,7 +27,11 @@ pub async fn kick_guest(
         .kick_guest(guest_id, host_id)
         .map_err(|e| CliError::InvalidConfig(e.to_string()))?;
 
-    tracing::info!("Kicked guest: {}", kicked_participant.name());
+    tracing::info!(
+        "✅ Kicked guest: {} (ID: {})",
+        kicked_participant.name(),
+        guest_id
+    );
 
     // Create and broadcast the event
     let event = DomainEvent::GuestKicked {
@@ -35,11 +39,14 @@ pub async fn kick_guest(
         kicked_by: host_id,
     };
 
-    session
-        .create_event(event)
-        .map_err(|e| CliError::MessageSend(e.to_string()))?;
+    tracing::info!("📤 Broadcasting GuestKicked event...");
 
-    tracing::info!("📤 Broadcast guest kicked event");
+    session.create_event(event).map_err(|e| {
+        tracing::error!("❌ Failed to broadcast kick event: {:?}", e);
+        CliError::MessageSend(e.to_string())
+    })?;
+
+    tracing::info!("✅ GuestKicked event broadcast successful");
 
     Ok(())
 }
