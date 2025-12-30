@@ -1,10 +1,11 @@
 use clap::{Parser, Subcommand};
-use konnekt_session_cli::presentation::tui::{self, App, AppEvent};
-use konnekt_session_cli::{CliError, Result, domain::SessionState}; // 🆕 FIXED: Import from root
-use konnekt_session_core::{DomainCommand, Participant};
+use konnekt_session_cli::presentation::tui::{self, App, AppEvent, UserAction};
+use konnekt_session_cli::{CliError, Result};
+use konnekt_session_core::DomainCommand;
 use konnekt_session_p2p::{IceServer, P2PLoopBuilder, SessionId, SessionLoop};
 use std::time::Duration;
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 #[derive(Parser)]
 #[command(name = "konnekt-tui")]
@@ -113,7 +114,7 @@ async fn create_host(server: &str, name: &str, ice_servers: Vec<IceServer>) -> R
     tracing::info!("🎯 Creating host session...");
 
     // Build SessionLoop as host
-    let (mut session_loop, session_id) = P2PLoopBuilder::new()
+    let (session_loop, session_id) = P2PLoopBuilder::new()
         .build_session_host(
             server,
             ice_servers,
@@ -122,28 +123,9 @@ async fn create_host(server: &str, name: &str, ice_servers: Vec<IceServer>) -> R
         )
         .await?;
 
-    let lobby_id = session_loop.lobby_id();
-
     tracing::info!("✅ Session created: {}", session_id);
-    tracing::info!("📋 Lobby ID: {}", lobby_id);
 
-    // Wait for peer ID
-    wait_for_peer_id(&mut session_loop).await?;
-
-    // Get the created lobby
-    let lobby = session_loop
-        .get_lobby()
-        .ok_or_else(|| CliError::P2PConnection("Lobby not created".to_string()))?
-        .clone();
-
-    tracing::info!("✅ Lobby ready: {}", lobby.name());
-
-    let host = Participant::new_host(name.to_string())?; // Auto-converts via From<ParticipantError>
-
-    let mut state = SessionState::new(host);
-    state.set_lobby(lobby);
-
-    run_tui(session_loop, state, session_id, true).await
+    run_tui(session_loop, session_id).await
 }
 
 async fn join_session(
@@ -162,17 +144,10 @@ async fn join_session(
 
     tracing::info!("✅ Joined session: {}", session_id);
 
-    // Wait for peer ID
-    wait_for_peer_id(&mut session_loop).await?;
-
-    // Wait for peer connection
-    wait_for_peer_connection(&mut session_loop).await?;
-
-    // Wait for lobby sync (host will send automatically)
-    tracing::info!("⏳ Waiting for lobby sync from host...");
+    // Wait for lobby to sync from host
     wait_for_lobby_sync(&mut session_loop).await?;
 
-    // Submit join command
+    // Submit join command (business logic in SessionLoop)
     session_loop.submit_command(DomainCommand::JoinLobby {
         lobby_id,
         guest_name: name.to_string(),
@@ -180,77 +155,131 @@ async fn join_session(
 
     tracing::info!("📤 Sent join request");
 
-    // Give it a moment to process
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    session_loop.poll();
-
-    let guest = Participant::new_guest(name.to_string())?;
-
-    let state = SessionState::new(guest);
-
-    run_tui(session_loop, state, session_id, false).await
+    run_tui(session_loop, session_id).await
 }
 
-async fn run_tui(
-    mut session_loop: SessionLoop,
-    state: SessionState,
-    session_id: SessionId,
-    is_host: bool,
-) -> Result<()> {
+async fn run_tui(mut session_loop: SessionLoop, session_id: SessionId) -> Result<()> {
     let mut terminal = tui::setup_terminal()?;
-    let session_id_str = session_id.to_string();
-    let mut app = App::new(state, session_id_str);
+    let mut app = App::new(session_id.to_string());
 
-    let (state_tx, mut state_rx) = mpsc::channel(100);
+    let (ui_tx, mut ui_rx) = mpsc::channel(100);
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UserCommand>(100);
 
-    // Spawn background session loop task
+    let lobby_id = session_loop.lobby_id();
+
+    // Spawn SessionLoop background task (ALL BUSINESS LOGIC)
     let session_handle = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(100));
 
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    // Poll SessionLoop (auto-syncs P2P ↔ Core)
+                    // 1. Process user commands from TUI
+                    while let Ok(user_cmd) = cmd_rx.try_recv() {
+                        if let Err(e) = handle_user_command(&mut session_loop, lobby_id, user_cmd) {
+                            tracing::error!("Failed to handle user command: {:?}", e);
+                        }
+                    }
+
+                    // 2. Poll SessionLoop (business logic)
                     let processed = session_loop.poll();
 
                     if processed > 0 {
                         tracing::trace!("SessionLoop processed {} events", processed);
                     }
 
-                    // Send lobby state to UI
+                    // 3. Send UI updates (read-only snapshots)
                     if let Some(lobby) = session_loop.get_lobby() {
-                        let _ = state_tx.send(AppUpdate::LobbyState(lobby.clone())).await;
+                        let _ = ui_tx.send(UiUpdate::Lobby(lobby.clone())).await;
                     }
 
-                    // Send peer count
-                    let peer_count = session_loop.connected_peers().len();
-                    let _ = state_tx.send(AppUpdate::PeerCount(peer_count)).await;
+                    if let Some(peer_id) = session_loop.local_peer_id() {
+                        let peer_count = session_loop.connected_peers().len();
+                        let is_host = session_loop.is_host();
+                        let _ = ui_tx.send(UiUpdate::PeerInfo {
+                            peer_id: peer_id.to_string(),
+                            peer_count,
+                            is_host,
+                        }).await;
+                    }
                 }
             }
         }
     });
 
-    // Run TUI event loop
-    let result = run_app_loop(&mut terminal, &mut app, &mut state_rx).await;
+    // Run TUI event loop (PRESENTATION ONLY)
+    let result = run_app_loop(&mut terminal, &mut app, &mut ui_rx, cmd_tx).await;
 
     tui::restore_terminal(terminal)?;
-
-    // Cleanup
     session_handle.abort();
 
     result
 }
 
+/// Commands from TUI to SessionLoop
+#[derive(Debug, Clone)]
+enum UserCommand {
+    ToggleParticipationMode { participant_id: Uuid },
+    KickGuest { guest_id: Uuid },
+    LeaveSession { participant_id: Uuid },
+}
+
+/// Handle user commands (business logic)
+fn handle_user_command(
+    session_loop: &mut SessionLoop,
+    lobby_id: Uuid,
+    command: UserCommand,
+) -> Result<()> {
+    match command {
+        UserCommand::ToggleParticipationMode { participant_id } => {
+            session_loop.submit_command(DomainCommand::ToggleParticipationMode {
+                lobby_id,
+                participant_id,
+                requester_id: participant_id,
+                activity_in_progress: false,
+            })?;
+            tracing::info!("Submitted toggle participation mode command");
+        }
+        UserCommand::KickGuest { guest_id } => {
+            let host_id = session_loop
+                .get_lobby()
+                .map(|l| l.host_id())
+                .ok_or_else(|| CliError::InvalidConfig("No lobby".to_string()))?;
+
+            session_loop.submit_command(DomainCommand::KickGuest {
+                lobby_id,
+                host_id,
+                guest_id,
+            })?;
+            tracing::info!("Submitted kick guest command");
+        }
+        UserCommand::LeaveSession { participant_id } => {
+            session_loop.submit_command(DomainCommand::LeaveLobby {
+                lobby_id,
+                participant_id,
+            })?;
+            tracing::info!("Submitted leave session command");
+        }
+    }
+    Ok(())
+}
+
 /// Updates sent from SessionLoop to TUI
-enum AppUpdate {
-    LobbyState(konnekt_session_core::Lobby),
-    PeerCount(usize),
+#[derive(Debug, Clone)]
+enum UiUpdate {
+    Lobby(konnekt_session_core::Lobby),
+    PeerInfo {
+        peer_id: String,
+        peer_count: usize,
+        is_host: bool,
+    },
 }
 
 async fn run_app_loop(
     terminal: &mut tui::TuiTerminal,
     app: &mut App,
-    state_rx: &mut mpsc::Receiver<AppUpdate>,
+    ui_rx: &mut mpsc::Receiver<UiUpdate>,
+    cmd_tx: mpsc::Sender<UserCommand>,
 ) -> Result<()> {
     loop {
         terminal.draw(|f| tui::ui::render(f, app))?;
@@ -259,7 +288,9 @@ async fn run_app_loop(
             Ok(app_event) = tui::event::read_events() => {
                 match app_event {
                     AppEvent::Key(key) => {
-                        app.handle_key(key);
+                        if let Some(action) = app.handle_key(key) {
+                            handle_user_action(app, action, &cmd_tx).await?;
+                        }
                         if app.should_quit {
                             break;
                         }
@@ -270,13 +301,13 @@ async fn run_app_loop(
                 }
             }
 
-            Some(update) = state_rx.recv() => {
+            Some(update) = ui_rx.recv() => {
                 match update {
-                    AppUpdate::LobbyState(lobby) => {
+                    UiUpdate::Lobby(lobby) => {
                         app.update_lobby(lobby);
                     }
-                    AppUpdate::PeerCount(count) => {
-                        app.update_peer_count(count);
+                    UiUpdate::PeerInfo { peer_id, peer_count, is_host } => {
+                        app.update_peer_info(peer_id, peer_count, is_host);
                     }
                 }
             }
@@ -286,93 +317,69 @@ async fn run_app_loop(
     Ok(())
 }
 
-async fn wait_for_peer_id(session_loop: &mut SessionLoop) -> Result<()> {
-    let timeout = Duration::from_secs(5);
-    let start = std::time::Instant::now();
-
-    tracing::info!("⏳ Waiting for peer ID...");
-
-    while start.elapsed() < timeout {
-        session_loop.poll();
-
-        if session_loop.local_peer_id().is_some() {
-            tracing::info!("✅ Peer ID assigned");
-            return Ok(());
+/// Handle user actions (presentation-only side effects + send commands)
+async fn handle_user_action(
+    app: &mut App,
+    action: UserAction,
+    cmd_tx: &mpsc::Sender<UserCommand>,
+) -> Result<()> {
+    match action {
+        UserAction::CopySessionId => {
+            let _ = app.copy_session_id();
         }
-
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
-    Err(CliError::P2PConnection(
-        "Timeout waiting for peer ID".to_string(),
-    ))
-}
-
-/// Wait for at least one peer to connect
-async fn wait_for_peer_connection(session_loop: &mut SessionLoop) -> Result<()> {
-    let timeout = Duration::from_secs(10);
-    let start = std::time::Instant::now();
-
-    tracing::info!("⏳ Waiting for peer connection...");
-
-    while start.elapsed() < timeout {
-        session_loop.poll();
-
-        if !session_loop.connected_peers().is_empty() {
-            tracing::info!(
-                "✅ Connected to {} peer(s)",
-                session_loop.connected_peers().len()
-            );
-
-            // Give the connection a moment to fully establish
-            tokio::time::sleep(Duration::from_millis(500)).await;
-
-            // Poll again to let host detect the connection
-            session_loop.poll();
-
-            return Ok(());
+        UserAction::CopyJoinCommand => {
+            let _ = app.copy_join_command();
         }
-
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        UserAction::ToggleParticipationMode => {
+            if let Some(participant_id) = app.get_local_participant_id() {
+                cmd_tx
+                    .send(UserCommand::ToggleParticipationMode { participant_id })
+                    .await
+                    .map_err(|e| {
+                        CliError::InvalidConfig(format!("Failed to send command: {}", e))
+                    })?;
+            } else {
+                tracing::warn!("Cannot toggle mode: participant ID not known yet");
+            }
+        }
+        UserAction::KickParticipant(guest_id) => {
+            cmd_tx
+                .send(UserCommand::KickGuest { guest_id })
+                .await
+                .map_err(|e| CliError::InvalidConfig(format!("Failed to send command: {}", e)))?;
+        }
+        UserAction::Quit => {
+            // Send leave command if we're a guest
+            if !app.is_host {
+                if let Some(participant_id) = app.get_local_participant_id() {
+                    let _ = cmd_tx
+                        .send(UserCommand::LeaveSession { participant_id })
+                        .await;
+                }
+            }
+        }
     }
-
-    Err(CliError::P2PConnection(
-        "Timeout waiting for peer connection".to_string(),
-    ))
+    Ok(())
 }
 
 async fn wait_for_lobby_sync(session_loop: &mut SessionLoop) -> Result<()> {
     let timeout = Duration::from_secs(10);
     let start = std::time::Instant::now();
 
+    tracing::info!("⏳ Waiting for lobby sync from host...");
+
     while start.elapsed() < timeout {
-        // Poll to process incoming messages
-        let processed = session_loop.poll();
+        session_loop.poll();
 
-        if processed > 0 {
-            tracing::debug!("Processed {} events during sync wait", processed);
-        }
-
-        // Check if we received lobby via P2P sync
-        if let Some(lobby) = session_loop.get_lobby() {
-            tracing::info!("✅ Lobby '{}' synced!", lobby.name());
-            tracing::info!("   Host: {:?}", lobby.host_id());
-            tracing::info!("   Participants: {}", lobby.participants().len());
+        if session_loop.get_lobby().is_some() {
+            tracing::info!("✅ Lobby synced!");
             return Ok(());
         }
 
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    tracing::error!("❌ Timeout waiting for lobby sync");
-    tracing::error!("   Lobby ID: {}", session_loop.lobby_id());
-    tracing::error!(
-        "   Connected peers: {}",
-        session_loop.connected_peers().len()
-    );
-
-    Err(CliError::P2PConnection(format!(
-        "Timeout waiting for lobby {} to sync",
-        session_loop.lobby_id()
-    )))
+    Err(CliError::P2PConnection(
+        "Timeout waiting for lobby sync".to_string(),
+    ))
 }

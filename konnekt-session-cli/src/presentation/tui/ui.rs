@@ -1,5 +1,4 @@
 use super::app::{App, Tab};
-use konnekt_session_core::ParticipationMode;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -126,10 +125,15 @@ fn render_session(f: &mut Frame, area: Rect, app: &App) {
     text.push(Line::from(""));
     text.push(Line::from(""));
 
+    // Connection status
     if let Some(peer_id) = &app.local_peer_id {
         text.push(Line::from(vec![
             Span::styled("Local Peer ID: ", Style::default().fg(Color::Cyan)),
             Span::raw(peer_id),
+        ]));
+        text.push(Line::from(vec![
+            Span::styled("Connected Peers: ", Style::default().fg(Color::Cyan)),
+            Span::raw(app.peer_count.to_string()),
         ]));
     } else {
         text.push(Line::from(vec![
@@ -150,8 +154,17 @@ fn render_session(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_lobby(f: &mut Frame, area: Rect, app: &App) {
-    let text = if let Some(lobby) = app.session_state.lobby() {
-        vec![
+    let text = if let Some(lobby) = &app.lobby_snapshot {
+        // Find our participant
+        let our_participant = lobby.participants().values().find(|p| {
+            if app.is_host {
+                p.is_host()
+            } else {
+                Some(p.id()) == app.local_participant_id
+            }
+        });
+
+        let mut lines = vec![
             Line::from(vec![
                 Span::styled("Lobby: ", Style::default().fg(Color::Cyan)),
                 Span::raw(lobby.name()),
@@ -166,11 +179,14 @@ fn render_lobby(f: &mut Frame, area: Rect, app: &App) {
                 Span::raw(lobby.participants().len().to_string()),
             ]),
             Line::from(""),
-            Line::from(vec![
+        ];
+
+        if let Some(participant) = our_participant {
+            lines.push(Line::from(vec![
                 Span::styled("Your Role: ", Style::default().fg(Color::Cyan)),
                 Span::styled(
-                    format!("{}", app.session_state.participant().lobby_role()),
-                    if app.session_state.is_host() {
+                    format!("{}", participant.lobby_role()),
+                    if participant.is_host() {
                         Style::default()
                             .fg(Color::Green)
                             .add_modifier(Modifier::BOLD)
@@ -178,20 +194,20 @@ fn render_lobby(f: &mut Frame, area: Rect, app: &App) {
                         Style::default().fg(Color::White)
                     },
                 ),
-            ]),
-            Line::from(vec![
+            ]));
+            lines.push(Line::from(vec![
                 Span::styled("Your Mode: ", Style::default().fg(Color::Cyan)),
                 Span::styled(
-                    format!("{}", app.session_state.participant().participation_mode()),
-                    if app.session_state.participant().can_submit_results() {
+                    format!("{}", participant.participation_mode()),
+                    if participant.can_submit_results() {
                         Style::default().fg(Color::Green)
                     } else {
                         Style::default().fg(Color::Yellow)
                     },
                 ),
-            ]),
-            Line::from(""),
-            Line::from(vec![
+            ]));
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
                 Span::raw("Press "),
                 Span::styled(
                     "t",
@@ -200,8 +216,10 @@ fn render_lobby(f: &mut Frame, area: Rect, app: &App) {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" to toggle between Active/Spectating"),
-            ]),
-        ]
+            ]));
+        }
+
+        lines
     } else {
         vec![
             Line::from("Not in a lobby"),
@@ -236,7 +254,7 @@ fn render_events(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_participants(f: &mut Frame, area: Rect, app: &App) {
-    let items: Vec<ListItem> = if let Some(lobby) = app.session_state.lobby() {
+    let items: Vec<ListItem> = if let Some(lobby) = &app.lobby_snapshot {
         lobby
             .participants()
             .values()
@@ -255,7 +273,7 @@ fn render_participants(f: &mut Frame, area: Rect, app: &App) {
                 };
 
                 // Highlight selected participant (if host)
-                let selected = app.session_state.is_host()
+                let selected = app.is_host
                     && app.current_tab == Tab::Participants
                     && idx == app.selected_participant;
 
@@ -292,8 +310,8 @@ fn render_participants(f: &mut Frame, area: Rect, app: &App) {
         vec![ListItem::new("No participants")]
     };
 
-    let title = if app.session_state.is_host() {
-        "Participants (j/k: select, x: kick)" // Changed from 'k: kick'
+    let title = if app.is_host {
+        "Participants (j/k: select, x: kick)"
     } else {
         "Participants"
     };
