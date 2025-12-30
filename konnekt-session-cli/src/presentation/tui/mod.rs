@@ -15,11 +15,9 @@ use std::io;
 
 pub type TuiTerminal = Terminal<CrosstermBackend<io::Stdout>>;
 
-/// Setup terminal for TUI mode
 pub fn setup_terminal() -> Result<TuiTerminal> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    // Don't enable mouse capture - allows text selection
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;

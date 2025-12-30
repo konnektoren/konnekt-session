@@ -6,6 +6,8 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+default-run = "konnekt-cli"
+
 [lib]
 name = "konnekt_session_cli"
 path = "src/lib.rs"

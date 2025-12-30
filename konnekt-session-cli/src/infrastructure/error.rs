@@ -34,6 +34,19 @@ pub enum CliError {
 
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
+
+    #[error("P2P error: {0}")]
+    P2P(#[from] konnekt_session_p2p::P2PError),
+
+    // 🆕 ADD: Core domain errors
+    #[error("Participant error: {0}")]
+    Participant(#[from] konnekt_session_core::ParticipantError),
+
+    #[error("Queue error: {0}")]
+    Queue(#[from] konnekt_session_core::QueueError),
+
+    #[error("Lobby error: {0}")]
+    Lobby(#[from] konnekt_session_core::LobbyError),
 }
 
 impl CliError {

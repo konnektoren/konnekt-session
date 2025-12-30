@@ -1,16 +1,13 @@
 use clap::{Parser, Subcommand};
 use konnekt_session_cli::{
-    application::use_cases::{
-        handle_message_received, handle_peer_connected, handle_peer_disconnected,
-        handle_peer_timed_out, kick_guest, toggle_participation_mode,
-    },
     domain::SessionState,
     infrastructure::{CliError, Result},
     presentation::tui::{self, App, AppEvent},
 };
-use konnekt_session_core::{Lobby, Participant};
-use konnekt_session_p2p::{ConnectionEvent, P2PSession, SessionConfig, SessionId};
+use konnekt_session_core::{DomainCommand, Participant};
+use konnekt_session_p2p::{ConnectionEvent, IceServer, P2PLoopBuilder, SessionId};
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 #[derive(Parser)]
 #[command(name = "konnekt-tui")]
@@ -25,52 +22,29 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Create a new session as host
     CreateHost {
-        /// Matchbox signalling server URL
         #[arg(short = 's', long, default_value = "wss://match.konnektoren.help")]
         server: String,
-
-        /// Host display name
         #[arg(short = 'n', long, default_value = "Host")]
         name: String,
-
-        /// TURN server URL
         #[arg(long)]
         turn_server: Option<String>,
-
-        /// TURN username
         #[arg(long)]
         turn_username: Option<String>,
-
-        /// TURN credential
         #[arg(long)]
         turn_credential: Option<String>,
     },
-
-    /// Join an existing session as guest
     Join {
-        /// Matchbox signalling server URL
         #[arg(short = 's', long, default_value = "wss://match.konnektoren.help")]
         server: String,
-
-        /// Session ID to join
         #[arg(short = 'i', long)]
         session_id: String,
-
-        /// Guest display name
         #[arg(short = 'n', long, default_value = "Guest")]
         name: String,
-
-        /// TURN server URL
         #[arg(long)]
         turn_server: Option<String>,
-
-        /// TURN username
         #[arg(long)]
         turn_username: Option<String>,
-
-        /// TURN credential
         #[arg(long)]
         turn_credential: Option<String>,
     },
@@ -88,8 +62,8 @@ async fn main() -> Result<()> {
             turn_username,
             turn_credential,
         } => {
-            let config = build_config(&server, turn_server, turn_username, turn_credential)?;
-            create_host(config, &name).await?;
+            let ice_servers = build_ice_servers(turn_server, turn_username, turn_credential)?;
+            create_host(&server, &name, ice_servers).await?;
         }
         Commands::Join {
             server,
@@ -99,26 +73,25 @@ async fn main() -> Result<()> {
             turn_username,
             turn_credential,
         } => {
-            let config = build_config(&server, turn_server, turn_username, turn_credential)?;
-            join_session(config, &session_id, &name).await?;
+            let ice_servers = build_ice_servers(turn_server, turn_username, turn_credential)?;
+            join_session(&server, &session_id, &name, ice_servers).await?;
         }
     }
 
     Ok(())
 }
 
-fn build_config(
-    server: &str,
+fn build_ice_servers(
     turn_server: Option<String>,
     turn_username: Option<String>,
     turn_credential: Option<String>,
-) -> Result<SessionConfig> {
-    let mut config = SessionConfig::new(server.to_string());
+) -> Result<Vec<IceServer>> {
+    let mut ice_servers = IceServer::default_stun_servers();
 
     if let Some(turn_url) = turn_server {
         match (turn_username, turn_credential) {
             (Some(username), Some(credential)) => {
-                config = config.with_turn_server(turn_url, username, credential);
+                ice_servers.push(IceServer::turn(turn_url, username, credential));
             }
             _ => {
                 return Err(CliError::InvalidConfig(
@@ -128,90 +101,150 @@ fn build_config(
         }
     }
 
-    Ok(config)
+    Ok(ice_servers)
 }
 
-async fn create_host(config: SessionConfig, name: &str) -> Result<()> {
-    let host = Participant::new_host(name.to_string())
-        .map_err(|e| CliError::ParticipantCreation(e.to_string()))?;
+async fn create_host(server: &str, name: &str, ice_servers: Vec<IceServer>) -> Result<()> {
+    let (mut runtime, session_id, lobby_id) = konnekt_session_cli::RuntimeBuilder::new()
+        .build_host(server, ice_servers)
+        .await?;
 
-    let lobby = Lobby::new("CLI Lobby".to_string(), host.clone())
-        .map_err(|e| CliError::InvalidConfig(e.to_string()))?;
+    tracing::info!("✅ Session created: {}", session_id);
+    tracing::info!("📋 Lobby ID: {}", lobby_id);
 
-    let lobby_id = lobby.id();
+    wait_for_peer_id(&mut runtime).await?;
+
+    // Create lobby in domain
+    let lobby = {
+        let cmd = DomainCommand::CreateLobby {
+            lobby_id: Some(lobby_id),
+            lobby_name: "TUI Lobby".to_string(),
+            host_name: name.to_string(),
+        };
+
+        runtime.domain_loop_mut().submit(cmd)?; // ✅ Now works with From<QueueError>
+        runtime.domain_loop_mut().poll();
+
+        match runtime.domain_loop_mut().drain_events().into_iter().next() {
+            Some(konnekt_session_core::DomainEvent::LobbyCreated { lobby }) => {
+                tracing::info!("✅ Lobby created: {}", lobby.name());
+                lobby
+            }
+            _ => {
+                return Err(CliError::InvalidConfig(
+                    "Failed to create lobby".to_string(),
+                ));
+            }
+        }
+    };
+
+    runtime.set_lobby(lobby_id, true);
+
+    // Initial broadcast (for any peers already connected)
+    runtime
+        .p2p_loop_mut()
+        .broadcast_event(konnekt_session_p2p::DomainEvent::LobbyCreated {
+            lobby_id,
+            host_id: lobby.host_id(),
+            name: lobby.name().to_string(),
+        })?;
+
+    tracing::info!("📤 Initial LobbyCreated broadcast");
+
+    let host = Participant::new_host(name.to_string())?; // ✅ Now works with From<ParticipantError>
     let mut state = SessionState::new(host);
-    state.set_lobby(lobby);
+    state.set_lobby(lobby.clone());
 
-    let mut session = P2PSession::create_host_with_config(config)
-        .await
-        .map_err(|e| CliError::P2PConnection(e.to_string()))?;
+    // Create snapshot for peer sync
+    let lobby_snapshot = konnekt_session_p2p::LobbySnapshot {
+        lobby_id,
+        name: lobby.name().to_string(),
+        host_id: lobby.host_id(),
+        participants: lobby.participants().values().cloned().collect(),
+        as_of_sequence: runtime.p2p_loop().current_sequence(),
+    };
 
-    // Initialize event sync as host
-    session.init_sync_as_host(lobby_id);
-
-    wait_for_peer_id(&mut session).await?;
-
-    run_tui(&mut session, state).await
+    run_tui(runtime, state, session_id, Some(lobby_snapshot)).await
 }
 
-async fn join_session(config: SessionConfig, session_id_str: &str, name: &str) -> Result<()> {
-    let guest = Participant::new_guest(name.to_string())
-        .map_err(|e| CliError::ParticipantCreation(e.to_string()))?;
+async fn join_session(
+    server: &str,
+    session_id_str: &str,
+    name: &str,
+    ice_servers: Vec<IceServer>,
+) -> Result<()> {
+    let session_id = SessionId::parse(session_id_str)?;
 
+    let (mut runtime, session_id, lobby_id) = konnekt_session_cli::RuntimeBuilder::new()
+        .build_guest(server, session_id, ice_servers)
+        .await?;
+
+    tracing::info!("✅ Joined session: {}", session_id);
+
+    wait_for_peer_id(&mut runtime).await?;
+
+    // Wait for lobby to sync
+    tracing::info!("⏳ Waiting for lobby sync...");
+    wait_for_lobby_sync(&mut runtime, lobby_id).await?;
+
+    let guest = Participant::new_guest(name.to_string())?;
     let state = SessionState::new(guest);
 
-    let session_id =
-        SessionId::parse(session_id_str).map_err(|e| CliError::InvalidSessionId(e.to_string()))?;
-
-    let mut session = P2PSession::join_with_config(config, session_id)
-        .await
-        .map_err(|e| CliError::P2PConnection(e.to_string()))?;
-
-    wait_for_peer_id(&mut session).await?;
-
-    // Initialize event sync as guest (lobby_id will be learned from host)
-    let placeholder_lobby_id = uuid::Uuid::new_v4();
-    session.init_sync_as_guest(placeholder_lobby_id);
-
-    run_tui(&mut session, state).await
+    run_tui(runtime, state, session_id, None).await
 }
 
-async fn wait_for_peer_id(session: &mut P2PSession) -> Result<()> {
-    let timeout = Duration::from_secs(5);
-    let start = std::time::Instant::now();
-
-    loop {
-        session.poll_events(); // Process events to get peer ID
-
-        if session.local_peer_id().is_some() {
-            return Ok(());
-        }
-
-        if start.elapsed() > timeout {
-            return Err(CliError::P2PConnection(
-                "Timeout waiting for peer ID".to_string(),
-            ));
-        }
-
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-}
-
-async fn run_tui(session: &mut P2PSession, state: SessionState) -> Result<()> {
+async fn run_tui(
+    mut runtime: konnekt_session_cli::DualLoopRuntime,
+    state: SessionState,
+    session_id: SessionId,
+    lobby_snapshot: Option<konnekt_session_p2p::LobbySnapshot>,
+) -> Result<()> {
     let mut terminal = tui::setup_terminal()?;
+    let session_id_str = session_id.to_string();
+    let mut app = App::new(state, session_id_str);
 
-    let session_id = session.session_id().to_string();
-    let local_peer_id = session.local_peer_id().map(|id| id.to_string());
+    let (runtime_tx, mut runtime_rx) = mpsc::channel(100);
 
-    let mut app = App::new(state, session_id);
+    // Spawn background runtime task
+    let runtime_handle = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(10));
 
-    if let Some(peer_id) = local_peer_id {
-        app.set_local_peer_id(peer_id);
-    }
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    runtime.tick();
 
-    let result = run_app_loop(&mut terminal, &mut app, session).await;
+                    // Handle peer connected - send full sync if host
+                    if let Some(ref snapshot) = lobby_snapshot {
+                        for event in runtime.drain_connection_events() {
+                            if let ConnectionEvent::PeerConnected(peer_id) = &event {
+                                tracing::info!("📤 Sending full sync to new peer {}", peer_id);
+
+                                if let Err(e) = runtime.p2p_loop_mut().send_full_sync_to_peer(*peer_id, snapshot.clone()) {
+                                    tracing::error!("❌ Failed to send full sync: {:?}", e);
+                                }
+                            }
+
+                            let _ = runtime_tx.send(event).await;
+                        }
+                    } else {
+                        // Guest - just forward events
+                        for event in runtime.drain_connection_events() {
+                            let _ = runtime_tx.send(event).await;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // Run TUI event loop
+    let result = run_app_loop(&mut terminal, &mut app, &mut runtime_rx).await;
 
     tui::restore_terminal(terminal)?;
+
+    // Cleanup
+    runtime_handle.abort();
 
     result
 }
@@ -219,94 +252,75 @@ async fn run_tui(session: &mut P2PSession, state: SessionState) -> Result<()> {
 async fn run_app_loop(
     terminal: &mut tui::TuiTerminal,
     app: &mut App,
-    session: &mut P2PSession,
+    runtime_rx: &mut mpsc::Receiver<ConnectionEvent>,
 ) -> Result<()> {
     loop {
         terminal.draw(|f| tui::ui::render(f, app))?;
 
-        match tui::event::read_events().await {
-            Ok(AppEvent::Key(key)) => {
-                app.handle_key(key);
-
-                if app.should_quit {
-                    break;
-                }
-
-                // Handle kick request
-                if let Some(guest_id) = app.kick_requested.take() {
-                    match kick_guest(session, &mut app.session_state, guest_id).await {
-                        Ok(_) => {
-                            app.add_event("✓ Guest kicked".to_string());
-                        }
-                        Err(e) => {
-                            app.add_event(format!("✗ Failed to kick: {}", e));
+        tokio::select! {
+            Ok(app_event) = tui::event::read_events() => {
+                match app_event {
+                    AppEvent::Key(key) => {
+                        app.handle_key(key);
+                        if app.should_quit {
+                            break;
                         }
                     }
-                }
-
-                // Handle spectator toggle request
-                if app.toggle_spectator_requested {
-                    app.toggle_spectator_requested = false;
-
-                    let activity_in_progress = false;
-
-                    match toggle_participation_mode(
-                        session,
-                        &mut app.session_state,
-                        activity_in_progress,
-                    )
-                    .await
-                    {
-                        Ok(_) => {
-                            app.add_event("✓ Toggled participation mode".to_string());
-                        }
-                        Err(e) => {
-                            app.add_event(format!("✗ Failed to toggle mode: {}", e));
-                        }
+                    AppEvent::Tick => {
+                        app.tick();
                     }
                 }
             }
-            Ok(AppEvent::Tick) => {
-                // Tick the app (for clipboard message timer)
-                app.tick();
 
-                // Poll P2P events
-                let events = session.poll_events();
-
-                for event in events {
-                    app.handle_connection_event(&event);
-
-                    match event {
-                        ConnectionEvent::PeerConnected(peer_id) => {
-                            handle_peer_connected(session, &mut app.session_state, peer_id).await?;
-                        }
-                        ConnectionEvent::PeerDisconnected(peer_id) => {
-                            handle_peer_disconnected(session, &mut app.session_state, peer_id)
-                                .await?;
-                        }
-                        ConnectionEvent::PeerTimedOut {
-                            peer_id,
-                            participant_id,
-                            was_host,
-                        } => {
-                            handle_peer_timed_out(
-                                session,
-                                &mut app.session_state,
-                                participant_id,
-                                was_host,
-                            )
-                            .await?;
-                        }
-                        ConnectionEvent::MessageReceived { from, data } => {
-                            handle_message_received(session, &mut app.session_state, from, data)
-                                .await?;
-                        }
-                    }
-                }
+            Some(event) = runtime_rx.recv() => {
+                app.handle_connection_event(&event);
             }
-            Err(_) => {}
         }
     }
 
     Ok(())
+}
+
+async fn wait_for_peer_id(runtime: &mut konnekt_session_cli::DualLoopRuntime) -> Result<()> {
+    let timeout = Duration::from_secs(5);
+    let start = std::time::Instant::now();
+
+    while start.elapsed() < timeout {
+        runtime.tick();
+
+        if runtime.p2p_loop().local_peer_id().is_some() {
+            return Ok(());
+        }
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    Err(CliError::P2PConnection(
+        "Timeout waiting for peer ID".to_string(),
+    ))
+}
+
+async fn wait_for_lobby_sync(
+    runtime: &mut konnekt_session_cli::DualLoopRuntime,
+    lobby_id: uuid::Uuid,
+) -> Result<()> {
+    let timeout = Duration::from_secs(10);
+    let start = std::time::Instant::now();
+
+    while start.elapsed() < timeout {
+        runtime.tick();
+
+        // Check if we received lobby via P2P sync
+        if let Some(lobby) = runtime.domain_loop().event_loop().get_lobby(&lobby_id) {
+            tracing::info!("✅ Lobby '{}' synced!", lobby.name());
+            return Ok(());
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    Err(CliError::P2PConnection(format!(
+        "Timeout waiting for lobby {} to sync",
+        lobby_id
+    )))
 }
