@@ -71,6 +71,11 @@ impl DomainLoop {
         &self.event_loop
     }
 
+    /// Get mutable reference to event loop (for P2P sync)
+    pub fn event_loop_mut(&mut self) -> &mut DomainEventLoop {
+        &mut self.event_loop
+    }
+
     /// Get pending command count
     pub fn pending_commands(&self) -> usize {
         self.inbound.len()
@@ -101,6 +106,7 @@ mod tests {
             .submit(DomainCommand::CreateLobby {
                 lobby_name: "Test Lobby".to_string(),
                 host_name: "Alice".to_string(),
+                lobby_id: None, // 🆕 Let the system generate an ID
             })
             .unwrap();
 
@@ -135,6 +141,7 @@ mod tests {
                 .submit(DomainCommand::CreateLobby {
                     lobby_name: format!("Lobby{}", i),
                     host_name: "Host".to_string(),
+                    lobby_id: None, // 🆕 Let the system generate an ID
                 })
                 .unwrap();
         }
@@ -163,6 +170,7 @@ mod tests {
             .submit(DomainCommand::CreateLobby {
                 lobby_name: "Test".to_string(),
                 host_name: "Alice".to_string(),
+                lobby_id: None, // 🆕 Let the system generate an ID
             })
             .unwrap();
         loop_.poll();
@@ -199,6 +207,7 @@ mod tests {
             .submit(DomainCommand::CreateLobby {
                 lobby_name: "L1".to_string(),
                 host_name: "A".to_string(),
+                lobby_id: None, // 🆕 Let the system generate an ID
             })
             .unwrap();
 
@@ -206,6 +215,7 @@ mod tests {
             .submit(DomainCommand::CreateLobby {
                 lobby_name: "L2".to_string(),
                 host_name: "B".to_string(),
+                lobby_id: None, // 🆕 Let the system generate an ID
             })
             .unwrap();
 
@@ -213,6 +223,7 @@ mod tests {
         let result = loop_.submit(DomainCommand::CreateLobby {
             lobby_name: "L3".to_string(),
             host_name: "C".to_string(),
+            lobby_id: None, // 🆕 Let the system generate an ID
         });
 
         assert!(result.is_err());
@@ -236,6 +247,7 @@ mod tests {
             .submit(DomainCommand::CreateLobby {
                 lobby_name: "Lobby 1".to_string(),
                 host_name: "Alice".to_string(),
+                lobby_id: None, // 🆕 Let the system generate an ID
             })
             .unwrap();
 
@@ -243,6 +255,7 @@ mod tests {
             .submit(DomainCommand::CreateLobby {
                 lobby_name: "Lobby 2".to_string(),
                 host_name: "Bob".to_string(),
+                lobby_id: None, // 🆕 Let the system generate an ID
             })
             .unwrap();
 
@@ -268,6 +281,7 @@ mod tests {
             .submit(DomainCommand::CreateLobby {
                 lobby_name: "Test".to_string(),
                 host_name: "Alice".to_string(),
+                lobby_id: None, // 🆕 Let the system generate an ID
             })
             .unwrap();
 

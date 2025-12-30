@@ -3,8 +3,9 @@ use uuid::Uuid;
 /// Commands that can be executed on the lobby domain
 #[derive(Debug, Clone, PartialEq)]
 pub enum DomainCommand {
-    /// Create a new lobby
+    /// Create a new lobby with specific ID
     CreateLobby {
+        lobby_id: Option<Uuid>, // 🆕 Optional lobby ID
         lobby_name: String,
         host_name: String,
     },
@@ -50,6 +51,7 @@ mod tests {
         let cmd = DomainCommand::CreateLobby {
             lobby_name: "Test".to_string(),
             host_name: "Alice".to_string(),
+            lobby_id: None, // 🆕 Let the system generate an ID
         };
 
         let cloned = cmd.clone();

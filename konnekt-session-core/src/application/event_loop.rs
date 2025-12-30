@@ -22,9 +22,10 @@ impl DomainEventLoop {
     pub fn handle_command(&mut self, command: DomainCommand) -> DomainEvent {
         match command {
             DomainCommand::CreateLobby {
+                lobby_id,
                 lobby_name,
                 host_name,
-            } => self.handle_create_lobby(lobby_name, host_name),
+            } => self.handle_create_lobby(lobby_id, lobby_name, host_name),
 
             DomainCommand::JoinLobby {
                 lobby_id,
@@ -62,19 +63,32 @@ impl DomainEventLoop {
         }
     }
 
-    fn handle_create_lobby(&mut self, lobby_name: String, host_name: String) -> DomainEvent {
+    fn handle_create_lobby(
+        &mut self,
+        lobby_id: Option<Uuid>, // 🆕 Accept optional ID
+        lobby_name: String,
+        host_name: String,
+    ) -> DomainEvent {
         match Participant::new_host(host_name) {
-            Ok(host) => match Lobby::new(lobby_name, host) {
-                Ok(lobby) => {
-                    let lobby_id = lobby.id();
-                    self.lobbies.insert(lobby_id, lobby.clone());
-                    DomainEvent::LobbyCreated { lobby }
+            Ok(host) => {
+                let result = if let Some(id) = lobby_id {
+                    Lobby::with_id(id, lobby_name, host) // 🆕 Use specific ID
+                } else {
+                    Lobby::new(lobby_name, host) // Generate random ID
+                };
+
+                match result {
+                    Ok(lobby) => {
+                        let lobby_id = lobby.id();
+                        self.lobbies.insert(lobby_id, lobby.clone());
+                        DomainEvent::LobbyCreated { lobby }
+                    }
+                    Err(e) => DomainEvent::CommandFailed {
+                        command: "CreateLobby".to_string(),
+                        reason: e.to_string(),
+                    },
                 }
-                Err(e) => DomainEvent::CommandFailed {
-                    command: "CreateLobby".to_string(),
-                    reason: e.to_string(),
-                },
-            },
+            }
             Err(e) => DomainEvent::CommandFailed {
                 command: "CreateLobby".to_string(),
                 reason: e.to_string(),
@@ -219,6 +233,11 @@ impl DomainEventLoop {
         }
     }
 
+    /// Add a lobby directly (for P2P sync)
+    pub fn add_lobby(&mut self, lobby: Lobby) {
+        self.lobbies.insert(lobby.id(), lobby);
+    }
+
     /// Get a lobby by ID (for testing/inspection)
     pub fn get_lobby(&self, lobby_id: &Uuid) -> Option<&Lobby> {
         self.lobbies.get(lobby_id)
@@ -248,6 +267,7 @@ mod tests {
         let cmd = DomainCommand::CreateLobby {
             lobby_name: "Test Lobby".to_string(),
             host_name: "Alice".to_string(),
+            lobby_id: None, // 🆕 Let the system generate an ID
         };
 
         let event = event_loop.handle_command(cmd);
@@ -270,6 +290,8 @@ mod tests {
         let create_cmd = DomainCommand::CreateLobby {
             lobby_name: "Test Lobby".to_string(),
             host_name: "Alice".to_string(),
+
+            lobby_id: None, // 🆕 Let the system generate an ID
         };
         let lobby_id = match event_loop.handle_command(create_cmd) {
             DomainEvent::LobbyCreated { lobby } => lobby.id(),
@@ -327,6 +349,7 @@ mod tests {
         let create_cmd = DomainCommand::CreateLobby {
             lobby_name: "Test".to_string(),
             host_name: "Alice".to_string(),
+            lobby_id: None, // 🆕 Let the system generate an ID
         };
         let lobby_id = match event_loop.handle_command(create_cmd) {
             DomainEvent::LobbyCreated { lobby } => lobby.id(),
@@ -372,6 +395,7 @@ mod tests {
         let create_cmd = DomainCommand::CreateLobby {
             lobby_name: "Test".to_string(),
             host_name: "Alice".to_string(),
+            lobby_id: None, // 🆕 Let the system generate an ID
         };
         let (lobby_id, host_id) = match event_loop.handle_command(create_cmd) {
             DomainEvent::LobbyCreated { lobby } => (lobby.id(), lobby.host_id()),
@@ -421,6 +445,7 @@ mod tests {
         let create_cmd = DomainCommand::CreateLobby {
             lobby_name: "Test".to_string(),
             host_name: "Alice".to_string(),
+            lobby_id: None, // 🆕 Let the system generate an ID
         };
         let lobby_id = match event_loop.handle_command(create_cmd) {
             DomainEvent::LobbyCreated { lobby } => lobby.id(),
@@ -474,6 +499,7 @@ mod tests {
         let create_cmd = DomainCommand::CreateLobby {
             lobby_name: "Test".to_string(),
             host_name: "Alice".to_string(),
+            lobby_id: None, // 🆕 Let the system generate an ID
         };
         let lobby_id = match event_loop.handle_command(create_cmd) {
             DomainEvent::LobbyCreated { lobby } => lobby.id(),
@@ -515,6 +541,7 @@ mod tests {
         let create_cmd = DomainCommand::CreateLobby {
             lobby_name: "Test".to_string(),
             host_name: "Alice".to_string(),
+            lobby_id: None, // 🆕 Let the system generate an ID
         };
         let (lobby_id, host_id) = match event_loop.handle_command(create_cmd) {
             DomainEvent::LobbyCreated { lobby } => (lobby.id(), lobby.host_id()),
@@ -566,12 +593,14 @@ mod tests {
         let cmd1 = DomainCommand::CreateLobby {
             lobby_name: "Lobby 1".to_string(),
             host_name: "Alice".to_string(),
+            lobby_id: None, // 🆕 Let the system generate an ID
         };
         event_loop.handle_command(cmd1);
 
         let cmd2 = DomainCommand::CreateLobby {
             lobby_name: "Lobby 2".to_string(),
             host_name: "Bob".to_string(),
+            lobby_id: None, // 🆕 Let the system generate an ID
         };
         event_loop.handle_command(cmd2);
 

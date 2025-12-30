@@ -49,23 +49,9 @@ pub enum LobbyError {
 }
 
 impl Lobby {
-    /// Create a new lobby with a host
+    // Keep existing new() for backward compatibility
     pub fn new(name: String, host: Participant) -> Result<Self, LobbyError> {
-        if !host.is_host() {
-            return Err(LobbyError::NoHost);
-        }
-
-        let id = Uuid::new_v4();
-        let host_id = host.id();
-        let mut participants = HashMap::new();
-        participants.insert(host_id, host);
-
-        Ok(Lobby {
-            id,
-            name,
-            participants,
-            host_id,
-        })
+        Self::with_id(Uuid::new_v4(), name, host)
     }
 
     /// Get lobby ID
@@ -333,6 +319,24 @@ impl Lobby {
         }
 
         Ok(kicked_participant)
+    }
+
+    /// Create a new lobby with a specific ID
+    pub fn with_id(id: Uuid, name: String, host: Participant) -> Result<Self, LobbyError> {
+        if !host.is_host() {
+            return Err(LobbyError::NoHost);
+        }
+
+        let host_id = host.id();
+        let mut participants = HashMap::new();
+        participants.insert(host_id, host);
+
+        Ok(Lobby {
+            id, // 🆕 Use provided ID
+            name,
+            participants,
+            host_id,
+        })
     }
 }
 

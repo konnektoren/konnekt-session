@@ -63,7 +63,6 @@ impl Default for CommandQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
 
     #[test]
     fn test_push_pop() {
@@ -72,6 +71,7 @@ mod tests {
         let cmd = DomainCommand::CreateLobby {
             lobby_name: "Test".to_string(),
             host_name: "Alice".to_string(),
+            lobby_id: None, // 🆕 Let the system generate an ID
         };
 
         queue.push(cmd.clone()).unwrap();
@@ -90,6 +90,7 @@ mod tests {
             .push(DomainCommand::CreateLobby {
                 lobby_name: "L1".to_string(),
                 host_name: "A".to_string(),
+                lobby_id: None, // 🆕 Let the system generate an ID
             })
             .unwrap();
 
@@ -97,6 +98,7 @@ mod tests {
             .push(DomainCommand::CreateLobby {
                 lobby_name: "L2".to_string(),
                 host_name: "B".to_string(),
+                lobby_id: None, // 🆕 Let the system generate an ID
             })
             .unwrap();
 
@@ -104,6 +106,7 @@ mod tests {
         let result = queue.push(DomainCommand::CreateLobby {
             lobby_name: "L3".to_string(),
             host_name: "C".to_string(),
+            lobby_id: None, // 🆕 Let the system generate an ID
         });
 
         assert!(matches!(result, Err(QueueError::Full { max: 2 })));
@@ -118,6 +121,7 @@ mod tests {
                 .push(DomainCommand::CreateLobby {
                     lobby_name: format!("L{}", i),
                     host_name: "Host".to_string(),
+                    lobby_id: None, // 🆕 Let the system generate an ID
                 })
                 .unwrap();
         }
@@ -136,6 +140,7 @@ mod tests {
                 .push(DomainCommand::CreateLobby {
                     lobby_name: format!("L{}", i),
                     host_name: "Host".to_string(),
+                    lobby_id: None, // 🆕 Let the system generate an ID
                 })
                 .unwrap();
         }
