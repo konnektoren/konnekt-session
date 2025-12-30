@@ -1,0 +1,13 @@
+[build]
+# Point to the parent crate
+target = "index.html"
+
+dist = "dist"
+
+[watch]
+# Watch the parent src directory
+watch = ["src"]
+
+[serve]
+# Serve configuration
+port = 8080

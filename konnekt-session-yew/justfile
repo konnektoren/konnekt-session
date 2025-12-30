@@ -1,0 +1,21 @@
+# Run basic lobby example
+example-basic:
+    trunk serve --config Trunk.toml --open
+
+# Build for release
+build-release:
+    trunk build --config Trunk.toml --release
+
+# Run tests
+test:
+    wasm-pack test --headless --firefox
+
+# Clean build artifacts
+clean:
+    trunk clean
+    rm -rf dist/
+
+# Install dependencies
+install:
+    cargo install trunk
+    rustup target add wasm32-unknown-unknown

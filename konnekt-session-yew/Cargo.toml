@@ -1,0 +1,66 @@
+[package]
+name = "konnekt-session-yew"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "basic-lobby"
+path = "examples/basic-lobby.rs"
+required-features = ["basic-lobby"]
+
+[dependencies]
+# Core domain
+konnekt-session-core = { path = "../konnekt-session-core" }
+konnekt-session-p2p = { path = "../konnekt-session-p2p" }
+
+# Yew framework
+yew = { version = "0.22", features = ["csr"] }
+yew-router = { version = "0.18", optional = true }
+
+# Web APIs
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Navigator",
+    "Clipboard",
+    "Document",
+    "Element",
+    "HtmlElement",
+] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+gloo = "0.11"
+gloo-timers = { version = "0.3", features = ["futures"] }
+
+# Async
+futures = "0.3"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-wasm = "0.2"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[features]
+default = []
+router = ["yew-router"]
+basic-lobby = []
