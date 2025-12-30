@@ -35,7 +35,7 @@ uuid = { workspace = true }
 thiserror = { workspace = true }
 
 # Async runtime
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync"] }
 
 # Logging
 tracing = { workspace = true }

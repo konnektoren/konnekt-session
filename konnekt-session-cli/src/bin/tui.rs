@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use konnekt_session_cli::infrastructure::LogConfig; // 🆕 Add this
+use konnekt_session_cli::infrastructure::LogConfig;
 use konnekt_session_cli::presentation::tui::{self, App, AppEvent, UserAction};
 use konnekt_session_cli::{CliError, Result};
 use konnekt_session_core::DomainCommand;
@@ -7,11 +7,8 @@ use konnekt_session_core::domain::{ActivityMetadata, ActivityResult};
 use konnekt_session_p2p::{IceServer, P2PLoopBuilder, SessionId, SessionLoop};
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::{info, instrument};
 use uuid::Uuid;
-
-// 🆕 Import tracing for instrumentation
-use tracing::instrument;
 
 #[derive(Parser)]
 #[command(name = "konnekt-tui")]
@@ -56,26 +53,19 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging FIRST
+    // Initialize logging (TUI mode - silent)
     #[cfg(feature = "console")]
     let log_config = if std::env::var("TOKIO_CONSOLE").is_ok() {
         eprintln!("🔍 Initializing tokio-console...");
-        LogConfig::dev().with_console()
+        LogConfig::tui().with_console()
     } else {
-        LogConfig::dev()
+        LogConfig::tui()
     };
 
     #[cfg(not(feature = "console"))]
-    let log_config = LogConfig::dev();
+    let log_config = LogConfig::tui();
 
     log_config.init().map_err(|e| CliError::InvalidInput(e))?;
-
-    #[cfg(feature = "console")]
-    if std::env::var("TOKIO_CONSOLE").is_ok() {
-        eprintln!("✅ Tokio console initialized");
-        eprintln!("📡 Listening on http://127.0.0.1:6669");
-        eprintln!("🔗 Connect with: tokio-console");
-    }
 
     let cli = Cli::parse();
 
@@ -130,9 +120,6 @@ fn build_ice_servers(
 }
 
 async fn create_host(server: &str, name: &str, ice_servers: Vec<IceServer>) -> Result<()> {
-    tracing::info!("🎯 Creating host session...");
-
-    // Build SessionLoop as host
     let (session_loop, session_id) = P2PLoopBuilder::new()
         .build_session_host(
             server,
@@ -141,8 +128,6 @@ async fn create_host(server: &str, name: &str, ice_servers: Vec<IceServer>) -> R
             name.to_string(),
         )
         .await?;
-
-    tracing::info!("✅ Session created: {}", session_id);
 
     run_tui(session_loop, session_id).await
 }
@@ -153,26 +138,20 @@ async fn join_session(
     name: &str,
     ice_servers: Vec<IceServer>,
 ) -> Result<()> {
-    tracing::info!("🎯 Joining session...");
-
     let session_id = SessionId::parse(session_id_str)?;
 
     let (mut session_loop, lobby_id) = P2PLoopBuilder::new()
         .build_session_guest(server, session_id.clone(), ice_servers)
         .await?;
 
-    tracing::info!("✅ Joined session: {}", session_id);
-
     // Wait for lobby to sync from host
     wait_for_lobby_sync(&mut session_loop).await?;
 
-    // Submit join command (business logic in SessionLoop)
+    // Submit join command
     session_loop.submit_command(DomainCommand::JoinLobby {
         lobby_id,
         guest_name: name.to_string(),
     })?;
-
-    tracing::info!("📤 Sent join request");
 
     run_tui(session_loop, session_id).await
 }
@@ -189,8 +168,6 @@ enum UserCommand {
     LeaveSession {
         participant_id: Uuid,
     },
-
-    // 🆕 Activity commands
     PlanActivity {
         metadata: ActivityMetadata,
     },
@@ -205,99 +182,6 @@ enum UserCommand {
         participant_id: Uuid,
         response: String,
     },
-}
-
-/// Handle user commands (business logic)
-fn handle_user_command(
-    session_loop: &mut SessionLoop,
-    lobby_id: Uuid,
-    command: UserCommand,
-) -> Result<()> {
-    match command {
-        UserCommand::ToggleParticipationMode { participant_id } => {
-            session_loop.submit_command(DomainCommand::ToggleParticipationMode {
-                lobby_id,
-                participant_id,
-                requester_id: participant_id,
-                activity_in_progress: false,
-            })?;
-            tracing::info!("Submitted toggle participation mode command");
-        }
-        UserCommand::KickGuest { guest_id } => {
-            let host_id = session_loop
-                .get_lobby()
-                .map(|l| l.host_id())
-                .ok_or_else(|| CliError::InvalidConfig("No lobby".to_string()))?;
-
-            session_loop.submit_command(DomainCommand::KickGuest {
-                lobby_id,
-                host_id,
-                guest_id,
-            })?;
-            tracing::info!("Submitted kick guest command");
-        }
-        UserCommand::LeaveSession { participant_id } => {
-            session_loop.submit_command(DomainCommand::LeaveLobby {
-                lobby_id,
-                participant_id,
-            })?;
-            tracing::info!("Submitted leave session command");
-        }
-
-        // 🆕 Activity command handlers
-        UserCommand::PlanActivity { metadata } => {
-            session_loop.submit_command(DomainCommand::PlanActivity { lobby_id, metadata })?;
-            tracing::info!("Submitted plan activity command");
-        }
-        UserCommand::StartActivity { activity_id } => {
-            session_loop.submit_command(DomainCommand::StartActivity {
-                lobby_id,
-                activity_id,
-            })?;
-            tracing::info!("Submitted start activity command");
-        }
-        UserCommand::CancelActivity { activity_id } => {
-            session_loop.submit_command(DomainCommand::CancelActivity {
-                lobby_id,
-                activity_id,
-            })?;
-            tracing::info!("Submitted cancel activity command");
-        }
-        UserCommand::SubmitActivityResult {
-            activity_id,
-            participant_id,
-            response,
-        } => {
-            // Parse current activity to calculate score
-            if let Some(lobby) = session_loop.get_lobby() {
-                if let Some(activity) = lobby.get_activity(activity_id) {
-                    if let Ok(challenge) =
-                        konnekt_session_core::EchoChallenge::from_config(activity.config.clone())
-                    {
-                        let score = challenge.calculate_score(&response);
-                        let echo_result =
-                            konnekt_session_core::EchoResult::new(response.clone(), 1000);
-
-                        let result = ActivityResult::new(activity_id, participant_id)
-                            .with_data(echo_result.to_json())
-                            .with_score(score)
-                            .with_time(1000);
-
-                        session_loop
-                            .submit_command(DomainCommand::SubmitResult { lobby_id, result })?;
-                        // ☝️ This goes to SessionLoop
-
-                        tracing::info!(
-                            "Submitted activity result: '{}' (score: {})",
-                            response,
-                            score
-                        );
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Updates sent from SessionLoop to TUI
@@ -318,29 +202,21 @@ async fn run_tui(mut session_loop: SessionLoop, session_id: SessionId) -> Result
     let mut terminal = tui::setup_terminal()?;
     let mut app = App::new(session_id.to_string());
 
-    let (ui_tx, mut ui_rx) = mpsc::channel(100);
-    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UserCommand>(100);
+    let (ui_tx, mut ui_rx) = mpsc::channel(10);
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UserCommand>(10);
 
     let lobby_id = session_loop.lobby_id();
 
-    // 🔧 FIX: Spawn SessionLoop only (TUI stays in main task)
-    let session_span = tracing::info_span!("session_loop::poll");
+    // Spawn SessionLoop task
+    let session_span = tracing::info_span!("session_loop");
     let session_handle = tokio::spawn(async move {
         let _enter = session_span.enter();
-        info!("SessionLoop task started");
 
-        let mut interval = tokio::time::interval(Duration::from_millis(100));
+        let mut interval = tokio::time::interval(Duration::from_millis(10));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-        let mut tick_count = 0u64;
 
         loop {
             interval.tick().await;
-            tick_count += 1;
-
-            if tick_count % 10 == 0 {
-                tracing::debug!("SessionLoop tick {}", tick_count);
-            }
 
             // 1. Process user commands from TUI
             while let Ok(user_cmd) = cmd_rx.try_recv() {
@@ -349,33 +225,25 @@ async fn run_tui(mut session_loop: SessionLoop, session_id: SessionId) -> Result
                 }
             }
 
-            // 2. Poll SessionLoop (business logic)
-            let processed = session_loop.poll();
+            // 2. Poll SessionLoop (P2P + Domain)
+            session_loop.poll();
 
-            if processed > 0 {
-                tracing::debug!("SessionLoop processed {} events", processed);
-            }
-
-            // 3. Send UI updates (read-only snapshots)
+            // 3. Send UI updates (non-blocking)
             if let Some(lobby) = session_loop.get_lobby() {
-                let _ = ui_tx.send(UiUpdate::Lobby(lobby.clone())).await;
+                let _ = ui_tx.try_send(UiUpdate::Lobby(lobby.clone()));
             }
 
             if let Some(peer_id) = session_loop.local_peer_id() {
-                let peer_count = session_loop.connected_peers().len();
-                let is_host = session_loop.is_host();
-                let _ = ui_tx
-                    .send(UiUpdate::PeerInfo {
-                        peer_id: peer_id.to_string(),
-                        peer_count,
-                        is_host,
-                    })
-                    .await;
+                let _ = ui_tx.try_send(UiUpdate::PeerInfo {
+                    peer_id: peer_id.to_string(),
+                    peer_count: session_loop.connected_peers().len(),
+                    is_host: session_loop.is_host(),
+                });
             }
         }
     });
 
-    // 🔧 FIX: Run TUI in current task (not spawned)
+    // Run TUI in main task
     let result = run_app_loop(&mut terminal, &mut app, &mut ui_rx, cmd_tx).await;
 
     // Cleanup
@@ -396,7 +264,7 @@ async fn run_app_loop(
         terminal.draw(|f| tui::ui::render(f, app))?;
 
         tokio::select! {
-            // Handle crossterm events
+            // Handle keyboard input
             app_event = tui::event::read_events() => {
                 match app_event? {
                     AppEvent::Key(key) => {
@@ -430,7 +298,84 @@ async fn run_app_loop(
     Ok(())
 }
 
-/// Handle user actions (presentation-only side effects + send commands)
+/// Handle user commands (business logic)
+fn handle_user_command(
+    session_loop: &mut SessionLoop,
+    lobby_id: Uuid,
+    command: UserCommand,
+) -> Result<()> {
+    match command {
+        UserCommand::ToggleParticipationMode { participant_id } => {
+            session_loop.submit_command(DomainCommand::ToggleParticipationMode {
+                lobby_id,
+                participant_id,
+                requester_id: participant_id,
+                activity_in_progress: false,
+            })?;
+        }
+        UserCommand::KickGuest { guest_id } => {
+            let host_id = session_loop
+                .get_lobby()
+                .map(|l| l.host_id())
+                .ok_or_else(|| CliError::InvalidConfig("No lobby".to_string()))?;
+
+            session_loop.submit_command(DomainCommand::KickGuest {
+                lobby_id,
+                host_id,
+                guest_id,
+            })?;
+        }
+        UserCommand::LeaveSession { participant_id } => {
+            session_loop.submit_command(DomainCommand::LeaveLobby {
+                lobby_id,
+                participant_id,
+            })?;
+        }
+        UserCommand::PlanActivity { metadata } => {
+            session_loop.submit_command(DomainCommand::PlanActivity { lobby_id, metadata })?;
+        }
+        UserCommand::StartActivity { activity_id } => {
+            session_loop.submit_command(DomainCommand::StartActivity {
+                lobby_id,
+                activity_id,
+            })?;
+        }
+        UserCommand::CancelActivity { activity_id } => {
+            session_loop.submit_command(DomainCommand::CancelActivity {
+                lobby_id,
+                activity_id,
+            })?;
+        }
+        UserCommand::SubmitActivityResult {
+            activity_id,
+            participant_id,
+            response,
+        } => {
+            if let Some(lobby) = session_loop.get_lobby() {
+                if let Some(activity) = lobby.get_activity(activity_id) {
+                    if let Ok(challenge) =
+                        konnekt_session_core::EchoChallenge::from_config(activity.config.clone())
+                    {
+                        let score = challenge.calculate_score(&response);
+                        let echo_result =
+                            konnekt_session_core::EchoResult::new(response.clone(), 1000);
+
+                        let result = ActivityResult::new(activity_id, participant_id)
+                            .with_data(echo_result.to_json())
+                            .with_score(score)
+                            .with_time(1000);
+
+                        session_loop
+                            .submit_command(DomainCommand::SubmitResult { lobby_id, result })?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Handle user actions (presentation layer)
 async fn handle_user_action(
     app: &mut App,
     action: UserAction,
@@ -451,8 +396,6 @@ async fn handle_user_action(
                     .map_err(|e| {
                         CliError::InvalidConfig(format!("Failed to send command: {}", e))
                     })?;
-            } else {
-                tracing::warn!("Cannot toggle mode: participant ID not known yet");
             }
         }
         UserAction::KickParticipant(guest_id) => {
@@ -461,8 +404,6 @@ async fn handle_user_action(
                 .await
                 .map_err(|e| CliError::InvalidConfig(format!("Failed to send command: {}", e)))?;
         }
-
-        // 🆕 Activity actions
         UserAction::PlanActivity(metadata) => {
             cmd_tx
                 .send(UserCommand::PlanActivity { metadata })
@@ -498,9 +439,7 @@ async fn handle_user_action(
                     })?;
             }
         }
-
         UserAction::Quit => {
-            // Send leave command if we're a guest
             if !app.is_host {
                 if let Some(participant_id) = app.get_local_participant_id() {
                     let _ = cmd_tx
@@ -517,17 +456,14 @@ async fn wait_for_lobby_sync(session_loop: &mut SessionLoop) -> Result<()> {
     let timeout = Duration::from_secs(10);
     let start = std::time::Instant::now();
 
-    tracing::info!("⏳ Waiting for lobby sync from host...");
-
     while start.elapsed() < timeout {
         session_loop.poll();
 
         if session_loop.get_lobby().is_some() {
-            tracing::info!("✅ Lobby synced!");
             return Ok(());
         }
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
     Err(CliError::P2PConnection(

@@ -1,4 +1,4 @@
-use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Logging configuration
 #[derive(Debug, Clone)]
@@ -6,10 +6,11 @@ pub struct LogConfig {
     pub default_level: tracing::Level,
     pub json_format: bool,
     pub file_output: Option<String>,
-    pub chrome_trace: Option<String>,
+    pub chrome_trace: bool,
     pub show_spans: bool,
     pub show_thread_ids: bool,
     pub show_targets: bool,
+    pub show_logs: bool, // 🆕 NEW: Whether to show logs to stdout/stderr
 
     #[cfg(feature = "console")]
     pub enable_console: bool,
@@ -21,10 +22,11 @@ impl Default for LogConfig {
             default_level: tracing::Level::INFO,
             json_format: false,
             file_output: None,
-            chrome_trace: None,
+            chrome_trace: false,
             show_spans: false,
             show_thread_ids: false,
             show_targets: true,
+            show_logs: true, // 🆕 Default: show logs
             #[cfg(feature = "console")]
             enable_console: false,
         }
@@ -46,16 +48,25 @@ impl LogConfig {
     pub fn dev_with_trace() -> Self {
         Self {
             default_level: tracing::Level::DEBUG,
-            chrome_trace: Some("trace.json".to_string()),
+            chrome_trace: true,
             show_spans: true,
             show_thread_ids: true,
             ..Default::default()
         }
     }
 
+    /// TUI mode (logs to file, not stdout)
+    pub fn tui() -> Self {
+        Self {
+            default_level: tracing::Level::INFO,
+            show_logs: false, // 🆕 Hide logs in TUI mode
+            ..Default::default()
+        }
+    }
+
     /// Enable Chrome tracing
-    pub fn with_chrome_trace(mut self, path: &str) -> Self {
-        self.chrome_trace = Some(path.to_string());
+    pub fn with_chrome_trace(mut self) -> Self {
+        self.chrome_trace = true;
         self
     }
 
@@ -63,6 +74,18 @@ impl LogConfig {
     #[cfg(feature = "console")]
     pub fn with_console(mut self) -> Self {
         self.enable_console = true;
+        self
+    }
+
+    /// Hide logs (for TUI)
+    pub fn without_logs(mut self) -> Self {
+        self.show_logs = false;
+        self
+    }
+
+    /// Log to file
+    pub fn with_file_output(mut self, path: String) -> Self {
+        self.file_output = Some(path);
         self
     }
 
@@ -79,38 +102,40 @@ impl LogConfig {
             .add_directive("konnekt_session_p2p=debug".parse().unwrap())
         });
 
-        // 🔧 FIX: Chrome tracing (highest priority)
+        // 🔧 Chrome tracing (highest priority)
         #[cfg(all(feature = "chrome-trace", not(target_arch = "wasm32")))]
-        if let Some(chrome_path) = self.chrome_trace {
-            use std::fs::File;
+        if self.chrome_trace {
             use tracing_chrome::ChromeLayerBuilder;
 
-            // Create the file first
-            let file = File::create(&chrome_path)
-                .map_err(|e| format!("Failed to create trace file: {}", e))?;
+            let (chrome_layer, _guard) = ChromeLayerBuilder::new().build();
 
-            // Build chrome layer - use writer, not file path
-            let (chrome_layer, guard) = ChromeLayerBuilder::new()
-                .writer(file) // 🔧 FIX: Use .writer() instead of .file()
-                .include_args(true)
-                .build();
+            if self.show_logs {
+                eprintln!("📊 Chrome trace enabled");
+                eprintln!("   Trace file: trace-<timestamp>.json");
+                eprintln!("   View at: https://ui.perfetto.dev/");
+                eprintln!("");
+            }
 
-            // Also add fmt layer for terminal output
-            let fmt_layer = fmt::layer().with_target(true).compact();
+            // Also add fmt layer for terminal output (if enabled)
+            if self.show_logs {
+                let fmt_layer = fmt::layer().with_target(true).compact();
 
-            tracing_subscriber::registry()
-                .with(env_filter)
-                .with(chrome_layer)
-                .with(fmt_layer)
-                .try_init()
-                .map_err(|e| format!("Failed to initialize tracing: {}", e))?;
-
-            eprintln!("📊 Chrome trace enabled: {}", chrome_path);
-            eprintln!("   View at: https://ui.perfetto.dev/");
-            eprintln!("");
+                tracing_subscriber::registry()
+                    .with(env_filter)
+                    .with(chrome_layer)
+                    .with(fmt_layer)
+                    .try_init()
+                    .map_err(|e| format!("Failed to initialize tracing: {}", e))?;
+            } else {
+                tracing_subscriber::registry()
+                    .with(env_filter)
+                    .with(chrome_layer)
+                    .try_init()
+                    .map_err(|e| format!("Failed to initialize tracing: {}", e))?;
+            }
 
             // Keep guard alive for the lifetime of the program
-            std::mem::forget(guard);
+            std::mem::forget(_guard);
 
             return Ok(());
         }
@@ -120,13 +145,14 @@ impl LogConfig {
         if self.enable_console {
             use console_subscriber::ConsoleLayer;
 
-            eprintln!("🔍 Tokio Console enabled - connect with `tokio-console`");
+            if self.show_logs {
+                eprintln!("🔍 Tokio Console enabled - connect with `tokio-console`");
+                eprintln!("📡 Console server started on 127.0.0.1:6669");
+            }
 
             let console_layer = ConsoleLayer::builder()
                 .server_addr(([127, 0, 0, 1], 6669))
                 .spawn();
-
-            eprintln!("📡 Console server started on 127.0.0.1:6669");
 
             tracing_subscriber::registry()
                 .with(env_filter)
@@ -134,21 +160,31 @@ impl LogConfig {
                 .try_init()
                 .map_err(|e| format!("Failed to initialize tracing: {}", e))?;
 
-            eprintln!("✅ Tracing subscriber initialized with console");
+            if self.show_logs {
+                eprintln!("✅ Tracing subscriber initialized with console");
+            }
 
             return Ok(());
         }
 
-        // Default: fmt layer
-        let fmt_layer = fmt::layer()
-            .with_target(self.show_targets)
-            .with_thread_ids(self.show_thread_ids);
+        // Default: fmt layer (only if show_logs is true)
+        if self.show_logs {
+            let fmt_layer = fmt::layer()
+                .with_target(self.show_targets)
+                .with_thread_ids(self.show_thread_ids);
 
-        tracing_subscriber::registry()
-            .with(env_filter)
-            .with(fmt_layer)
-            .try_init()
-            .map_err(|e| format!("Failed to initialize tracing: {}", e))
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(fmt_layer)
+                .try_init()
+                .map_err(|e| format!("Failed to initialize tracing: {}", e))
+        } else {
+            // Silent mode: no fmt layer, just filter
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .try_init()
+                .map_err(|e| format!("Failed to initialize tracing: {}", e))
+        }
     }
 }
 
@@ -162,7 +198,8 @@ mod tests {
         assert_eq!(config.default_level, tracing::Level::INFO);
         assert!(!config.json_format);
         assert!(config.file_output.is_none());
-        assert!(config.chrome_trace.is_none());
+        assert!(!config.chrome_trace);
+        assert!(config.show_logs); // 🆕 Default: show logs
     }
 
     #[test]
@@ -171,18 +208,38 @@ mod tests {
         assert_eq!(config.default_level, tracing::Level::DEBUG);
         assert!(config.show_spans);
         assert!(config.show_thread_ids);
+        assert!(config.show_logs);
+    }
+
+    #[test]
+    fn test_tui_config() {
+        let config = LogConfig::tui();
+        assert_eq!(config.default_level, tracing::Level::INFO);
+        assert!(!config.show_logs); // 🆕 TUI mode: hide logs
     }
 
     #[test]
     fn test_dev_with_trace() {
         let config = LogConfig::dev_with_trace();
         assert_eq!(config.default_level, tracing::Level::DEBUG);
-        assert_eq!(config.chrome_trace, Some("trace.json".to_string()));
+        assert!(config.chrome_trace);
     }
 
     #[test]
     fn test_with_chrome_trace() {
-        let config = LogConfig::default().with_chrome_trace("custom.json");
-        assert_eq!(config.chrome_trace, Some("custom.json".to_string()));
+        let config = LogConfig::default().with_chrome_trace();
+        assert!(config.chrome_trace);
+    }
+
+    #[test]
+    fn test_without_logs() {
+        let config = LogConfig::default().without_logs();
+        assert!(!config.show_logs);
+    }
+
+    #[test]
+    fn test_with_file_output() {
+        let config = LogConfig::default().with_file_output("app.log".to_string());
+        assert_eq!(config.file_output, Some("app.log".to_string()));
     }
 }
