@@ -1,6 +1,8 @@
-use matchbox_socket::PeerId as MatchboxPeerId;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+
+// Re-export the underlying matchbox type
+pub use matchbox_socket::PeerId as MatchboxPeerId;
 
 /// Domain entity: Unique identifier for a peer in the P2P network
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

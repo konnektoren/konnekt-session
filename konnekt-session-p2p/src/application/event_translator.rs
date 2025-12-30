@@ -6,6 +6,7 @@ use crate::domain::{DelegationReason, DomainEvent as P2PDomainEvent};
 /// Translates between P2P domain events and Core domain commands/events
 ///
 /// This is the Anti-Corruption Layer (ACL) that keeps the two bounded contexts separate.
+#[derive(Debug, Clone)]
 pub struct EventTranslator {
     /// Session/Lobby ID (1:1 relationship enforced by design)
     lobby_id: Uuid,
