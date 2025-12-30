@@ -28,3 +28,51 @@ host-tui NAME="TestHost":
 # Join a session (TUI)
 join-tui SESSION_ID NAME="TestGuest":
     cargo run --bin konnekt-tui --features tui -- join --session-id "{{ SESSION_ID }}" --name "{{ NAME }}"
+
+# 🆕 Run with tokio-console enabled (host)
+host-console NAME="TestHost":
+    @echo "🔍 Starting with tokio-console enabled"
+    @echo "   Run 'tokio-console' in another terminal to connect"
+    @echo ""
+    TOKIO_CONSOLE=1 RUSTFLAGS="--cfg tokio_unstable" cargo run --features console -- create-host --name "{{ NAME }}"
+
+# 🆕 Run with tokio-console enabled (guest)
+join-console SESSION_ID NAME="TestGuest":
+    @echo "🔍 Starting with tokio-console enabled"
+    @echo "   Run 'tokio-console' in another terminal to connect"
+    @echo ""
+    TOKIO_CONSOLE=1 RUSTFLAGS="--cfg tokio_unstable" cargo run --features console -- join --session-id "{{ SESSION_ID }}" --name "{{ NAME }}"
+
+# 🆕 Run TUI with tokio-console enabled (host)
+host-tui-console NAME="TestHost":
+    @echo "🔍 Starting TUI with tokio-console enabled"
+    @echo "   Run 'tokio-console' in another terminal to connect"
+    @echo ""
+    TOKIO_CONSOLE=1 RUSTFLAGS="--cfg tokio_unstable" cargo run --bin konnekt-tui --features "tui,chrome-trace" -- create-host --name "{{ NAME }}"
+
+# 🆕 Run TUI with tokio-console enabled (guest)
+join-tui-console SESSION_ID NAME="TestGuest":
+    @echo "🔍 Starting TUI with tokio-console enabled"
+    @echo "   Run 'tokio-console' in another terminal to connect"
+    @echo ""
+    TOKIO_CONSOLE=1 RUSTFLAGS="--cfg tokio_unstable" cargo run --bin konnekt-tui --features "tui,console" -- join --session-id "{{ SESSION_ID }}" --name "{{ NAME }}"
+
+# 🆕 Install tokio-console (if not already installed)
+install-tokio-console:
+    cargo install --locked tokio-console
+
+# 🆕 Open tokio-console in new terminal (requires 'screen' or 'tmux')
+console:
+    @echo "Opening tokio-console..."
+    tokio-console
+
+# 🆕 Run host + console in split terminal (tmux)
+host-with-console NAME="TestHost":
+    #!/usr/bin/env bash
+    tmux new-session -d -s konnekt "just host-console {{ NAME }}"
+    tmux split-window -h -t konnekt "sleep 2 && tokio-console"
+    tmux attach-session -t konnekt
+
+# 🆕 Kill tmux session
+kill-console:
+    tmux kill-session -t konnekt || true

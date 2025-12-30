@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use konnekt_session_cli::Result;
+use konnekt_session_cli::{LogConfig, Result}; // 🆕 Import LogConfig
 use konnekt_session_core::DomainCommand;
 use konnekt_session_p2p::{ConnectionEvent, IceServer, P2PLoopBuilder, SessionId, SessionLoop};
 use std::time::Duration;
@@ -75,13 +75,26 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    // 🆕 Initialize logging
+    #[cfg(feature = "console")]
+    let log_config = if std::env::var("TOKIO_CONSOLE").is_ok() {
+        LogConfig::dev().with_console()
+    } else if cfg!(debug_assertions) {
+        LogConfig::dev()
+    } else {
+        LogConfig::default()
+    };
+
+    #[cfg(not(feature = "console"))]
+    let log_config = if cfg!(debug_assertions) {
+        LogConfig::dev()
+    } else {
+        LogConfig::default()
+    };
+
+    log_config
+        .init()
+        .map_err(|e| konnekt_session_cli::CliError::InvalidInput(e))?;
 
     let cli = Cli::parse();
 

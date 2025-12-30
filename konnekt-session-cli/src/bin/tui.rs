@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use konnekt_session_cli::infrastructure::LogConfig; // 🆕 Add this
 use konnekt_session_cli::presentation::tui::{self, App, AppEvent, UserAction};
 use konnekt_session_cli::{CliError, Result};
 use konnekt_session_core::DomainCommand;
@@ -6,7 +7,11 @@ use konnekt_session_core::domain::{ActivityMetadata, ActivityResult};
 use konnekt_session_p2p::{IceServer, P2PLoopBuilder, SessionId, SessionLoop};
 use std::time::Duration;
 use tokio::sync::mpsc;
+use tracing::info;
 use uuid::Uuid;
+
+// 🆕 Import tracing for instrumentation
+use tracing::instrument;
 
 #[derive(Parser)]
 #[command(name = "konnekt-tui")]
@@ -51,6 +56,27 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize logging FIRST
+    #[cfg(feature = "console")]
+    let log_config = if std::env::var("TOKIO_CONSOLE").is_ok() {
+        eprintln!("🔍 Initializing tokio-console...");
+        LogConfig::dev().with_console()
+    } else {
+        LogConfig::dev()
+    };
+
+    #[cfg(not(feature = "console"))]
+    let log_config = LogConfig::dev();
+
+    log_config.init().map_err(|e| CliError::InvalidInput(e))?;
+
+    #[cfg(feature = "console")]
+    if std::env::var("TOKIO_CONSOLE").is_ok() {
+        eprintln!("✅ Tokio console initialized");
+        eprintln!("📡 Listening on http://127.0.0.1:6669");
+        eprintln!("🔗 Connect with: tokio-console");
+    }
+
     let cli = Cli::parse();
 
     match cli.command {
@@ -149,64 +175,6 @@ async fn join_session(
     tracing::info!("📤 Sent join request");
 
     run_tui(session_loop, session_id).await
-}
-
-async fn run_tui(mut session_loop: SessionLoop, session_id: SessionId) -> Result<()> {
-    let mut terminal = tui::setup_terminal()?;
-    let mut app = App::new(session_id.to_string());
-
-    let (ui_tx, mut ui_rx) = mpsc::channel(100);
-    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UserCommand>(100);
-
-    let lobby_id = session_loop.lobby_id();
-
-    // Spawn SessionLoop background task (ALL BUSINESS LOGIC)
-    let session_handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_millis(100));
-
-        loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    // 1. Process user commands from TUI
-                    while let Ok(user_cmd) = cmd_rx.try_recv() {
-                        if let Err(e) = handle_user_command(&mut session_loop, lobby_id, user_cmd) {
-                            tracing::error!("Failed to handle user command: {:?}", e);
-                        }
-                    }
-
-                    // 2. Poll SessionLoop (business logic)
-                    let processed = session_loop.poll();
-
-                    if processed > 0 {
-                        tracing::trace!("SessionLoop processed {} events", processed);
-                    }
-
-                    // 3. Send UI updates (read-only snapshots)
-                    if let Some(lobby) = session_loop.get_lobby() {
-                        let _ = ui_tx.send(UiUpdate::Lobby(lobby.clone())).await;
-                    }
-
-                    if let Some(peer_id) = session_loop.local_peer_id() {
-                        let peer_count = session_loop.connected_peers().len();
-                        let is_host = session_loop.is_host();
-                        let _ = ui_tx.send(UiUpdate::PeerInfo {
-                            peer_id: peer_id.to_string(),
-                            peer_count,
-                            is_host,
-                        }).await;
-                    }
-                }
-            }
-        }
-    });
-
-    // Run TUI event loop (PRESENTATION ONLY)
-    let result = run_app_loop(&mut terminal, &mut app, &mut ui_rx, cmd_tx).await;
-
-    tui::restore_terminal(terminal)?;
-    session_handle.abort();
-
-    result
 }
 
 /// Commands from TUI to SessionLoop
@@ -343,6 +311,80 @@ enum UiUpdate {
     },
 }
 
+#[instrument(skip(session_loop), fields(session_id = %session_id))]
+async fn run_tui(mut session_loop: SessionLoop, session_id: SessionId) -> Result<()> {
+    info!("Starting TUI");
+
+    let mut terminal = tui::setup_terminal()?;
+    let mut app = App::new(session_id.to_string());
+
+    let (ui_tx, mut ui_rx) = mpsc::channel(100);
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<UserCommand>(100);
+
+    let lobby_id = session_loop.lobby_id();
+
+    // 🔧 FIX: Spawn SessionLoop only (TUI stays in main task)
+    let session_span = tracing::info_span!("session_loop::poll");
+    let session_handle = tokio::spawn(async move {
+        let _enter = session_span.enter();
+        info!("SessionLoop task started");
+
+        let mut interval = tokio::time::interval(Duration::from_millis(100));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        let mut tick_count = 0u64;
+
+        loop {
+            interval.tick().await;
+            tick_count += 1;
+
+            if tick_count % 10 == 0 {
+                tracing::debug!("SessionLoop tick {}", tick_count);
+            }
+
+            // 1. Process user commands from TUI
+            while let Ok(user_cmd) = cmd_rx.try_recv() {
+                if let Err(e) = handle_user_command(&mut session_loop, lobby_id, user_cmd) {
+                    tracing::error!("Failed to handle user command: {:?}", e);
+                }
+            }
+
+            // 2. Poll SessionLoop (business logic)
+            let processed = session_loop.poll();
+
+            if processed > 0 {
+                tracing::debug!("SessionLoop processed {} events", processed);
+            }
+
+            // 3. Send UI updates (read-only snapshots)
+            if let Some(lobby) = session_loop.get_lobby() {
+                let _ = ui_tx.send(UiUpdate::Lobby(lobby.clone())).await;
+            }
+
+            if let Some(peer_id) = session_loop.local_peer_id() {
+                let peer_count = session_loop.connected_peers().len();
+                let is_host = session_loop.is_host();
+                let _ = ui_tx
+                    .send(UiUpdate::PeerInfo {
+                        peer_id: peer_id.to_string(),
+                        peer_count,
+                        is_host,
+                    })
+                    .await;
+            }
+        }
+    });
+
+    // 🔧 FIX: Run TUI in current task (not spawned)
+    let result = run_app_loop(&mut terminal, &mut app, &mut ui_rx, cmd_tx).await;
+
+    // Cleanup
+    tui::restore_terminal(terminal)?;
+    session_handle.abort();
+
+    result
+}
+
 async fn run_app_loop(
     terminal: &mut tui::TuiTerminal,
     app: &mut App,
@@ -350,11 +392,13 @@ async fn run_app_loop(
     cmd_tx: mpsc::Sender<UserCommand>,
 ) -> Result<()> {
     loop {
+        // Draw UI
         terminal.draw(|f| tui::ui::render(f, app))?;
 
         tokio::select! {
-            Ok(app_event) = tui::event::read_events() => {
-                match app_event {
+            // Handle crossterm events
+            app_event = tui::event::read_events() => {
+                match app_event? {
                     AppEvent::Key(key) => {
                         if let Some(action) = app.handle_key(key) {
                             handle_user_action(app, action, &cmd_tx).await?;
@@ -369,6 +413,7 @@ async fn run_app_loop(
                 }
             }
 
+            // Handle UI updates from SessionLoop
             Some(update) = ui_rx.recv() => {
                 match update {
                     UiUpdate::Lobby(lobby) => {
