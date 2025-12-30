@@ -3,38 +3,59 @@ name: GitHub Pages
 on:
   push:
     branches:
+      - "*"
       - main
     tags:
       - "*"
 
 jobs:
-  build_and_deploy_main:
-    name: Rust project for main branch
+  build_and_deploy:
+    name: Build and Deploy Konnekt Session Yew
     runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions-rs/toolchain@v1
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           target: wasm32-unknown-unknown
           override: true
 
-      - uses: jetli/trunk-action@v0.5.0
+      - name: Install Trunk
+        uses: jetli/trunk-action@v0.5.0
         with:
           version: "latest"
 
-      - name: Build with Trunk
-        working-directory: ./konnekt-session
-        env:
-          WEBSOCKET_URL: ${{ secrets.WEBSOCKET_URL || 'wss://echo.websocket.events' }}
-        run: trunk build --features=yew --release --public-url /konnekt-session/
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
-      - name: Deploy
+      - name: Build Yew App
+        env:
+          WEBSOCKET_URL: ${{ secrets.WEBSOCKET_URL || 'wss://match.konnektoren.help' }}
+        working-directory: ./konnekt-session-yew
+        run: trunk build --release --public-url /konnekt-session/
+
+      - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: gh-pages
-          publish_dir: ./konnekt-session/dist
-          keep_files: true
+          publish_dir: ./konnekt-session-yew/dist
+          keep_files: false # Don't keep old files
+          cname: false # No custom domain
+
+      - name: Summary
+        run: |
+          echo "✅ Deployed to: https://${{ github.repository_owner }}.github.io/konnekt-session/"
