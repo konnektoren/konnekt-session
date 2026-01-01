@@ -65,6 +65,13 @@ pub enum DomainCommand {
         lobby_id: Uuid,
         activity_id: crate::domain::ActivityId,
     },
+
+    /// Add a participant directly (used for P2P sync)
+    /// This is different from JoinLobby because it specifies the exact participant to add
+    AddParticipant {
+        lobby_id: Uuid,
+        participant: crate::domain::Participant,
+    },
 }
 
 #[cfg(test)]

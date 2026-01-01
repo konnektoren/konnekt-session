@@ -80,6 +80,11 @@ impl DomainEventLoop {
                 lobby_id,
                 activity_id,
             } => self.handle_cancel_activity(lobby_id, activity_id),
+
+            DomainCommand::AddParticipant {
+                lobby_id,
+                participant,
+            } => self.handle_add_participant(lobby_id, participant),
         }
     }
 
@@ -348,6 +353,29 @@ impl DomainEventLoop {
             },
             Err(e) => DomainEvent::CommandFailed {
                 command: "CancelActivity".to_string(),
+                reason: e.to_string(),
+            },
+        }
+    }
+
+    fn handle_add_participant(&mut self, lobby_id: Uuid, participant: Participant) -> DomainEvent {
+        let lobby = match self.lobbies.get_mut(&lobby_id) {
+            Some(l) => l,
+            None => {
+                return DomainEvent::CommandFailed {
+                    command: "AddParticipant".to_string(),
+                    reason: format!("Lobby {} not found", lobby_id),
+                };
+            }
+        };
+
+        match lobby.add_guest(participant.clone()) {
+            Ok(_) => DomainEvent::GuestJoined {
+                lobby_id,
+                participant,
+            },
+            Err(e) => DomainEvent::CommandFailed {
+                command: "AddParticipant".to_string(),
                 reason: e.to_string(),
             },
         }

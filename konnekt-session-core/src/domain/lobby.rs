@@ -73,6 +73,9 @@ pub enum LobbyError {
 
     #[error("Spectator cannot submit results")]
     SpectatorCannotSubmit,
+
+    #[error("Participant already submitted result for this activity")]
+    DuplicateSubmission,
 }
 
 impl Lobby {
@@ -164,6 +167,14 @@ impl Lobby {
     pub fn add_guest(&mut self, guest: Participant) -> Result<(), LobbyError> {
         if guest.is_host() {
             return Err(LobbyError::CannotDelegateToNonGuest);
+        }
+
+        // ✅ Idempotent: If participant already exists, just update it
+        if let Some(existing) = self.participants.get(&guest.id()) {
+            if existing.name() == guest.name() {
+                tracing::debug!("Participant {} already exists, skipping", guest.id());
+                return Ok(());
+            }
         }
 
         self.participants.insert(guest.id(), guest);
@@ -450,8 +461,19 @@ impl Lobby {
             .find(|a| a.id == result.activity_id)
             .ok_or(LobbyError::ActivityNotFound(result.activity_id))?;
 
+        tracing::info!(
+            "📥 Lobby: Received result from participant {} for activity {}",
+            result.participant_id,
+            result.activity_id
+        );
+
         // Check activity is in progress
         if activity.status != ActivityStatus::InProgress {
+            tracing::warn!(
+                "⚠️  Activity {} is not in progress (status: {:?})",
+                result.activity_id,
+                activity.status
+            );
             return Err(LobbyError::ActivityNotInProgress);
         }
 
@@ -462,14 +484,38 @@ impl Lobby {
             .ok_or(LobbyError::ParticipantNotFound(result.participant_id))?;
 
         if !participant.can_submit_results() {
+            tracing::warn!(
+                "⚠️  Participant {} cannot submit (mode: {:?})",
+                result.participant_id,
+                participant.participation_mode()
+            );
             return Err(LobbyError::SpectatorCannotSubmit);
         }
 
         // Store result
-        self.activity_results.push(result);
+        self.activity_results.push(result.clone());
+
+        tracing::info!(
+            "✅ Result stored. Total results: {}",
+            self.activity_results.len()
+        );
 
         // Check if all active participants submitted
+        let active_count = self.active_participants().len();
+        let submitted_count = self
+            .activity_results
+            .iter()
+            .filter(|r| r.activity_id == activity.id)
+            .count();
+
+        tracing::info!(
+            "📊 Activity progress: {}/{} participants submitted",
+            submitted_count,
+            active_count
+        );
+
         if self.all_active_participants_submitted(activity.id) {
+            tracing::info!("🏁 All participants submitted! Completing activity");
             self.complete_activity(activity.id)?;
         }
 
