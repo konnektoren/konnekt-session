@@ -35,11 +35,25 @@ pub fn session_screen(props: &SessionScreenProps) -> Html {
         let view_mode = view_mode.clone();
         let lobby = session.lobby.clone();
 
-        use_effect_with(lobby, move |lobby_opt| {
+        use_effect_with(lobby.clone(), move |lobby_opt| {
             if let Some(lobby) = lobby_opt {
-                if lobby.current_activity().is_some() {
+                // Check for current in-progress activity
+                if let Some(current) = lobby.current_activity() {
+                    tracing::info!("Activity in progress: {}", current.name);
                     view_mode.set(ViewMode::ActivityInProgress);
-                } else {
+                }
+                // Check for completed activities
+                else if lobby
+                    .activities()
+                    .iter()
+                    .any(|a| a.status == konnekt_session_core::domain::ActivityStatus::Completed)
+                {
+                    tracing::info!("Activity completed, showing results");
+                    view_mode.set(ViewMode::Results);
+                }
+                // Back to lobby view
+                else {
+                    tracing::info!("No active activity, showing lobby");
                     view_mode.set(ViewMode::Lobby);
                 }
             }
@@ -107,34 +121,66 @@ pub fn session_screen(props: &SessionScreenProps) -> Html {
         let lobby = session.lobby.clone();
         let send_command = session.send_command.clone();
         let participant_id = session.local_participant_id;
+
         Callback::from(move |e: SubmitEvent| {
             e.prevent_default();
 
-            if let (Some(lobby), Some(participant_id)) = (&lobby, participant_id) {
-                if let Some(current_activity) = lobby.current_activity() {
-                    let response = (*activity_response).clone();
+            tracing::info!("📤 Attempting to submit response");
 
-                    if let Ok(challenge) =
-                        EchoChallenge::from_config(current_activity.config.clone())
-                    {
-                        let score = challenge.calculate_score(&response);
-                        let echo_result = EchoResult::new(response.clone(), 1000);
-                        let result = konnekt_session_core::domain::ActivityResult::new(
-                            current_activity.id,
-                            participant_id,
-                        )
-                        .with_data(echo_result.to_json())
-                        .with_score(score)
-                        .with_time(1000);
+            if participant_id.is_none() {
+                tracing::error!("❌ Cannot submit: No local participant ID");
+                return;
+            }
 
-                        send_command(DomainCommand::SubmitResult {
-                            lobby_id: lobby.id(),
-                            result,
-                        });
+            if lobby.is_none() {
+                tracing::error!("❌ Cannot submit: No lobby");
+                return;
+            }
 
-                        activity_response.set(String::new());
-                    }
+            let lobby = lobby.as_ref().unwrap();
+            let participant_id = participant_id.unwrap();
+
+            if let Some(current_activity) = lobby.current_activity() {
+                let response = (*activity_response).clone();
+
+                tracing::info!(
+                    "📤 Submitting response for activity {} by participant {}",
+                    current_activity.id,
+                    participant_id
+                );
+
+                if let Ok(challenge) = EchoChallenge::from_config(current_activity.config.clone()) {
+                    let score = challenge.calculate_score(&response);
+                    let echo_result = EchoResult::new(response.clone(), 1000);
+
+                    tracing::info!(
+                        "✅ Response '{}' scored: {} (expected: '{}')",
+                        response,
+                        score,
+                        challenge.prompt
+                    );
+
+                    let result = konnekt_session_core::domain::ActivityResult::new(
+                        current_activity.id,
+                        participant_id,
+                    )
+                    .with_data(echo_result.to_json())
+                    .with_score(score)
+                    .with_time(1000);
+
+                    send_command(DomainCommand::SubmitResult {
+                        lobby_id: lobby.id(),
+                        result,
+                    });
+
+                    activity_response.set(String::new());
+
+                    tracing::info!("✅ Result submitted successfully");
+                } else {
+                    tracing::error!("❌ Failed to parse activity config");
                 }
+            } else {
+                tracing::error!("❌ No current activity to submit to");
             }
         })
     };
@@ -444,7 +490,10 @@ fn render_results_view(lobby: &Option<konnekt_session_core::Lobby>) -> Html {
 
         html! {
             <div class="konnekt-results-screen">
-                <h2>{"Results"}</h2>
+                <div class="konnekt-results-screen__header">
+                    <h2>{"🏆 Results"}</h2>
+                </div>
+
                 {for completed_activities.iter().map(|activity| {
                     let results = lobby.get_results(activity.id);
 
@@ -474,6 +523,12 @@ fn render_results_view(lobby: &Option<konnekt_session_core::Lobby>) -> Html {
                         </div>
                     }
                 })}
+
+                <div class="konnekt-results-screen__footer">
+                    <p class="konnekt-results-screen__note">
+                        {"Activity completed! You can plan a new activity from the lobby."}
+                    </p>
+                </div>
             </div>
         }
     } else {

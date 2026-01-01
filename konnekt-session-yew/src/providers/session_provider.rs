@@ -57,14 +57,17 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
         let signalling_server = props.signalling_server.to_string();
         let session_id_prop = props.session_id.clone();
         let name = props.name.clone().unwrap_or_else(|| "Guest".into());
-        let is_host = is_host.clone();
-        let actual_session_id = actual_session_id.clone();
-        let lobby = lobby.clone();
-        let peer_count = peer_count.clone();
-        let local_participant_id = local_participant_id.clone();
-        let session_state = session_state.clone();
+        let is_host_clone = is_host.clone();
+        let actual_session_id_clone = actual_session_id.clone();
+        let lobby_clone = lobby.clone();
+        let peer_count_clone = peer_count.clone();
+        let local_participant_id_clone = local_participant_id.clone();
+        let session_state_clone = session_state.clone();
 
+        // ✅ FIX: Only run ONCE on mount
         use_effect_with((), move |_| {
+            tracing::info!("🚀 SessionProvider effect starting (should only run ONCE)");
+
             wasm_bindgen_futures::spawn_local(async move {
                 let ice_servers = IceServer::default_stun_servers();
 
@@ -79,7 +82,6 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
 
                     tracing::info!("⏳ Waiting for lobby sync...");
 
-                    // Wait for lobby sync
                     for i in 0..100 {
                         loop_.poll();
                         if loop_.get_lobby().is_some() {
@@ -89,7 +91,6 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                         gloo_timers::future::TimeoutFuture::new(100).await;
                     }
 
-                    // Submit join command
                     tracing::info!("📤 Submitting JoinLobby as '{}'", name);
                     if let Err(e) = loop_.submit_command(DomainCommand::JoinLobby {
                         lobby_id,
@@ -98,12 +99,45 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                         tracing::error!("❌ Failed to join: {:?}", e);
                     }
 
-                    is_host.set(false);
+                    let name_str = name.to_string();
+                    for i in 0..50 {
+                        loop_.poll();
+
+                        if let Some(lobby) = loop_.get_lobby() {
+                            if let Some(our_participant) = lobby
+                                .participants()
+                                .values()
+                                .find(|p| p.name() == name_str.as_str() && !p.is_host())
+                            {
+                                tracing::info!(
+                                    "✅ Found ourselves in lobby: {} (id: {})",
+                                    our_participant.name(),
+                                    our_participant.id()
+                                );
+                                local_participant_id_clone.set(Some(our_participant.id()));
+                                break;
+                            }
+                        }
+
+                        if i == 49 {
+                            tracing::error!("❌ Timeout: Didn't find ourselves in lobby");
+                            if let Some(lobby) = loop_.get_lobby() {
+                                tracing::error!("   Participants:");
+                                for p in lobby.participants().values() {
+                                    tracing::error!("     - {} (host: {})", p.name(), p.is_host());
+                                }
+                            }
+                        }
+
+                        gloo_timers::future::TimeoutFuture::new(100).await;
+                    }
+
+                    is_host_clone.set(false);
                     (loop_, sid)
                 } else {
                     tracing::info!("👑 Creating host session as '{}'", name);
 
-                    let (loop_, sid) = P2PLoopBuilder::new()
+                    let (mut loop_, sid) = P2PLoopBuilder::new()
                         .build_session_host(
                             &signalling_server,
                             ice_servers,
@@ -113,20 +147,38 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                         .await
                         .expect("Failed to create session");
 
-                    is_host.set(true);
+                    if let Some(lobby) = loop_.get_lobby() {
+                        if let Some(host_participant) =
+                            lobby.participants().values().find(|p| p.is_host())
+                        {
+                            tracing::info!(
+                                "✅ Host participant: {} (id: {})",
+                                host_participant.name(),
+                                host_participant.id()
+                            );
+                            local_participant_id_clone.set(Some(host_participant.id()));
+                        }
+                    }
+
+                    is_host_clone.set(true);
                     (loop_, sid)
                 };
 
-                actual_session_id.set(sid);
+                actual_session_id_clone.set(sid);
 
                 let mut interval = gloo_timers::future::IntervalStream::new(100);
-                let mut last_participant_count = 0;
+                let name_str = name.to_string();
+                let current_is_host = *is_host_clone;
+
+                tracing::info!("🔄 Starting main polling loop");
 
                 while interval.next().await.is_some() {
                     // 1. Process commands
-                    let commands = session_state.borrow_mut().drain_commands();
+                    let commands = session_state_clone.borrow_mut().drain_commands();
+                    if !commands.is_empty() {
+                        tracing::debug!("📤 Processing {} commands", commands.len());
+                    }
                     for cmd in commands {
-                        tracing::debug!("📤 Command: {:?}", cmd);
                         if let Err(e) = session_loop.submit_command(cmd) {
                             tracing::error!("❌ Command failed: {:?}", e);
                         }
@@ -135,43 +187,48 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                     // 2. Poll
                     session_loop.poll();
 
-                    // 3. Update state
+                    // 3. Update state (BATCHED to reduce re-renders)
                     if let Some(l) = session_loop.get_lobby() {
                         let current_count = l.participants().len();
+                        let old_participant_id = *local_participant_id_clone;
 
-                        // Log participant changes
-                        if current_count != last_participant_count {
-                            tracing::info!(
-                                "👥 Participants changed: {} -> {}",
-                                last_participant_count,
-                                current_count
-                            );
-                            last_participant_count = current_count;
-                        }
+                        // 🔥 ONLY update participant ID if it's actually different
+                        let mut new_participant_id = old_participant_id;
 
-                        // ✅ ALWAYS update (Yew handles deduplication)
-                        lobby.set(Some(l.clone()));
-
-                        // Find local participant
-                        if local_participant_id.is_none() {
-                            let current_is_host = *is_host;
-                            for p in l.participants().values() {
-                                if (current_is_host && p.is_host())
-                                    || (!current_is_host && !p.is_host())
-                                {
-                                    tracing::info!("✅ Local participant: {}", p.name());
-                                    local_participant_id.set(Some(p.id()));
-                                    break;
-                                }
+                        for p in l.participants().values() {
+                            if p.name() == name_str.as_str() && p.is_host() == current_is_host {
+                                new_participant_id = Some(p.id());
+                                break;
                             }
                         }
-                    }
 
-                    peer_count.set(session_loop.connected_peers().len());
+                        // ✅ Only set if changed (prevents infinite loops)
+                        if old_participant_id != new_participant_id {
+                            tracing::info!(
+                                "🔄 Participant ID changed: {:?} → {:?}",
+                                old_participant_id,
+                                new_participant_id
+                            );
+                            local_participant_id_clone.set(new_participant_id);
+                        }
+
+                        // ✅ Clone lobby ONCE per poll (not per state update)
+                        let lobby_clone_data = l.clone();
+                        let new_peer_count = session_loop.connected_peers().len();
+
+                        // ✅ Batch all state updates together
+                        lobby_clone.set(Some(lobby_clone_data));
+                        peer_count_clone.set(new_peer_count);
+                    }
                 }
+
+                tracing::warn!("🛑 Polling loop ended (should never happen)");
             });
 
-            move || {}
+            // ✅ Cleanup function (runs when component unmounts)
+            move || {
+                tracing::info!("🧹 SessionProvider cleanup (component unmounting)");
+            }
         });
     }
 
