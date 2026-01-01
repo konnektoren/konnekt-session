@@ -129,32 +129,41 @@ impl P2PLoop {
         info!("Applying lobby snapshot");
         debug!(host_id = %snapshot.host_id, "Snapshot host");
 
-        // Create lobby from snapshot
-        let create_lobby_cmd = DomainCommand::CreateLobby {
-            lobby_id: Some(snapshot.lobby_id),
+        // Find the host participant from snapshot
+        let host_participant = snapshot
+            .participants
+            .iter()
+            .find(|p| p.is_host())
+            .cloned()
+            .expect("Snapshot must have a host participant");
+
+        tracing::info!(
+            "📥 GUEST: Creating lobby with host {} (id: {})",
+            host_participant.name(),
+            host_participant.id()
+        );
+
+        // ✅ FIX: Use CreateLobbyWithHost to preserve host ID
+        let create_lobby_cmd = DomainCommand::CreateLobbyWithHost {
+            lobby_id: snapshot.lobby_id,
             lobby_name: snapshot.name,
-            host_name: snapshot
-                .participants
-                .iter()
-                .find(|p| p.is_host())
-                .map(|p| p.name().to_string())
-                .unwrap_or_else(|| "Host".to_string()),
+            host: host_participant,
         };
 
         self.pending_domain_commands.push_back(create_lobby_cmd);
 
-        // ✅ Add all participants from snapshot as separate JoinLobby commands
+        // ✅ Add other participants (non-host)
         for participant in snapshot.participants.iter() {
             if !participant.is_host() {
-                info!(
-                    "Adding guest from snapshot: {} ({})",
+                tracing::info!(
+                    "📥 GUEST: Adding guest {} (id: {}) from snapshot",
                     participant.name(),
                     participant.id()
                 );
                 self.pending_domain_commands
-                    .push_back(DomainCommand::JoinLobby {
+                    .push_back(DomainCommand::AddParticipant {
                         lobby_id: snapshot.lobby_id,
-                        guest_name: participant.name().to_string(),
+                        participant: participant.clone(),
                     });
             }
         }

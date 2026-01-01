@@ -36,15 +36,11 @@ impl SessionLoop {
     }
 
     /// Create a new session loop for GUEST
-    pub fn new_guest(mut p2p: P2PLoop, domain: DomainLoop, lobby_id: Uuid) -> Self {
+    pub fn new_guest(p2p: P2PLoop, domain: DomainLoop, lobby_id: Uuid) -> Self {
         tracing::info!("🎯 SessionLoop created as GUEST for lobby {}", lobby_id);
 
-        // Guest immediately requests full sync from host
-        tracing::info!("🔄 Guest auto-requesting full sync from host");
-
-        if let Err(e) = p2p.request_full_sync() {
-            tracing::warn!("Failed to request full sync: {:?}", e);
-        }
+        // ✅ FIX: Don't request sync here - wait for PeerConnected event in poll()
+        // The WebRTC connection isn't established yet!
 
         Self {
             p2p,
@@ -142,9 +138,10 @@ impl SessionLoop {
         }
 
         // ===== Step 1.5: Handle connection events =====
-        if self.is_host {
-            let connection_events = self.p2p.drain_events();
+        let connection_events = self.p2p.drain_events();
 
+        if self.is_host {
+            // HOST: Handle peer connections
             for event in &connection_events {
                 match event {
                     crate::application::ConnectionEvent::PeerConnected(peer_id) => {
@@ -216,7 +213,21 @@ impl SessionLoop {
                 }
             }
         } else {
-            self.p2p.drain_events();
+            // ✅ GUEST: Handle peer connections
+            for event in &connection_events {
+                match event {
+                    crate::application::ConnectionEvent::PeerConnected(peer_id) => {
+                        tracing::info!("🟢 GUEST: Connected to host peer {}", peer_id);
+                        tracing::info!("📤 GUEST: Requesting full sync from host");
+
+                        // ✅ Request sync now that we have a connection
+                        if let Err(e) = self.p2p.request_full_sync() {
+                            tracing::error!("❌ GUEST: Failed to request full sync: {:?}", e);
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
 
         // ===== Step 2: Get domain commands from P2P =====
@@ -270,7 +281,7 @@ impl SessionLoop {
         }
 
         for event in events {
-            // 🔥 Log BEFORE processing
+            // Log BEFORE processing
             tracing::info!(
                 "📤 Processing domain event: {:?}",
                 std::mem::discriminant(&event)
@@ -279,6 +290,41 @@ impl SessionLoop {
             match &event {
                 CoreDomainEvent::LobbyCreated { lobby } => {
                     tracing::info!("📤 Domain event: LobbyCreated - {}", lobby.name());
+
+                    // ✅ HOST: Register own peer → participant mapping
+                    if self.is_host {
+                        if let Some(host_participant) =
+                            lobby.participants().values().find(|p| p.is_host())
+                        {
+                            if let Some(local_peer_id) = self.local_peer_id() {
+                                tracing::info!(
+                                    "📝 HOST: Registering own peer {} → participant {} ({})",
+                                    local_peer_id,
+                                    host_participant.id(),
+                                    host_participant.name()
+                                );
+
+                                // Ensure peer exists in registry
+                                if self.p2p.peer_registry().get_peer(&local_peer_id).is_none() {
+                                    self.p2p.peer_registry_mut().add_peer(local_peer_id);
+                                }
+
+                                if let Some(peer_state) =
+                                    self.p2p.peer_registry_mut().get_peer_mut(&local_peer_id)
+                                {
+                                    peer_state.set_participant_info(
+                                        host_participant.id(),
+                                        host_participant.name().to_string(),
+                                        true, // is_host
+                                    );
+                                }
+                            } else {
+                                tracing::warn!("⚠️  HOST: No local peer ID available");
+                            }
+                        } else {
+                            tracing::warn!("⚠️  HOST: No host participant found in lobby");
+                        }
+                    }
                 }
                 CoreDomainEvent::GuestJoined { participant, .. } => {
                     tracing::info!(

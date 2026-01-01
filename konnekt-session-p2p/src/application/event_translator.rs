@@ -45,12 +45,24 @@ impl EventTranslator {
                 new_host_id: *to,
             }),
 
-            P2PDomainEvent::ParticipationModeChanged { participant_id, .. } => {
-                Some(DomainCommand::ToggleParticipationMode {
+            P2PDomainEvent::ParticipationModeChanged {
+                participant_id,
+                new_mode,
+            } => {
+                // Parse mode string
+                let mode = match new_mode.as_str() {
+                    "Active" => ParticipationMode::Active,
+                    "Spectating" => ParticipationMode::Spectating,
+                    _ => {
+                        tracing::warn!("Unknown participation mode: {}", new_mode);
+                        return None;
+                    }
+                };
+
+                Some(DomainCommand::UpdateParticipantMode {
                     lobby_id: self.lobby_id,
                     participant_id: *participant_id,
-                    requester_id: *participant_id,
-                    activity_in_progress: false,
+                    new_mode: mode,
                 })
             }
 
