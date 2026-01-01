@@ -25,11 +25,6 @@ impl EventTranslator {
     /// Returns `None` if the event doesn't map to a command (e.g., LobbyCreated is a state snapshot)
     pub fn to_domain_command(&self, event: &P2PDomainEvent) -> Option<DomainCommand> {
         match event {
-            P2PDomainEvent::GuestJoined { participant } => Some(DomainCommand::JoinLobby {
-                lobby_id: self.lobby_id,
-                guest_name: participant.name().to_string(),
-            }),
-
             P2PDomainEvent::GuestLeft { participant_id } => Some(DomainCommand::LeaveLobby {
                 lobby_id: self.lobby_id,
                 participant_id: *participant_id,
@@ -84,7 +79,14 @@ impl EventTranslator {
 
             // State snapshots - don't map to commands
             P2PDomainEvent::LobbyCreated { .. } => None,
-            P2PDomainEvent::ActivityCompleted { .. } => None, // Result of SubmitResult, not a command
+            P2PDomainEvent::GuestJoined { participant } => {
+                // ✅ Guests receiving this event should add the exact participant
+                Some(DomainCommand::AddParticipant {
+                    lobby_id: self.lobby_id,
+                    participant: participant.clone(),
+                })
+            }
+            P2PDomainEvent::ActivityCompleted { .. } => None,
         }
     }
 

@@ -176,7 +176,6 @@ impl SessionLoop {
                         }
                     }
 
-                    // 🆕 Handle peer timeout → remove participant from lobby
                     crate::application::ConnectionEvent::PeerTimedOut {
                         peer_id,
                         participant_id,
@@ -189,14 +188,12 @@ impl SessionLoop {
                             was_host
                         );
 
-                        // If peer had a participant, remove them from lobby
                         if let Some(participant_id) = participant_id {
                             tracing::info!(
                                 "🔴 HOST: Auto-removing participant {} (peer timed out)",
                                 participant_id
                             );
 
-                            // Submit LeaveLobby command
                             let leave_cmd = DomainCommand::LeaveLobby {
                                 lobby_id: self.lobby_id,
                                 participant_id: *participant_id,
@@ -209,10 +206,8 @@ impl SessionLoop {
                                 );
                             }
 
-                            // If it was the host who timed out, we need delegation
                             if *was_host {
                                 tracing::warn!("⚠️  Host timed out! Delegation needed (TODO)");
-                                // TODO: Trigger host delegation
                             }
                         }
                     }
@@ -221,7 +216,6 @@ impl SessionLoop {
                 }
             }
         } else {
-            // Guest: Just drain events (don't process them)
             self.p2p.drain_events();
         }
 
@@ -268,7 +262,7 @@ impl SessionLoop {
             tracing::debug!("🔧 Domain processed {} commands", domain_processed);
         }
 
-        // ===== Step 4: Broadcast domain events (HOST ONLY) =====
+        // ===== Step 4: Broadcast domain events =====
         let events = self.domain.drain_events();
 
         if !events.is_empty() {
@@ -276,25 +270,51 @@ impl SessionLoop {
         }
 
         for event in events {
+            // 🔥 Log BEFORE processing
+            tracing::info!(
+                "📤 Processing domain event: {:?}",
+                std::mem::discriminant(&event)
+            );
+
             match &event {
                 CoreDomainEvent::LobbyCreated { lobby } => {
                     tracing::info!("📤 Domain event: LobbyCreated - {}", lobby.name());
                 }
                 CoreDomainEvent::GuestJoined { participant, .. } => {
-                    tracing::info!("📤 Domain event: GuestJoined - {}", participant.name());
+                    tracing::info!(
+                        "📤 Domain event: GuestJoined - {} (id: {})",
+                        participant.name(),
+                        participant.id()
+                    );
 
-                    // 🆕 HOST: Register peer → participant mapping
+                    // HOST: Register peer → participant mapping
                     if self.is_host {
                         self.map_newest_guest_to_participant(participant.id(), participant.name());
+                        tracing::info!("📡 HOST: About to broadcast GuestJoined to all peers");
                     }
 
-                    // Guest registers themselves
+                    // GUEST: Register own participant ID
                     if !self.is_host {
                         self.register_participant_for_peer(participant.id());
+                        tracing::info!(
+                            "📝 GUEST: Registered own participant ID: {}",
+                            participant.id()
+                        );
                     }
                 }
                 CoreDomainEvent::GuestLeft { participant_id, .. } => {
                     tracing::info!("📤 Domain event: GuestLeft - {}", participant_id);
+                }
+                CoreDomainEvent::ParticipationModeChanged {
+                    participant_id,
+                    new_mode,
+                    ..
+                } => {
+                    tracing::info!(
+                        "📤 Domain event: ParticipationModeChanged - {} → {:?}",
+                        participant_id,
+                        new_mode
+                    );
                 }
                 CoreDomainEvent::ActivityCompleted {
                     activity_id,
@@ -317,16 +337,26 @@ impl SessionLoop {
 
             // Only host broadcasts to P2P
             if self.is_host {
-                // Don't broadcast failures
                 if matches!(event, CoreDomainEvent::CommandFailed { .. }) {
+                    tracing::warn!("⚠️  Not broadcasting CommandFailed");
                     continue;
                 }
 
+                tracing::info!(
+                    "📡 HOST: Broadcasting event type: {:?}",
+                    std::mem::discriminant(&event)
+                );
+
                 if let Err(e) = self.p2p.broadcast_domain_event(event.clone()) {
-                    tracing::warn!("Failed to broadcast event: {:?}", e);
+                    tracing::error!("❌ Failed to broadcast event: {:?}", e);
                 } else {
-                    tracing::debug!("✅ Event broadcast to P2P network");
+                    tracing::info!(
+                        "✅ HOST: Successfully broadcast {:?} to all peers",
+                        std::mem::discriminant(&event)
+                    );
                 }
+            } else {
+                tracing::debug!("📝 GUEST: Event processed locally (not broadcasting)");
             }
         }
 

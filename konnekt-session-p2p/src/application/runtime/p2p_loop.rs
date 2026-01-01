@@ -143,6 +143,22 @@ impl P2PLoop {
 
         self.pending_domain_commands.push_back(create_lobby_cmd);
 
+        // ✅ Add all participants from snapshot as separate JoinLobby commands
+        for participant in snapshot.participants.iter() {
+            if !participant.is_host() {
+                info!(
+                    "Adding guest from snapshot: {} ({})",
+                    participant.name(),
+                    participant.id()
+                );
+                self.pending_domain_commands
+                    .push_back(DomainCommand::JoinLobby {
+                        lobby_id: snapshot.lobby_id,
+                        guest_name: participant.name().to_string(),
+                    });
+            }
+        }
+
         // Translate subsequent events to commands
         for event in events {
             if let Some(cmd) = self.translator.to_domain_command(&event.event) {
