@@ -9,8 +9,8 @@ pub mod infrastructure;
 
 // Re-exports for convenience
 pub use application::runtime::{
-    MessageQueue, P2PLoop, P2PLoopBuilder, QueueError, SessionLoop, SessionLoopV2,
-    SessionLoopV2Builder,
+    MatchboxSessionLoop, MessageQueue, P2PLoop, P2PLoopBuilder, QueueError, SessionLoop,
+    SessionLoopV2, SessionLoopV2Builder,
 };
 pub use application::{
     ConnectionEvent, EventSyncManager, EventTranslator, LobbySnapshot, SessionConfig, SyncError,
@@ -20,4 +20,4 @@ pub use domain::{
     DelegationReason, DomainEvent, EventLog, IceServer, LobbyEvent, PeerId, SessionId,
 };
 pub use infrastructure::error::{P2PError, Result};
-pub use infrastructure::{P2PTransport, P2PTransportBuilder};
+pub use infrastructure::{NetworkConnection, P2PTransport, P2PTransportBuilder};

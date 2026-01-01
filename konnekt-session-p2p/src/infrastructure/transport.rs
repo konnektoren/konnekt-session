@@ -1,6 +1,5 @@
 use crate::application::ConnectionEvent;
 use crate::domain::PeerId;
-use crate::infrastructure::connection::MatchboxConnection;
 use crate::infrastructure::error::{P2PError, Result};
 use crate::infrastructure::message::{MessageKind, P2PMessage};
 use std::collections::{HashMap, VecDeque};
@@ -21,10 +20,42 @@ pub enum TransportEvent {
     },
 }
 
-/// Reliable P2P transport (domain-agnostic)
-pub struct P2PTransport {
-    /// WebRTC connection
-    connection: MatchboxConnection,
+/// Trait for network connection (allows mocking in tests)
+pub trait NetworkConnection {
+    fn local_peer_id(&self) -> Option<PeerId>;
+    fn connected_peers(&self) -> Vec<PeerId>;
+    fn send_to(&mut self, peer: PeerId, data: Vec<u8>) -> Result<()>;
+    fn broadcast(&mut self, data: Vec<u8>) -> Result<()>;
+    fn poll_events(&mut self) -> Vec<ConnectionEvent>;
+}
+
+/// Implement NetworkConnection for MatchboxConnection
+impl NetworkConnection for crate::infrastructure::connection::MatchboxConnection {
+    fn local_peer_id(&self) -> Option<PeerId> {
+        self.local_peer_id()
+    }
+
+    fn connected_peers(&self) -> Vec<PeerId> {
+        self.connected_peers()
+    }
+
+    fn send_to(&mut self, peer: PeerId, data: Vec<u8>) -> Result<()> {
+        self.send_to(peer, data)
+    }
+
+    fn broadcast(&mut self, data: Vec<u8>) -> Result<()> {
+        self.broadcast(data)
+    }
+
+    fn poll_events(&mut self) -> Vec<ConnectionEvent> {
+        self.poll_events()
+    }
+}
+
+/// Reliable P2P transport (domain-agnostic, generic over connection)
+pub struct P2PTransport<C: NetworkConnection> {
+    /// Network connection (can be real or mock)
+    connection: C,
 
     /// Next sequence number to assign (host only)
     next_sequence: u64,
@@ -48,9 +79,9 @@ pub struct P2PTransport {
     pending_events: Vec<TransportEvent>,
 }
 
-impl P2PTransport {
+impl<C: NetworkConnection> P2PTransport<C> {
     /// Create a new transport as host
-    pub fn new_host(connection: MatchboxConnection, cache_size: usize) -> Self {
+    pub fn new_host(connection: C, cache_size: usize) -> Self {
         Self {
             connection,
             next_sequence: 1, // Start at 1 (0 reserved for control)
@@ -64,7 +95,7 @@ impl P2PTransport {
     }
 
     /// Create a new transport as guest
-    pub fn new_guest(connection: MatchboxConnection, cache_size: usize) -> Self {
+    pub fn new_guest(connection: C, cache_size: usize) -> Self {
         Self {
             connection,
             next_sequence: 0, // Guests don't assign sequences
@@ -77,7 +108,7 @@ impl P2PTransport {
         }
     }
 
-    /// Send an application message
+    /// Send an application message (HOST ONLY - broadcasts to ALL peers)
     pub fn send(&mut self, payload: serde_json::Value) -> Result<u64> {
         if !self.is_host {
             return Err(P2PError::SendFailed(
@@ -94,6 +125,7 @@ impl P2PTransport {
         // Serialize and broadcast
         let data = serde_json::to_vec(&msg).map_err(P2PError::Serialization)?;
 
+        // ✅ FIX: Broadcast to ALL connected peers (not including self)
         self.connection.broadcast(data)?;
 
         // Cache for resend
@@ -101,6 +133,8 @@ impl P2PTransport {
         if self.message_cache.len() > self.cache_size {
             self.message_cache.pop_front();
         }
+
+        tracing::debug!("📡 HOST: Broadcast message with sequence {}", sequence);
 
         Ok(sequence)
     }
@@ -316,6 +350,9 @@ impl P2PTransport {
         self.connection.connected_peers()
     }
 }
+
+// Type alias for production use (with MatchboxConnection)
+pub type MatchboxP2PTransport = P2PTransport<crate::infrastructure::connection::MatchboxConnection>;
 
 #[cfg(test)]
 mod tests {

@@ -1,15 +1,16 @@
 use crate::infrastructure::error::Result;
-use crate::infrastructure::transport::{P2PTransport, TransportEvent};
+use crate::infrastructure::transport::{NetworkConnection, P2PTransport, TransportEvent};
 use konnekt_session_core::{DomainCommand, DomainEvent as CoreDomainEvent, DomainLoop, Lobby};
 use uuid::Uuid;
 
 /// Unified session loop (translation layer between domain and transport)
-pub struct SessionLoopV2 {
+/// Generic over connection type to allow mocking in tests
+pub struct SessionLoopV2<C: NetworkConnection> {
     /// Domain layer (business logic)
     domain: DomainLoop,
 
     /// Transport layer (networking)
-    transport: P2PTransport,
+    transport: P2PTransport<C>,
 
     /// Are we the host?
     is_host: bool,
@@ -18,9 +19,14 @@ pub struct SessionLoopV2 {
     lobby_id: Uuid,
 }
 
-impl SessionLoopV2 {
+impl<C: NetworkConnection> SessionLoopV2<C> {
     /// Create new session loop
-    pub fn new(domain: DomainLoop, transport: P2PTransport, is_host: bool, lobby_id: Uuid) -> Self {
+    pub fn new(
+        domain: DomainLoop,
+        transport: P2PTransport<C>,
+        is_host: bool,
+        lobby_id: Uuid,
+    ) -> Self {
         Self {
             domain,
             transport,
@@ -49,7 +55,7 @@ impl SessionLoopV2 {
     pub fn poll(&mut self) -> usize {
         let mut processed = 0;
 
-        // 1. Handle transport events (connections, snapshot requests)
+        // 1. Handle transport events
         for event in self.transport.drain_events() {
             match event {
                 TransportEvent::PeerConnected(peer_id) => {
@@ -79,31 +85,110 @@ impl SessionLoopV2 {
         }
 
         // 2. Poll transport for messages
-        for payload in self.transport.poll() {
+        let messages = self.transport.poll();
+
+        if !messages.is_empty() {
+            tracing::debug!("📥 Received {} messages from transport", messages.len());
+        }
+
+        for payload in messages {
             processed += 1;
 
-            // Deserialize domain command
-            if let Ok(cmd) = serde_json::from_value::<DomainCommand>(payload) {
-                // Execute in domain
-                let _ = self.domain.submit(cmd);
+            if let Ok(cmd) = serde_json::from_value::<DomainCommand>(payload.clone()) {
+                tracing::debug!("📥 Processing command: {:?}", std::mem::discriminant(&cmd));
+
+                // Log details for important commands
+                match &cmd {
+                    DomainCommand::JoinLobby { guest_name, .. } => {
+                        tracing::info!("👤 Guest '{}' wants to join", guest_name);
+                    }
+                    DomainCommand::SubmitResult { result, .. } => {
+                        tracing::info!(
+                            "📊 Result from participant {} for activity {}",
+                            result.participant_id,
+                            result.activity_id
+                        );
+                    }
+                    _ => {}
+                }
+
+                // ✅ FIX: Execute in domain FIRST
+                if let Err(e) = self.domain.submit(cmd.clone()) {
+                    tracing::warn!("❌ Failed to submit command to domain: {:?}", e);
+                    continue; // Skip broadcast if command failed
+                }
+
+                // ✅ FIX: If host, ALWAYS broadcast to all guests (even if we executed it)
+                if self.is_host {
+                    tracing::debug!(
+                        "📡 HOST: Broadcasting command to all peers: {:?}",
+                        std::mem::discriminant(&cmd)
+                    );
+
+                    if let Ok(payload) = serde_json::to_value(&cmd) {
+                        if let Err(e) = self.transport.send(payload) {
+                            tracing::warn!("❌ Failed to broadcast: {:?}", e);
+                        } else {
+                            tracing::debug!("✅ Broadcast successful");
+                        }
+                    }
+                }
             }
         }
 
         // 3. Process domain commands
-        processed += self.domain.poll();
+        let domain_processed = self.domain.poll();
+        processed += domain_processed;
 
-        // 4. Broadcast domain events (HOST ONLY)
+        if domain_processed > 0 {
+            tracing::debug!("🔧 Domain processed {} commands", domain_processed);
+        }
+
+        // 4. Broadcast HOST-INITIATED events (not guest commands)
         if self.is_host {
             for event in self.domain.drain_events() {
-                // Translate domain event → command for guests
+                tracing::debug!(
+                    "📤 HOST: Processing domain event: {:?}",
+                    std::mem::discriminant(&event)
+                );
+
+                match &event {
+                    // ✅ Skip events that came from guest commands (already broadcast in step 2)
+                    CoreDomainEvent::GuestJoined { .. } => {
+                        tracing::debug!("   ↳ Skipping GuestJoined (already broadcast)");
+                        continue;
+                    }
+                    CoreDomainEvent::ResultSubmitted { .. } => {
+                        tracing::debug!("   ↳ Skipping ResultSubmitted (already broadcast)");
+                        continue;
+                    }
+                    CoreDomainEvent::GuestLeft { .. } => {
+                        tracing::debug!("   ↳ Skipping GuestLeft (already broadcast)");
+                        continue;
+                    }
+                    CoreDomainEvent::ActivityCompleted { .. } => {
+                        tracing::debug!(
+                            "   ↳ Skipping ActivityCompleted (auto-completes on guests)"
+                        );
+                        continue;
+                    }
+                    _ => {}
+                }
+
+                // Translate HOST-initiated events → commands for guests
                 if let Some(cmd) = self.event_to_command(event) {
+                    tracing::debug!(
+                        "   ↳ Broadcasting host-initiated event as command: {:?}",
+                        std::mem::discriminant(&cmd)
+                    );
+
                     if let Ok(payload) = serde_json::to_value(&cmd) {
                         let _ = self.transport.send(payload);
                     }
                 }
             }
         } else {
-            // Guests still need to drain events (but don't broadcast)
+            // Guests drain events (but don't broadcast)
             self.domain.drain_events();
         }
 
@@ -201,7 +286,19 @@ impl SessionLoopV2 {
                     activity_id,
                 })
             }
-            // Don't broadcast these
+            CoreDomainEvent::ActivityCompleted {
+                activity_id,
+                results,
+                ..
+            } => {
+                // We need to submit all results to ensure guest sees completion
+                // But first, let's just mark it complete via the last result
+                // The better way is to have a CompleteActivity command
+
+                // For now, we rely on guests receiving all SubmitResult commands
+                // When they process the final result, they'll auto-complete
+                None // Guest will auto-complete when they receive all results
+            }
             _ => None,
         }
     }
@@ -223,6 +320,9 @@ impl SessionLoopV2 {
         self.transport.connected_peers()
     }
 }
+
+// Type alias for production use
+pub type MatchboxSessionLoop = SessionLoopV2<crate::infrastructure::connection::MatchboxConnection>;
 
 /// Snapshot of lobby state (for sync)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

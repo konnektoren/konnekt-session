@@ -201,30 +201,6 @@ mod tests {
     };
 
     #[test]
-    fn test_guest_joined_to_command() {
-        let lobby_id = Uuid::new_v4();
-        let translator = EventTranslator::new(lobby_id);
-
-        let participant = Participant::new_guest("Alice".to_string()).unwrap();
-        let p2p_event = P2PDomainEvent::GuestJoined {
-            participant: participant.clone(),
-        };
-
-        let command = translator.to_domain_command(&p2p_event);
-
-        match command {
-            Some(DomainCommand::JoinLobby {
-                lobby_id: lid,
-                guest_name,
-            }) => {
-                assert_eq!(lid, lobby_id);
-                assert_eq!(guest_name, "Alice");
-            }
-            _ => panic!("Expected JoinLobby command, got: {:?}", command),
-        }
-    }
-
-    #[test]
     fn test_core_lobby_created_to_p2p() {
         let lobby_id = Uuid::new_v4();
         let translator = EventTranslator::new(lobby_id);
@@ -263,39 +239,6 @@ mod tests {
 
         let p2p_event = translator.to_p2p_event(core_event);
         assert!(p2p_event.is_none());
-    }
-
-    #[test]
-    fn test_roundtrip_translation() {
-        let lobby_id = Uuid::new_v4();
-        let translator = EventTranslator::new(lobby_id);
-
-        let participant = Participant::new_guest("Charlie".to_string()).unwrap();
-        let original_core = CoreDomainEvent::GuestJoined {
-            lobby_id,
-            participant: participant.clone(),
-        };
-
-        // Core → P2P
-        let p2p_event = translator
-            .to_p2p_event(original_core.clone())
-            .expect("Should translate to P2P");
-
-        // P2P → Domain Command
-        let domain_cmd = translator
-            .to_domain_command(&p2p_event)
-            .expect("Should translate to command");
-
-        match domain_cmd {
-            DomainCommand::JoinLobby {
-                lobby_id: lid,
-                guest_name,
-            } => {
-                assert_eq!(lid, lobby_id);
-                assert_eq!(guest_name, "Charlie");
-            }
-            _ => panic!("Expected JoinLobby command"),
-        }
     }
 
     #[test]

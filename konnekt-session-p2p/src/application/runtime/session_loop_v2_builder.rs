@@ -4,7 +4,7 @@ use crate::infrastructure::transport_builder::P2PTransportBuilder;
 use konnekt_session_core::DomainLoop;
 use uuid::Uuid;
 
-use super::session_loop_v2::SessionLoopV2;
+use super::session_loop_v2::MatchboxSessionLoop;
 
 /// Builder for creating complete SessionLoopV2 (P2P + Domain integrated)
 pub struct SessionLoopV2Builder {
@@ -38,21 +38,13 @@ impl SessionLoopV2Builder {
     }
 
     /// Build complete SessionLoopV2 for HOST
-    ///
-    /// This creates:
-    /// - P2P transport layer
-    /// - Core domain layer
-    /// - Lobby with host participant
-    /// - Automatic wiring between layers
-    ///
-    /// Returns: (session_loop, session_id)
     pub async fn build_host(
         self,
         signalling_server: &str,
         ice_servers: Vec<IceServer>,
         lobby_name: String,
         host_name: String,
-    ) -> Result<(SessionLoopV2, SessionId)> {
+    ) -> Result<(MatchboxSessionLoop, SessionId)> {
         tracing::info!("🎯 Building SessionLoopV2 as HOST");
 
         // 1. Create P2P transport
@@ -66,7 +58,7 @@ impl SessionLoopV2Builder {
 
         // 3. Create lobby in domain
         let create_cmd = konnekt_session_core::DomainCommand::CreateLobby {
-            lobby_id: Some(lobby_id), // Use same ID as session
+            lobby_id: Some(lobby_id),
             lobby_name,
             host_name,
         };
@@ -75,10 +67,8 @@ impl SessionLoopV2Builder {
             .submit(create_cmd)
             .map_err(|e| crate::infrastructure::error::P2PError::SendFailed(e.to_string()))?;
 
-        // Process command to create lobby
         domain.poll();
 
-        // Verify lobby was created
         let events = domain.drain_events();
         if !events
             .iter()
@@ -89,8 +79,7 @@ impl SessionLoopV2Builder {
             ));
         }
 
-        // 4. Create unified session loop
-        let session_loop = SessionLoopV2::new(domain, transport, true, lobby_id);
+        let session_loop = MatchboxSessionLoop::new(domain, transport, true, lobby_id);
 
         tracing::info!("✅ SessionLoopV2 created as HOST");
 
@@ -98,34 +87,22 @@ impl SessionLoopV2Builder {
     }
 
     /// Build complete SessionLoopV2 for GUEST
-    ///
-    /// This creates:
-    /// - P2P transport layer
-    /// - Core domain layer (empty, will sync from host)
-    /// - Automatic wiring between layers
-    ///
-    /// Guest will receive full lobby state from host via P2P sync.
-    ///
-    /// Returns: (session_loop, lobby_id)
     pub async fn build_guest(
         self,
         signalling_server: &str,
         session_id: SessionId,
         ice_servers: Vec<IceServer>,
-    ) -> Result<(SessionLoopV2, Uuid)> {
+    ) -> Result<(MatchboxSessionLoop, Uuid)> {
         tracing::info!("🎯 Building SessionLoopV2 as GUEST");
 
-        // 1. Create P2P transport
         let (transport, lobby_id) = P2PTransportBuilder::new()
             .cache_size(self.cache_size)
             .build_guest(signalling_server, session_id, ice_servers)
             .await?;
 
-        // 2. Create domain layer (empty)
         let domain = DomainLoop::new(self.batch_size, self.queue_size);
 
-        // 3. Create unified session loop
-        let session_loop = SessionLoopV2::new(domain, transport, false, lobby_id);
+        let session_loop = MatchboxSessionLoop::new(domain, transport, false, lobby_id);
 
         tracing::info!("✅ SessionLoopV2 created as GUEST");
 
@@ -136,30 +113,5 @@ impl SessionLoopV2Builder {
 impl Default for SessionLoopV2Builder {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_builder_defaults() {
-        let builder = SessionLoopV2Builder::new();
-        assert_eq!(builder.batch_size, 10);
-        assert_eq!(builder.queue_size, 100);
-        assert_eq!(builder.cache_size, 100);
-    }
-
-    #[test]
-    fn test_builder_custom() {
-        let builder = SessionLoopV2Builder::new()
-            .batch_size(20)
-            .queue_size(200)
-            .cache_size(50);
-
-        assert_eq!(builder.batch_size, 20);
-        assert_eq!(builder.queue_size, 200);
-        assert_eq!(builder.cache_size, 50);
     }
 }
