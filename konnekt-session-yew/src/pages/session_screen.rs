@@ -21,28 +21,31 @@ enum ViewMode {
 pub fn session_screen(props: &SessionScreenProps) -> Html {
     let session = use_session();
     let view_mode = use_state(|| ViewMode::Lobby);
-    let has_submitted = use_state(|| false);
 
-    // Determine current view based on lobby state
+    // ✅ NO LOCAL STATE - determine view mode from Core only
     {
         let view_mode = view_mode.clone();
         let lobby = session.lobby.clone();
-        let has_submitted = has_submitted.clone();
 
         use_effect_with(lobby.clone(), move |lobby_opt| {
             if let Some(lobby) = lobby_opt {
-                if lobby.current_activity().is_some() {
-                    view_mode.set(ViewMode::ActivityInProgress);
+                // Check Core's activity status
+                if let Some(current) = lobby.current_activity() {
+                    if current.status == konnekt_session_core::domain::ActivityStatus::InProgress {
+                        view_mode.set(ViewMode::ActivityInProgress);
+                    } else if current.status
+                        == konnekt_session_core::domain::ActivityStatus::Completed
+                    {
+                        view_mode.set(ViewMode::Results);
+                    }
                 } else if lobby
                     .activities()
                     .iter()
                     .any(|a| a.status == konnekt_session_core::domain::ActivityStatus::Completed)
                 {
                     view_mode.set(ViewMode::Results);
-                    has_submitted.set(false);
                 } else {
                     view_mode.set(ViewMode::Lobby);
-                    has_submitted.set(false);
                 }
             }
             || ()
@@ -68,13 +71,6 @@ pub fn session_screen(props: &SessionScreenProps) -> Html {
                     activity_in_progress,
                 });
             }
-        })
-    };
-
-    let on_submit_result = {
-        let has_submitted = has_submitted.clone();
-        Callback::from(move |_| {
-            has_submitted.set(true);
         })
     };
 
@@ -115,8 +111,6 @@ pub fn session_screen(props: &SessionScreenProps) -> Html {
                         lobby={session.lobby.clone()}
                         is_host={session.is_host}
                         participant_id={session.get_local_participant_id()}
-                        has_submitted={*has_submitted}
-                        on_submit={on_submit_result}
                     />
                 },
                 ViewMode::Results => html! {

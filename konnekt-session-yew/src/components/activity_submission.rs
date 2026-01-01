@@ -10,8 +10,8 @@ pub struct ActivitySubmissionProps {
     pub lobby: Option<Lobby>,
     pub is_host: bool,
     pub participant_id: Option<Uuid>,
-    pub has_submitted: bool,
-    pub on_submit: Callback<()>,
+    // ✅ REMOVED: has_submitted (was local state)
+    // ✅ REMOVED: on_submit callback (no longer needed)
 }
 
 #[function_component(ActivitySubmission)]
@@ -32,7 +32,6 @@ pub fn activity_submission(props: &ActivitySubmissionProps) -> Html {
         let lobby = props.lobby.clone();
         let send_command = session.send_command.clone();
         let participant_id = props.participant_id;
-        let on_submit = props.on_submit.clone();
 
         Callback::from(move |e: SubmitEvent| {
             e.prevent_default();
@@ -51,13 +50,20 @@ pub fn activity_submission(props: &ActivitySubmissionProps) -> Html {
                                 .with_score(score)
                                 .with_time(1000);
 
+                        tracing::info!(
+                            "📤 Submitting result for activity {} (participant {})",
+                            current.id,
+                            pid
+                        );
+
+                        // ✅ Just send the command - let P2P + Core handle sync
                         send_command(DomainCommand::SubmitResult {
                             lobby_id: lobby.id(),
                             result,
                         });
 
                         response.set(String::new());
-                        on_submit.emit(());
+                        // ✅ NO LOCAL STATE UPDATE - wait for Core to update
                     }
                 }
             }
@@ -88,13 +94,19 @@ pub fn activity_submission(props: &ActivitySubmissionProps) -> Html {
                 Err(e) => (None, Some(format!("Failed to load: {}", e))),
             };
 
-            // Check if already submitted
+            // ✅ CHECK CORE: Has this participant submitted?
             let results = lobby.get_results(current.id);
-            let has_user_submitted = props.has_submitted
-                || props
-                    .participant_id
-                    .map(|id| results.iter().any(|r| r.participant_id == id))
-                    .unwrap_or(false);
+            let has_user_submitted = props
+                .participant_id
+                .map(|id| results.iter().any(|r| r.participant_id == id))
+                .unwrap_or(false);
+
+            tracing::debug!(
+                "Participant {:?} submitted: {} (results in core: {})",
+                props.participant_id,
+                has_user_submitted,
+                results.len()
+            );
 
             return html! {
                 <div class="konnekt-activity-screen">
@@ -130,6 +142,7 @@ pub fn activity_submission(props: &ActivitySubmissionProps) -> Html {
                                     activity_id={current.id}
                                 />
 
+                                // ✅ Check Core state only
                                 {if has_user_submitted {
                                     html! {
                                         <div class="konnekt-activity-screen__waiting-message">
