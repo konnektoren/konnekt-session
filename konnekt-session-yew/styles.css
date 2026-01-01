@@ -728,3 +728,31 @@ body {
     color: #666;
     font-style: italic;
 }
+
+.konnekt-participant-list__item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border-radius: 4px;
+    margin-bottom: 0.5rem;
+    transition: background-color 0.2s;
+    cursor: help; /* ✅ Show help cursor on hover */
+}
+
+.konnekt-participant-list__id {
+    font-size: 0.75rem;
+    color: #999;
+    font-family: monospace;
+    margin-left: auto;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.konnekt-participant-list__item:hover .konnekt-participant-list__id {
+    opacity: 1;
+}
+
+.konnekt-participant-list__item:hover {
+    background-color: rgba(0, 0, 0, 0.02);
+}

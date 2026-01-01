@@ -20,7 +20,6 @@ pub fn participant_list(props: &ParticipantListProps) -> Html {
             </h3>
             <ul class="konnekt-participant-list__items">
                 {for participants.values().map(|participant| {
-                    // 🔧 FIX: Show role in parentheses, not as main text
                     let role_icon = if participant.is_host() {
                         "👑"
                     } else {
@@ -39,8 +38,18 @@ pub fn participant_list(props: &ParticipantListProps) -> Html {
                         "spectating"
                     };
 
+                    // ✅ Build tooltip with participant ID
+                    let tooltip = format!(
+                        "ID: {}\nJoined: {}",
+                        participant.id(),
+                        participant.joined_at()
+                    );
+
                     html! {
-                        <li class={classes!("konnekt-participant-list__item", mode_class)}>
+                        <li
+                            class={classes!("konnekt-participant-list__item", mode_class)}
+                            title={tooltip}
+                        >
                             <span class="konnekt-participant-list__icon">{role_icon}</span>
                             <span class="konnekt-participant-list__name">
                                 {participant.name()}
@@ -52,6 +61,10 @@ pub fn participant_list(props: &ParticipantListProps) -> Html {
                                 } else {
                                     "👁️  Spectating"
                                 }}
+                            </span>
+                            // ✅ Show short ID for debugging
+                            <span class="konnekt-participant-list__id">
+                                {format!("#{}", &participant.id().to_string()[..8])}
                             </span>
                         </li>
                     }

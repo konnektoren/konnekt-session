@@ -116,75 +116,6 @@ pub fn session_screen(props: &SessionScreenProps) -> Html {
         })
     };
 
-    let on_submit_response = {
-        let activity_response = activity_response.clone();
-        let lobby = session.lobby.clone();
-        let send_command = session.send_command.clone();
-        let participant_id = session.local_participant_id;
-
-        Callback::from(move |e: SubmitEvent| {
-            e.prevent_default();
-
-            tracing::info!("📤 Attempting to submit response");
-
-            if participant_id.is_none() {
-                tracing::error!("❌ Cannot submit: No local participant ID");
-                return;
-            }
-
-            if lobby.is_none() {
-                tracing::error!("❌ Cannot submit: No lobby");
-                return;
-            }
-
-            let lobby = lobby.as_ref().unwrap();
-            let participant_id = participant_id.unwrap();
-
-            if let Some(current_activity) = lobby.current_activity() {
-                let response = (*activity_response).clone();
-
-                tracing::info!(
-                    "📤 Submitting response for activity {} by participant {}",
-                    current_activity.id,
-                    participant_id
-                );
-
-                if let Ok(challenge) = EchoChallenge::from_config(current_activity.config.clone()) {
-                    let score = challenge.calculate_score(&response);
-                    let echo_result = EchoResult::new(response.clone(), 1000);
-
-                    tracing::info!(
-                        "✅ Response '{}' scored: {} (expected: '{}')",
-                        response,
-                        score,
-                        challenge.prompt
-                    );
-
-                    let result = konnekt_session_core::domain::ActivityResult::new(
-                        current_activity.id,
-                        participant_id,
-                    )
-                    .with_data(echo_result.to_json())
-                    .with_score(score)
-                    .with_time(1000);
-
-                    send_command(DomainCommand::SubmitResult {
-                        lobby_id: lobby.id(),
-                        result,
-                    });
-
-                    activity_response.set(String::new());
-
-                    tracing::info!("✅ Result submitted successfully");
-                } else {
-                    tracing::error!("❌ Failed to parse activity config");
-                }
-            } else {
-                tracing::error!("❌ No current activity to submit to");
-            }
-        })
-    };
-
     let on_cancel_activity = {
         let send_command = session.send_command.clone();
         let lobby = session.lobby.clone();
@@ -203,9 +134,12 @@ pub fn session_screen(props: &SessionScreenProps) -> Html {
     let on_toggle_participation = {
         let send_command = session.send_command.clone();
         let lobby = session.lobby.clone();
-        let participant_id = session.local_participant_id;
+        let session_clone = session.clone();
+
         Callback::from(move |_: MouseEvent| {
-            if let (Some(lobby), Some(participant_id)) = (&lobby, participant_id) {
+            if let (Some(lobby), Some(participant_id)) =
+                (&lobby, session_clone.get_local_participant_id())
+            {
                 let activity_in_progress = lobby.current_activity().is_some();
                 send_command(DomainCommand::ToggleParticipationMode {
                     lobby_id: lobby.id(),
@@ -213,6 +147,47 @@ pub fn session_screen(props: &SessionScreenProps) -> Html {
                     requester_id: participant_id,
                     activity_in_progress,
                 });
+            }
+        })
+    };
+
+    let on_submit_response = {
+        let activity_response = activity_response.clone();
+        let lobby = session.lobby.clone();
+        let send_command = session.send_command.clone();
+        let session_clone = session.clone();
+
+        Callback::from(move |e: SubmitEvent| {
+            e.prevent_default();
+
+            if let (Some(lobby), Some(participant_id)) =
+                (&lobby, session_clone.get_local_participant_id())
+            {
+                if let Some(current_activity) = lobby.current_activity() {
+                    let response = (*activity_response).clone();
+
+                    if let Ok(challenge) =
+                        EchoChallenge::from_config(current_activity.config.clone())
+                    {
+                        let score = challenge.calculate_score(&response);
+                        let echo_result = EchoResult::new(response.clone(), 1000);
+
+                        let result = konnekt_session_core::domain::ActivityResult::new(
+                            current_activity.id,
+                            participant_id,
+                        )
+                        .with_data(echo_result.to_json())
+                        .with_score(score)
+                        .with_time(1000);
+
+                        send_command(DomainCommand::SubmitResult {
+                            lobby_id: lobby.id(),
+                            result,
+                        });
+
+                        activity_response.set(String::new());
+                    }
+                }
             }
         })
     };
