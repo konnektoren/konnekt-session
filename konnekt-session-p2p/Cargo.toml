@@ -39,10 +39,20 @@ console-subscriber = { workspace = true, optional = true }
 gloo-timers = { version = "0.3", features = ["futures"] }
 wasm-bindgen-futures = "0.4"
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+
 [features]
 native = ["tokio"]
 console = ["native", "console-subscriber", "tokio/tracing"]
 
-[dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+[[example]]
+name = "v2_basic_host"
+path = "examples/v2_basic_host.rs"
+required-features = ["native"]
+
+[[example]]
+name = "v2_basic_guest"
+path = "examples/v2_basic_guest.rs"
+required-features = ["native"]

@@ -1,2 +1,9 @@
 pub mod connection;
 pub mod error;
+pub mod message;
+pub mod transport;
+pub mod transport_builder;
+
+pub use message::{MessageKind, P2PMessage};
+pub use transport::P2PTransport;
+pub use transport_builder::P2PTransportBuilder;

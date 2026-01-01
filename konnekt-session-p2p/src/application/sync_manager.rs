@@ -373,7 +373,6 @@ pub enum SyncError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use konnekt_session_core::Participant;
 
     fn create_test_command() -> DomainCommand {
         DomainCommand::JoinLobby {
