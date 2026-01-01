@@ -80,17 +80,47 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                         .await
                         .expect("Failed to join session");
 
-                    tracing::info!("⏳ Waiting for lobby sync...");
+                    // 🔥 NEW: Wait for peer connection BEFORE doing anything else
+                    tracing::info!("⏳ Waiting for peer connection...");
+                    for i in 0..100 {
+                        loop_.poll();
+                        if !loop_.connected_peers().is_empty() {
+                            tracing::info!(
+                                "✅ Connected to {} peer(s) after {} attempts",
+                                loop_.connected_peers().len(),
+                                i + 1
+                            );
+                            break;
+                        }
 
+                        if i == 99 {
+                            tracing::error!(
+                                "❌ Timeout: No peer connection established after 10 seconds"
+                            );
+                            tracing::error!("   Make sure the host is running and reachable");
+                        }
+
+                        gloo_timers::future::TimeoutFuture::new(100).await;
+                    }
+
+                    // 🔥 NEW: Additional wait for lobby sync from host
+                    tracing::info!("⏳ Waiting for lobby sync from host...");
                     for i in 0..100 {
                         loop_.poll();
                         if loop_.get_lobby().is_some() {
                             tracing::info!("✅ Lobby synced after {} attempts!", i + 1);
                             break;
                         }
+
+                        if i == 99 {
+                            tracing::error!("❌ Timeout: Lobby never synced from host");
+                            tracing::error!("   Host should auto-send snapshot on connection");
+                        }
+
                         gloo_timers::future::TimeoutFuture::new(100).await;
                     }
 
+                    // NOW we can send commands - we have a peer connection AND lobby state
                     tracing::info!("📤 Submitting JoinLobby as '{}'", name);
                     if let Err(e) = loop_.submit_command(DomainCommand::JoinLobby {
                         lobby_id,
@@ -99,6 +129,7 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                         tracing::error!("❌ Failed to join: {:?}", e);
                     }
 
+                    // Poll until we see ourselves in the lobby
                     let name_str = name.to_string();
                     for i in 0..50 {
                         loop_.poll();
@@ -120,11 +151,18 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                         }
 
                         if i == 49 {
-                            tracing::error!("❌ Timeout: Didn't find ourselves in lobby");
+                            tracing::error!(
+                                "❌ Timeout: Didn't find ourselves in lobby after 5 seconds"
+                            );
                             if let Some(lobby) = loop_.get_lobby() {
-                                tracing::error!("   Participants:");
+                                tracing::error!("   Current participants:");
                                 for p in lobby.participants().values() {
-                                    tracing::error!("     - {} (host: {})", p.name(), p.is_host());
+                                    tracing::error!(
+                                        "     - {} (id: {}, host: {})",
+                                        p.name(),
+                                        p.id(),
+                                        p.is_host()
+                                    );
                                 }
                             }
                         }
