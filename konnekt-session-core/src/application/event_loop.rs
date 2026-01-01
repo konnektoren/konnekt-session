@@ -1,6 +1,7 @@
 use crate::application::{DomainCommand, DomainEvent};
 use crate::domain::{
     ActivityId, ActivityMetadata, ActivityResult, ActivityStatus, Lobby, LobbyError, Participant,
+    ParticipationMode,
 };
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -28,6 +29,12 @@ impl DomainEventLoop {
                 lobby_name,
                 host_name,
             } => self.handle_create_lobby(lobby_id, lobby_name, host_name),
+
+            DomainCommand::CreateLobbyWithHost {
+                lobby_id,
+                lobby_name,
+                host,
+            } => self.handle_create_lobby_with_host(lobby_id, lobby_name, host),
 
             DomainCommand::JoinLobby {
                 lobby_id,
@@ -85,6 +92,12 @@ impl DomainEventLoop {
                 lobby_id,
                 participant,
             } => self.handle_add_participant(lobby_id, participant),
+
+            DomainCommand::UpdateParticipantMode {
+                lobby_id,
+                participant_id,
+                new_mode,
+            } => self.handle_update_participant_mode(lobby_id, participant_id, new_mode),
         }
     }
 
@@ -376,6 +389,69 @@ impl DomainEventLoop {
             },
             Err(e) => DomainEvent::CommandFailed {
                 command: "AddParticipant".to_string(),
+                reason: e.to_string(),
+            },
+        }
+    }
+
+    fn handle_update_participant_mode(
+        &mut self,
+        lobby_id: Uuid,
+        participant_id: Uuid,
+        new_mode: ParticipationMode,
+    ) -> DomainEvent {
+        let lobby = match self.lobbies.get_mut(&lobby_id) {
+            Some(l) => l,
+            None => {
+                return DomainEvent::CommandFailed {
+                    command: "UpdateParticipantMode".to_string(),
+                    reason: format!("Lobby {} not found", lobby_id),
+                };
+            }
+        };
+
+        // Get participant
+        let participant = match lobby.participants_mut().get_mut(&participant_id) {
+            Some(p) => p,
+            None => {
+                return DomainEvent::CommandFailed {
+                    command: "UpdateParticipantMode".to_string(),
+                    reason: format!("Participant {} not found", participant_id),
+                };
+            }
+        };
+
+        // Force set the mode (no toggle, just set)
+        participant.force_participation_mode(new_mode);
+
+        DomainEvent::ParticipationModeChanged {
+            lobby_id,
+            participant_id,
+            new_mode,
+        }
+    }
+
+    fn handle_create_lobby_with_host(
+        &mut self,
+        lobby_id: Uuid,
+        lobby_name: String,
+        host: Participant,
+    ) -> DomainEvent {
+        tracing::info!(
+            "Creating lobby {} with specific host {} (id: {})",
+            lobby_name,
+            host.name(),
+            host.id()
+        );
+
+        match Lobby::with_id(lobby_id, lobby_name, host) {
+            Ok(lobby) => {
+                let lobby_id = lobby.id();
+                self.lobbies.insert(lobby_id, lobby.clone());
+                DomainEvent::LobbyCreated { lobby }
+            }
+            Err(e) => DomainEvent::CommandFailed {
+                command: "CreateLobbyWithHost".to_string(),
                 reason: e.to_string(),
             },
         }

@@ -6,9 +6,16 @@ use uuid::Uuid;
 pub enum DomainCommand {
     /// Create a new lobby with specific ID
     CreateLobby {
-        lobby_id: Option<Uuid>, // 🆕 Optional lobby ID
+        lobby_id: Option<Uuid>,
         lobby_name: String,
         host_name: String,
+    },
+
+    // Create lobby with specific host participant (for P2P sync)
+    CreateLobbyWithHost {
+        lobby_id: Uuid,
+        lobby_name: String,
+        host: crate::domain::Participant,
     },
 
     /// Join an existing lobby as guest
@@ -71,6 +78,14 @@ pub enum DomainCommand {
     AddParticipant {
         lobby_id: Uuid,
         participant: crate::domain::Participant,
+    },
+
+    /// Update a participant's mode directly (used for P2P sync)
+    /// This is different from ToggleParticipationMode because it sets a specific mode
+    UpdateParticipantMode {
+        lobby_id: Uuid,
+        participant_id: Uuid,
+        new_mode: crate::domain::ParticipationMode,
     },
 }
 
