@@ -41,11 +41,11 @@ fn test_guest_joins_and_syncs_lobby() {
 fn test_multiple_guests() {
     let mut fixture = SessionFixture::new(3);
 
-    // Wait for initial snapshot sync
-    println!("🔄 Waiting for snapshot sync...");
-    fixture.poll_until_stable(50);
+    // Initialize all peers - let them discover each other and sync initial state
+    println!("🔄 Initializing peers...");
+    fixture.tick(100);
 
-    println!("📊 After snapshot sync:");
+    println!("📊 After initial sync:");
     fixture.print_state();
 
     // All guests join
@@ -58,9 +58,17 @@ fn test_multiple_guests() {
         guest.submit_command(cmd).unwrap();
     }
 
-    // Wait for joins to propagate
-    println!("\n🔄 Waiting for joins to propagate...");
-    fixture.poll_until_stable(50);
+    // Let each guest process the join command and send it out
+    fixture.tick(100);
+
+    println!("📊 After guest joins:");
+    fixture.print_state();
+
+    // Let host receive and process all join messages from guests
+    fixture.tick(100);
+
+    // Ensure all peers have converged state
+    fixture.tick(100);
 
     println!("\n📊 Final state:");
     fixture.print_state();

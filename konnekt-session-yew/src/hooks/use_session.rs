@@ -51,21 +51,23 @@ impl PartialEq for SessionContext {
 ///
 /// # Example
 ///
-/// ```rust,no_run
+/// ```rust,ignore
 /// use konnekt_session_yew::use_session;
-/// use konnekt_session_core::DomainCommand;
 ///
-/// let session = use_session();
+/// #[function_component]
+/// fn MyComponent() -> Html {
+///     let session = use_session();
 ///
-/// // Get our participant ID from core
-/// if let Some(participant_id) = session.get_local_participant_id() {
-///     // Send a command
-///     (session.send_command)(DomainCommand::ToggleParticipationMode {
-///         lobby_id: session.lobby.unwrap().id(),
-///         participant_id,
-///         requester_id: participant_id,
-///         activity_in_progress: false,
-///     });
+///     // Access session properties
+///     let session_id = &session.session_id;
+///     let is_host = session.is_host;
+///     let peer_count = session.peer_count;
+///
+///     html! {
+///         <div>
+///             <p>{format!("Peers: {}", peer_count)}</p>
+///         </div>
+///     }
 /// }
 /// ```
 #[hook]

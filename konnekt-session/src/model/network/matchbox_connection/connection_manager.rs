@@ -21,7 +21,7 @@ impl ConnectionManager for MatchboxConnectionManager {
     type Peer = MatchboxPeerId;
 
     fn add_peer(&self, peer: Self::Peer) {
-        self.peers.write().unwrap().insert(peer, true);
+        self.peers.write().unwrap().insert(peer, false);
     }
 
     fn remove_peer(&self, peer: &Self::Peer) {
