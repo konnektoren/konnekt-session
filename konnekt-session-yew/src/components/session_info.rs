@@ -1,6 +1,11 @@
 use yew::prelude::*;
 
-#[derive(Properties, PartialEq)]
+#[cfg(feature = "preview")]
+use yew_preview::prelude::*;
+#[cfg(feature = "preview")]
+use yew_preview::test_utils::{exists, has_text};
+
+#[derive(Properties, PartialEq, Clone)]
 pub struct SessionInfoProps {
     pub session_id: String,
     #[prop_or_default]
@@ -112,32 +117,41 @@ pub fn session_info(props: &SessionInfoProps) -> Html {
 }
 
 #[cfg(feature = "preview")]
-use yew_preview::prelude::*;
-
-#[cfg(feature = "preview")]
-yew_preview::create_preview!(
-    SessionInfo,
-    SessionInfoProps {
+yew_preview::create_preview_with_tests!(
+    component: SessionInfo,
+    default_props: SessionInfoProps {
         session_id: "a1b2-c3d4-e5f6".to_string(),
         peer_count: 3,
         is_host: true,
     },
-    (
-        "Guest View",
-        SessionInfoProps {
-            session_id: "a1b2-c3d4-e5f6".to_string(),
-            peer_count: 3,
-            is_host: false,
-        }
-    ),
-    (
-        "Solo",
-        SessionInfoProps {
-            session_id: "a1b2-c3d4-e5f6".to_string(),
-            peer_count: 1,
-            is_host: true,
-        }
-    ),
+    variants: [
+        (
+            "Guest View",
+            SessionInfoProps {
+                session_id: "a1b2-c3d4-e5f6".to_string(),
+                peer_count: 3,
+                is_host: false,
+            }
+        ),
+        (
+            "Solo",
+            SessionInfoProps {
+                session_id: "a1b2-c3d4-e5f6".to_string(),
+                peer_count: 1,
+                is_host: true,
+            }
+        )
+    ],
+    tests: [
+        ("Has main container class", exists("konnekt-session-info")),
+        ("Has label class", exists("konnekt-session-info__label")),
+        ("Has code tag", exists("code")),
+        ("Has copy button class", exists("konnekt-session-info__copy")),
+        ("Contains Session ID label", has_text("Session ID:")),
+        ("Contains Connected Peers label", has_text("Connected Peers:")),
+        ("Contains Role label", has_text("Role:")),
+        ("Shows peer count", has_text("3")),
+    ]
 );
 
 #[cfg(test)]

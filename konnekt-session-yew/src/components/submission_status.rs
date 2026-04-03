@@ -4,8 +4,10 @@ use yew::prelude::*;
 
 #[cfg(feature = "preview")]
 use yew_preview::prelude::*;
+#[cfg(feature = "preview")]
+use yew_preview::test_utils::{exists, has_text};
 
-#[derive(Properties, PartialEq)]
+#[derive(Properties, PartialEq, Clone)]
 pub struct SubmissionStatusProps {
     pub lobby: Lobby,
     pub activity_id: ActivityId,
@@ -121,8 +123,21 @@ mod preview_fixtures {
 }
 
 #[cfg(feature = "preview")]
-yew_preview::create_preview!(SubmissionStatus, {
-    let lobby = preview_fixtures::make_sample_lobby();
-    let activity_id = lobby.current_activity().map(|a| a.id).unwrap_or_default();
-    SubmissionStatusProps { lobby, activity_id }
-},);
+yew_preview::create_preview_with_tests!(
+    component: SubmissionStatus,
+    default_props: {
+        let lobby = preview_fixtures::make_sample_lobby();
+        let activity_id = lobby.activities().first().map(|a| a.id).unwrap_or_default();
+        SubmissionStatusProps { lobby, activity_id }
+    },
+    variants: [],
+    tests: [
+        ("Has main container class", exists("konnekt-submission-status")),
+        ("Has stats class", exists("konnekt-submission-status__stats")),
+        ("Has submitted class", exists("konnekt-submission-status__submitted")),
+        ("Has pending class", exists("konnekt-submission-status__pending")),
+        ("Shows submission progress", has_text("2 / 3 submitted")),
+        ("Contains Alice (submitted)", has_text("Alice")),
+        ("Contains Charlie (pending)", has_text("Charlie")),
+    ]
+);

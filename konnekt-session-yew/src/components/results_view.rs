@@ -3,8 +3,10 @@ use yew::prelude::*;
 
 #[cfg(feature = "preview")]
 use yew_preview::prelude::*;
+#[cfg(feature = "preview")]
+use yew_preview::test_utils::{exists, has_text};
 
-#[derive(Properties, PartialEq)]
+#[derive(Properties, PartialEq, Clone)]
 pub struct ResultsViewProps {
     pub lobby: Option<Lobby>,
     pub is_host: bool,
@@ -112,7 +114,7 @@ mod preview_fixtures {
         );
         lobby.plan_activity(activity).unwrap();
 
-        let activity_id = lobby.current_activity().map(|a| a.id);
+        let activity_id = lobby.activities().first().map(|a| a.id);
         if let Some(id) = activity_id {
             lobby.start_activity(id).unwrap();
 
@@ -132,24 +134,37 @@ mod preview_fixtures {
 }
 
 #[cfg(feature = "preview")]
-yew_preview::create_preview!(
-    ResultsView,
-    ResultsViewProps {
+yew_preview::create_preview_with_tests!(
+    component: ResultsView,
+    default_props: ResultsViewProps {
         lobby: Some(preview_fixtures::make_sample_lobby()),
         is_host: true,
     },
-    (
-        "Guest View",
-        ResultsViewProps {
-            lobby: Some(preview_fixtures::make_sample_lobby()),
-            is_host: false,
-        }
-    ),
-    (
-        "No Lobby",
-        ResultsViewProps {
-            lobby: None,
-            is_host: false,
-        }
-    ),
+    variants: [
+        (
+            "Guest View",
+            ResultsViewProps {
+                lobby: Some(preview_fixtures::make_sample_lobby()),
+                is_host: false,
+            }
+        ),
+        (
+            "No Lobby",
+            ResultsViewProps {
+                lobby: None,
+                is_host: false,
+            }
+        )
+    ],
+    tests: [
+        ("Has results screen class", exists("konnekt-results-screen")),
+        ("Has header class", exists("konnekt-results-screen__header")),
+        ("Has footer class", exists("konnekt-results-screen__footer")),
+        ("Has activity class", exists("konnekt-results-screen__activity")),
+        ("Contains Results title", has_text("Results")),
+        ("Contains Echo Challenge", has_text("Echo Challenge")),
+        ("Contains Alice score", has_text("95")),
+        ("Contains Bob score", has_text("85")),
+        ("Contains Charlie score", has_text("92")),
+    ]
 );

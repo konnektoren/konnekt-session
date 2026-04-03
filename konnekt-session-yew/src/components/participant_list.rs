@@ -3,8 +3,10 @@ use yew::prelude::*;
 
 #[cfg(feature = "preview")]
 use yew_preview::prelude::*;
+#[cfg(feature = "preview")]
+use yew_preview::test_utils::{exists, has_text};
 
-#[derive(Properties, PartialEq)]
+#[derive(Properties, PartialEq, Clone)]
 pub struct ParticipantListProps {
     pub lobby: Lobby,
 }
@@ -79,6 +81,7 @@ pub fn participant_list(props: &ParticipantListProps) -> Html {
 
 #[cfg(feature = "preview")]
 mod preview_fixtures {
+    use super::*;
     use konnekt_session_core::{Lobby, Participant};
 
     pub fn make_sample_lobby() -> Lobby {
@@ -95,11 +98,24 @@ mod preview_fixtures {
 }
 
 #[cfg(feature = "preview")]
-yew_preview::create_preview!(
-    ParticipantList,
-    ParticipantListProps {
+yew_preview::create_preview_with_tests!(
+    component: ParticipantList,
+    default_props: ParticipantListProps {
         lobby: preview_fixtures::make_sample_lobby(),
     },
+    variants: [],
+    tests: [
+        ("Has main container class", exists("konnekt-participant-list")),
+        ("Has title tag", exists("h3")),
+        ("Has items list class", exists("konnekt-participant-list__items")),
+        ("Has participant item class", exists("konnekt-participant-list__item")),
+        ("Has icon class", exists("konnekt-participant-list__icon")),
+        ("Shows correct participant count", has_text("Participants (3)")),
+        ("Contains Alice", has_text("Alice")),
+        ("Contains Bob", has_text("Bob")),
+        ("Contains Charlie", has_text("Charlie")),
+        ("Shows Active status", has_text("Active")),
+    ]
 );
 
 #[cfg(test)]
