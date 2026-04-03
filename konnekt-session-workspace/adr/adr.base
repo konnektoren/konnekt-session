@@ -1,0 +1,91 @@
+filters:
+  and:
+    - file.inFolder("adr")
+    - file.hasTag("adr")
+formulas:
+  days_since_decision: ((now() - date) / (1000 * 60 * 60 * 24)).round(0)
+  status_icon: if(status == "accepted", "✅", if(status == "proposed", "🔄", "❓"))
+  source_link: if(source, "📄", "")
+properties:
+  file.name:
+    displayName: ID
+  title:
+    displayName: Decision
+  category:
+    displayName: Category
+  status:
+    displayName: Status
+  formula.status_icon:
+    displayName: "·"
+  date:
+    displayName: Date
+  formula.days_since_decision:
+    displayName: Age (days)
+  tags:
+    displayName: Tags
+  source:
+    displayName: Source File
+  formula.source_link:
+    displayName: Doc
+views:
+  - type: table
+    name: All ADRs
+    order:
+      - file.name
+      - formula.status_icon
+      - title
+      - category
+      - date
+      - formula.days_since_decision
+
+  - type: table
+    name: By Category
+    groupBy:
+      property: category
+      direction: ASC
+    order:
+      - file.name
+      - title
+      - formula.status_icon
+      - date
+
+  - type: table
+    name: Accepted
+    filters:
+      and:
+        - status == "accepted"
+    order:
+      - category
+      - file.name
+      - title
+      - date
+
+  - type: table
+    name: Proposed / In Review
+    filters:
+      and:
+        - status == "proposed"
+    order:
+      - date
+      - file.name
+      - title
+      - category
+
+  - type: table
+    name: By Date
+    order:
+      - date
+      - file.name
+      - category
+      - title
+
+  - type: table
+    name: Full Details
+    order:
+      - file.name
+      - title
+      - category
+      - formula.status_icon
+      - tags
+      - source
+      - date

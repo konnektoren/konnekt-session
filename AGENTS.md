@@ -64,7 +64,7 @@ Konnekt Session is a **Rust-centric, peer-to-peer multiplayer-lobby library** wh
 5. **Test host delegation** – close the host window, watch oldest guest get promoted after 30s timeout.  
 6. **Test spectator mode** – toggle a guest to Spectating, verify they can't submit activity results.
 
-### 3. Key Artifacts to Touch  
+### 3. Key Artifacts to Touch
 
 | Artifact | Location | Why it matters |
 |----------|----------|----------------|
@@ -73,6 +73,54 @@ Konnekt Session is a **Rust-centric, peer-to-peer multiplayer-lobby library** wh
 | `konnekt-session-core/src/infrastructure/auth/` | `PrivateKey` generation, storage, host-key handling. | Enables stable identity and host reclaim. |
 | `konnekt-session-yew/src/components/` | Yew UI components that render lobby, activities, participant list. | UI reflects the signed state updates. |
 | `docs/*.adoc` | Full architecture documentation (DDD process, C4 diagrams, domain message flows). | Reference for architectural decisions. |
+| `docs/adr/` | 23 Architecture Decision Records (ADR-0001–ADR-0023). | Rationale for every key technology choice. |
+
+### 3a. DDD Modeling Process Status
+
+The project follows the **DDD Starter Modelling Process**:
+
+| Step | Document | Status |
+|------|----------|--------|
+| 1 – Understand | `docs/01-understand.adoc` | ✅ Done |
+| 2 – Discover | `docs/02-discover.adoc` | ✅ Done |
+| 3 – Decompose | `docs/03-decompose.adoc` | ✅ Done |
+| 4 – Strategize | `docs/04-strategize.adoc` | ✅ Done |
+| 5 – Connect | `docs/05-connect.adoc` | ✅ Done |
+| 6 – Organise | `docs/06-organise.adoc` | ✅ Done |
+| 7 – Define | _(coming soon)_ | 🚧 Planned |
+| 8 – Code | _(coming soon)_ | 🚧 Planned |
+
+### 3b. Architecture Decision Records (ADRs)
+
+All ADRs are in `docs/adr/` and follow the **Nygard format**. Full index at `docs/adr/README.adoc`.
+
+| ID | Title | Date |
+|----|-------|------|
+| ADR-0001 | Use Rust for Implementation | 2025-12-29 |
+| ADR-0002 | Use Yew for Frontend Framework | 2025-12-29 |
+| ADR-0003 | Use Matchbox for WebRTC Signaling | 2025-12-29 |
+| ADR-0004 | Use Client-Side Key Generation for Persistent Identity | 2025-12-29 |
+| ADR-0005 | Use Tracing for Logging and Diagnostics | 2025-12-29 |
+| ADR-0006 | Use Cargo Workspace for Modular Architecture | 2025-12-29 |
+| ADR-0007 | Use Cucumber for Behavior-Driven Testing | 2025-12-29 |
+| ADR-0008 | Use thiserror for Domain Errors | 2025-12-29 |
+| ADR-0009 | Use JSON with Feature-Gated MessagePack | 2025-12-29 |
+| ADR-0010 | Use Event Sourcing for Lobby State | 2025-12-29 |
+| ADR-0011 | Use std::future for WASM-Compatible Async | 2025-12-29 |
+| ADR-0012 | Use garde for Domain Validation | 2025-12-29 |
+| ADR-0013 | Use instant for Cross-Platform Time | 2025-12-29 |
+| ADR-0014 | Use localStorage for Session Persistence | 2025-12-29 |
+| ADR-0015 | Use Feature-Gated Event Cache | 2025-12-29 |
+| ADR-0016 | Use Clap for CLI Tooling | 2025-12-29 |
+| ADR-0017 | Use Schemars for Schema Generation with Aide for OpenAPI | 2025-12-29 |
+| ADR-0018 | Use Ratatui for Interactive CLI Development | 2025-12-29 |
+| ADR-0019 | Use Arboard for Clipboard Integration in TUI | 2025-12-29 |
+| ADR-0020 | Dual Event Loop Architecture with Anti-Corruption Layer | 2025-12-30 |
+| ADR-0021 | Use Mockall for Test Doubles | 2025-12-30 |
+| ADR-0022 | Use tokio-console for Async Runtime Debugging | 2025-12-30 |
+| ADR-0023 | Use tracing-chrome for Performance Profiling | 2025-12-30 |
+
+When adding a new ADR: number sequentially (ADR-0024+), use imperative mood ("Use X"), document alternatives considered.
 
 ### 4. Module Structure (Subdomain Mapping)
 
@@ -145,7 +193,27 @@ consuming-app/                 # Separate repository (example)
 
 ---  
 
-## What **Not** to Do  
+## Quality Attributes
+
+| Attribute | How addressed |
+|-----------|---------------|
+| **Scalability** | P2P scales with guests; signalling server is stateless. |
+| **Reliability** | Host delegation ensures lobby survives disconnections; oldest guest auto-promoted after 30s. |
+| **Security** | All messages signed with Ed25519; verification mandatory before state changes. |
+| **Performance** | WebRTC data channels provide low-latency P2P communication. |
+| **Testability** | Pure domain logic, dependency injection, simulated P2P network (Mockall, Cucumber BDD). |
+| **Flexibility** | Spectator mode allows guests to watch/play dynamically without leaving lobby. |
+
+## Known Risks & Technical Debt
+
+* **Network partitions** – WebRTC peers may diverge if they can't reach each other. Mitigation: reconnection + state reconciliation.
+* **Host key loss** – Host can't reclaim role if key is lost. Mitigation: provide key export/backup UI.
+* **Malicious peers** – Can spam invalid messages. Mitigation: rate limiting + signature verification + host kick.
+* **Spectator gaming** – Guest toggles Spectating to skip hard activities. Mitigation: forbid mode changes during active activity.
+
+---
+
+## What **Not** to Do
 
 * **Don't add new server-side storage** – it breaks the decentralized model.  
 * **Don't expose raw WebSocket frames** to the UI; always go through the signed `P2PMessage` envelope.  
