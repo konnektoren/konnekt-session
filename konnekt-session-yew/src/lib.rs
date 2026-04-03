@@ -6,6 +6,8 @@ pub mod app;
 pub mod components;
 pub mod hooks;
 pub mod pages;
+#[cfg(feature = "preview")]
+pub mod preview;
 pub mod providers;
 
 // Re-exports for convenience

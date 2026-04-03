@@ -111,6 +111,35 @@ pub fn session_info(props: &SessionInfoProps) -> Html {
     }
 }
 
+#[cfg(feature = "preview")]
+use yew_preview::prelude::*;
+
+#[cfg(feature = "preview")]
+yew_preview::create_preview!(
+    SessionInfo,
+    SessionInfoProps {
+        session_id: "a1b2-c3d4-e5f6".to_string(),
+        peer_count: 3,
+        is_host: true,
+    },
+    (
+        "Guest View",
+        SessionInfoProps {
+            session_id: "a1b2-c3d4-e5f6".to_string(),
+            peer_count: 3,
+            is_host: false,
+        }
+    ),
+    (
+        "Solo",
+        SessionInfoProps {
+            session_id: "a1b2-c3d4-e5f6".to_string(),
+            peer_count: 1,
+            is_host: true,
+        }
+    ),
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;

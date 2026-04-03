@@ -1,6 +1,9 @@
 use konnekt_session_core::Lobby;
 use yew::prelude::*;
 
+#[cfg(feature = "preview")]
+use yew_preview::prelude::*;
+
 #[derive(Properties, PartialEq)]
 pub struct ParticipantListProps {
     pub lobby: Lobby,
@@ -73,6 +76,31 @@ pub fn participant_list(props: &ParticipantListProps) -> Html {
         </div>
     }
 }
+
+#[cfg(feature = "preview")]
+mod preview_fixtures {
+    use konnekt_session_core::{Lobby, Participant};
+
+    pub fn make_sample_lobby() -> Lobby {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let mut lobby = Lobby::new("Preview Lobby".to_string(), host).unwrap();
+        lobby
+            .add_guest(Participant::new_guest("Bob".to_string()).unwrap())
+            .unwrap();
+        lobby
+            .add_guest(Participant::new_guest("Charlie".to_string()).unwrap())
+            .unwrap();
+        lobby
+    }
+}
+
+#[cfg(feature = "preview")]
+yew_preview::create_preview!(
+    ParticipantList,
+    ParticipantListProps {
+        lobby: preview_fixtures::make_sample_lobby(),
+    },
+);
 
 #[cfg(test)]
 mod tests {
