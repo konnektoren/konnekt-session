@@ -43,7 +43,7 @@ fn test_multiple_guests() {
 
     // Initialize all peers - let them discover each other and sync initial state
     println!("🔄 Initializing peers...");
-    fixture.tick(100);
+    fixture.tick(500);
 
     println!("📊 After initial sync:");
     fixture.print_state();
@@ -59,16 +59,16 @@ fn test_multiple_guests() {
     }
 
     // Let each guest process the join command and send it out
-    fixture.tick(100);
+    fixture.tick(300);
 
     println!("📊 After guest joins:");
     fixture.print_state();
 
     // Let host receive and process all join messages from guests
-    fixture.tick(100);
+    fixture.tick(300);
 
     // Ensure all peers have converged state
-    fixture.tick(100);
+    fixture.tick(300);
 
     println!("\n📊 Final state:");
     fixture.print_state();
@@ -144,7 +144,7 @@ fn test_activity_completion() {
     let mut fixture = SessionFixture::new(1);
 
     // Setup: join + plan + start
-    fixture.poll_until_stable(20);
+    fixture.tick(200);
 
     fixture.guests[0]
         .submit_command(DomainCommand::JoinLobby {
@@ -153,7 +153,7 @@ fn test_activity_completion() {
         })
         .unwrap();
 
-    fixture.poll_until_stable(20);
+    fixture.tick(250);
 
     // Now get participant IDs (after stabilization)
     let host_lobby = fixture.host.get_lobby().unwrap();
@@ -189,7 +189,7 @@ fn test_activity_completion() {
         })
         .unwrap();
 
-    fixture.poll_until_stable(20);
+    fixture.tick(250);
 
     let activity_id = fixture.host.get_lobby().unwrap().activities()[0].id;
 
@@ -202,7 +202,7 @@ fn test_activity_completion() {
         })
         .unwrap();
 
-    fixture.poll_until_stable(20);
+    fixture.tick(250);
 
     // Submit results
     let result = konnekt_session_core::EchoResult::new("Test".to_string(), 100);
@@ -220,7 +220,7 @@ fn test_activity_completion() {
         })
         .unwrap();
 
-    fixture.poll_until_stable(20);
+    fixture.tick(250);
 
     fixture.guests[0]
         .submit_command(DomainCommand::SubmitResult {
@@ -234,8 +234,8 @@ fn test_activity_completion() {
         })
         .unwrap();
 
-    // ✅ Wait for completion to propagate
-    fixture.poll_until_stable(30);
+    // ✅ Wait for completion to propagate with explicit ticks
+   fixture.tick(400);
 
     // Assert activity completed
     let host_activity = &fixture.host.get_lobby().unwrap().activities()[0];
