@@ -1,14 +1,14 @@
 <!doctype html>
 <html lang="en">
     <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Konnekt Session</title>
-        <link rel="stylesheet" href="/konnekt-session/styles-f584103ee24fed7d.css" integrity="sha384-gj33eTdnwL5CJoX+P31XHGGfTPr8BBHD95SyMvdIlUo6eoFx9ILyOBFEAn8ctOx5"/>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Konnekt Session - Basic Lobby Example</title>
+        <link rel="stylesheet" href="/konnekt-session/styles-fdd2b0de8f117f32.css" integrity="sha384-D9O9jOpZodhpvMlH2B5wz4JBo0Jneel1sP3GWg5RYd+QYdl1VokDo+w3ViLPv46Z"/>
         
 <script type="module">
-import init, * as bindings from '/konnekt-session/konnekt_session_app-64302fa09e8dab08.js';
-const wasm = await init({ module_or_path: '/konnekt-session/konnekt_session_app-64302fa09e8dab08_bg.wasm' });
+import init, * as bindings from '/konnekt-session/basic-lobby-608fda7073a859a0.js';
+const wasm = await init({ module_or_path: '/konnekt-session/basic-lobby-608fda7073a859a0_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -17,7 +17,7 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>
-    <link rel="modulepreload" href="/konnekt-session/konnekt_session_app-64302fa09e8dab08.js" crossorigin="anonymous" integrity="sha384-EHcfmxmx268BmwxHtfcT0ARRSb8drBgMeCbYYbDHlDMVUmDO2EBj9VcjcmtOMvLd"><link rel="preload" href="/konnekt-session/konnekt_session_app-64302fa09e8dab08_bg.wasm" crossorigin="anonymous" integrity="sha384-vPiGJvJC1qMBZgp90yE+WO5Bt70y8KWYl3X+E9qO6vBvfO2NOfIW3tLIj4F0PW0i" as="fetch" type="application/wasm"></head>
+    <link rel="modulepreload" href="/konnekt-session/basic-lobby-608fda7073a859a0.js" crossorigin="anonymous" integrity="sha384-3udojwjSy4XpsJi1Fr/RE3ysB48KECJfRFHTV3sVaJNrLRO716doyhUvXqAI5P5h"><link rel="preload" href="/konnekt-session/basic-lobby-608fda7073a859a0_bg.wasm" crossorigin="anonymous" integrity="sha384-/Vq5YMUF7ByQXe5jSg24+dM5+vOcKDEqVRJD3em5Jb0tQdmqXRwaMcoOiefA/0Ah" as="fetch" type="application/wasm"></head>
     <body>
         <div id="app"></div>
     </body>
