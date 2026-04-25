@@ -1,6 +1,8 @@
 use bevy_app::App;
 use cucumber::World;
-use konnekt_session_core::{DomainCommand, DomainEvent, DomainEventLoop, Lobby};
+use konnekt_session_core::{
+    DomainCommand, DomainEvent, DomainEventLoop, Lobby, LobbyRole, ParticipationMode,
+};
 use konnekt_session_bevy::{SessionCommand, SessionDomain, SessionEventLog, SessionPlugin};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -27,6 +29,19 @@ pub struct SessionWorld {
 
     /// Bevy app under test for BDD scenarios
     pub bevy_app: Option<App>,
+
+    /// Last who_am_i resolution (Yew identity function)
+    pub last_who_am_i: Option<WhoAmIObservation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WhoAmIObservation {
+    pub local_peer_id: Option<String>,
+    pub p2p_role: String,
+    pub participant_id: Option<Uuid>,
+    pub participant_name: Option<String>,
+    pub lobby_role: Option<LobbyRole>,
+    pub participation_mode: Option<ParticipationMode>,
 }
 
 impl SessionWorld {
