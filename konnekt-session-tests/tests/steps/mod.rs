@@ -1,4 +1,5 @@
 mod echo_challenge_steps;
+mod bevy_application_steps;
 mod event_translation_steps;
 mod host_delegation_steps;
 mod lobby_management_steps;

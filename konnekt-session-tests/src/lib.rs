@@ -1,7 +1,7 @@
+use bevy_app::App;
 use cucumber::World;
-use konnekt_session_core::{
-    DomainCommand, DomainEvent, DomainEventLoop, Lobby, LobbyError, Participant,
-};
+use konnekt_session_core::{DomainCommand, DomainEvent, DomainEventLoop, Lobby};
+use konnekt_session_bevy::{SessionCommand, SessionDomain, SessionEventLog, SessionPlugin};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -24,6 +24,9 @@ pub struct SessionWorld {
 
     /// Track errors (also used to temporarily store P2P events as JSON)
     pub last_error: Option<String>,
+
+    /// Bevy app under test for BDD scenarios
+    pub bevy_app: Option<App>,
 }
 
 impl SessionWorld {
@@ -80,5 +83,55 @@ impl SessionWorld {
         } else {
             *self.lobby_ids.values().next().unwrap()
         }
+    }
+
+    /// Initialize a fresh Bevy app with session plugin.
+    pub fn init_bevy(&mut self) {
+        let mut app = App::new();
+        app.add_plugins(SessionPlugin);
+        self.bevy_app = Some(app);
+    }
+
+    /// Submit a command into the Bevy message bus.
+    pub fn bevy_submit(&mut self, command: DomainCommand) {
+        let app = self
+            .bevy_app
+            .as_mut()
+            .expect("Bevy app not initialized for scenario");
+        app.world_mut().write_message(SessionCommand(command));
+    }
+
+    /// Tick Bevy app N times.
+    pub fn bevy_tick(&mut self, ticks: usize) {
+        let app = self
+            .bevy_app
+            .as_mut()
+            .expect("Bevy app not initialized for scenario");
+        for _ in 0..ticks {
+            app.update();
+        }
+    }
+
+    /// Read copied event log from Bevy resource.
+    pub fn bevy_event_log(&self) -> Vec<konnekt_session_bevy::SessionDomainEvent> {
+        let app = self
+            .bevy_app
+            .as_ref()
+            .expect("Bevy app not initialized for scenario");
+        app.world().resource::<SessionEventLog>().0.clone()
+    }
+
+    /// Read lobby participant count from Bevy-backed domain loop.
+    pub fn bevy_lobby_participant_count(&self, lobby_id: Uuid) -> usize {
+        let app = self
+            .bevy_app
+            .as_ref()
+            .expect("Bevy app not initialized for scenario");
+        app.world()
+            .resource::<SessionDomain>()
+            .event_loop
+            .get_lobby(&lobby_id)
+            .map(|l| l.participants().len())
+            .unwrap_or(0)
     }
 }
