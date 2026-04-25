@@ -102,11 +102,11 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
                     DomainCommand::JoinLobby { guest_name, .. } => {
                         tracing::info!("👤 Guest '{}' wants to join", guest_name);
                     }
-                    DomainCommand::SubmitResult { result, .. } => {
+                    DomainCommand::SubmitResult { result, run_id, .. } => {
                         tracing::info!(
-                            "📊 Result from participant {} for activity {}",
+                            "📊 Result from participant {} for run {}",
                             result.participant_id,
-                            result.activity_id
+                            run_id
                         );
                     }
                     _ => {}
@@ -166,9 +166,9 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
                         tracing::debug!("   ↳ Skipping GuestLeft (already broadcast)");
                         continue;
                     }
-                    CoreDomainEvent::ActivityCompleted { .. } => {
+                    CoreDomainEvent::RunEnded { .. } => {
                         tracing::debug!(
-                            "   ↳ Skipping ActivityCompleted (auto-completes on guests)"
+                            "   ↳ Skipping RunEnded (auto-completes on guests)"
                         );
                         continue;
                     }
@@ -264,39 +264,37 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
                     participant,
                 })
             }
-            CoreDomainEvent::ActivityStarted { activity_id, .. } => {
-                Some(DomainCommand::StartActivity {
+            CoreDomainEvent::RunStarted { run_id, config, .. } => {
+                let required_submitters = self.domain.event_loop()
+                    .get_run(&run_id)
+                    .map(|r| r.required_submitters().iter().cloned().collect())
+                    .unwrap_or_default();
+                Some(DomainCommand::SyncRunStarted {
                     lobby_id: self.lobby_id,
-                    activity_id,
+                    run_id,
+                    config,
+                    required_submitters,
                 })
             }
-            CoreDomainEvent::ActivityPlanned { metadata, .. } => {
-                Some(DomainCommand::PlanActivity {
+            CoreDomainEvent::ActivityQueued { config, .. } => {
+                Some(DomainCommand::QueueActivity {
                     lobby_id: self.lobby_id,
-                    metadata,
+                    config,
                 })
             }
-            CoreDomainEvent::ResultSubmitted { result, .. } => Some(DomainCommand::SubmitResult {
-                lobby_id: self.lobby_id,
-                result,
-            }),
-            CoreDomainEvent::ActivityCancelled { activity_id, .. } => {
-                Some(DomainCommand::CancelActivity {
+            CoreDomainEvent::ResultSubmitted { run_id, result, .. } => {
+                Some(DomainCommand::SubmitResult {
                     lobby_id: self.lobby_id,
-                    activity_id,
+                    run_id,
+                    result,
                 })
             }
-            CoreDomainEvent::ActivityCompleted {
-                activity_id,
-                results,
+            CoreDomainEvent::RunEnded {
+                run_id: _,
+                results: _,
                 ..
             } => {
-                // We need to submit all results to ensure guest sees completion
-                // But first, let's just mark it complete via the last result
-                // The better way is to have a CompleteActivity command
-
-                // For now, we rely on guests receiving all SubmitResult commands
-                // When they process the final result, they'll auto-complete
+                // Guests auto-complete when they process all SubmitResult commands
                 None // Guest will auto-complete when they receive all results
             }
             _ => None,
@@ -318,6 +316,11 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
 
     pub fn connected_peers(&self) -> Vec<crate::domain::PeerId> {
         self.transport.connected_peers()
+    }
+
+    pub fn get_active_run(&self) -> Option<&konnekt_session_core::ActivityRun> {
+        let run_id = self.get_lobby()?.active_run_id()?;
+        self.domain.event_loop().get_run(&run_id)
     }
 }
 

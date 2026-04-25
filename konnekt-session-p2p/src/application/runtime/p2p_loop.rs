@@ -1,7 +1,7 @@
 use crate::application::runtime::MessageQueue;
 use crate::application::sync_manager::{EventSyncManager, SyncMessage, SyncResponse};
 use crate::application::{ConnectionEvent, EventTranslator, LobbySnapshot};
-use crate::domain::{DomainEvent as P2PDomainEvent, LobbyEvent, PeerId, PeerRegistry};
+use crate::domain::{LobbyEvent, PeerId, PeerRegistry};
 use crate::infrastructure::connection::MatchboxConnection;
 use crate::infrastructure::error::Result;
 use instant::Duration;

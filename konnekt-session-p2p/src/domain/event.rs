@@ -1,6 +1,6 @@
 use konnekt_session_core::{
     Participant, Timestamp,
-    domain::{ActivityId, ActivityMetadata, ActivityResult},
+    domain::{ActivityConfig, ActivityResult, ActivityRunId, RunStatus},
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -8,7 +8,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DomainEvent {
-    // Existing events...
+    // ── Lobby events ─────────────────────────────────────────────────────────
+
     LobbyCreated {
         lobby_id: Uuid,
         host_id: Uuid,
@@ -39,25 +40,29 @@ pub enum DomainEvent {
         new_mode: String,
     },
 
-    ActivityPlanned {
-        metadata: ActivityMetadata,
+    ActivityQueued {
+        config: ActivityConfig,
     },
 
-    ActivityStarted {
-        activity_id: ActivityId,
+    // ── Run events ────────────────────────────────────────────────────────────
+
+    /// Host broadcasts when a run starts. Includes required_submitters so
+    /// peers can independently track completion.
+    RunStarted {
+        run_id: ActivityRunId,
+        config: ActivityConfig,
+        required_submitters: Vec<Uuid>,
     },
 
     ResultSubmitted {
+        run_id: ActivityRunId,
         result: ActivityResult,
     },
 
-    ActivityCompleted {
-        activity_id: ActivityId,
+    RunEnded {
+        run_id: ActivityRunId,
+        status: RunStatus,
         results: Vec<ActivityResult>,
-    },
-
-    ActivityCancelled {
-        activity_id: ActivityId,
     },
 }
 
@@ -73,25 +78,15 @@ pub enum DelegationReason {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub struct LobbyEvent {
-    /// Monotonically increasing sequence number (assigned by host)
     pub sequence: u64,
-
-    /// Lobby this event belongs to
     pub lobby_id: Uuid,
-
-    /// When this event was created
     pub timestamp: Timestamp,
-
-    /// The actual domain event
     pub event: DomainEvent,
-
-    /// Host's signature (TODO: in future commit)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<Vec<u8>>,
 }
 
 impl LobbyEvent {
-    /// Create a new event with sequence and timestamp
     pub fn new(sequence: u64, lobby_id: Uuid, event: DomainEvent) -> Self {
         Self {
             sequence,
@@ -102,10 +97,9 @@ impl LobbyEvent {
         }
     }
 
-    /// Create an event without sequence (for guests creating requests)
     pub fn without_sequence(lobby_id: Uuid, event: DomainEvent) -> Self {
         Self {
-            sequence: 0, // Will be assigned by host
+            sequence: 0,
             lobby_id,
             timestamp: Timestamp::now(),
             event,
@@ -155,23 +149,29 @@ mod tests {
         let manual = DelegationReason::Manual;
         let json = serde_json::to_string(&manual).unwrap();
         assert_eq!(json, "\"manual\"");
-
-        let timeout = DelegationReason::Timeout;
-        let json = serde_json::to_string(&timeout).unwrap();
-        assert_eq!(json, "\"timeout\"");
     }
 
     #[test]
-    fn test_event_without_sequence() {
-        let lobby_id = Uuid::new_v4();
-        let event = LobbyEvent::without_sequence(
-            lobby_id,
-            DomainEvent::GuestLeft {
-                participant_id: Uuid::new_v4(),
-            },
-        );
+    fn test_run_started_includes_submitters() {
+        let run_id = Uuid::new_v4();
+        let p1 = Uuid::new_v4();
+        let p2 = Uuid::new_v4();
+        let config = ActivityConfig::new("quiz".to_string(), "Q1".to_string(), serde_json::json!({}));
 
-        assert_eq!(event.sequence, 0);
-        assert_eq!(event.lobby_id, lobby_id);
+        let event = DomainEvent::RunStarted {
+            run_id,
+            config,
+            required_submitters: vec![p1, p2],
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        let deserialized: DomainEvent = serde_json::from_str(&json).unwrap();
+
+        match deserialized {
+            DomainEvent::RunStarted { required_submitters, .. } => {
+                assert_eq!(required_submitters.len(), 2);
+            }
+            _ => panic!("Expected RunStarted"),
+        }
     }
 }

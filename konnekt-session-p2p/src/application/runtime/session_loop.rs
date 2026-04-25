@@ -248,11 +248,11 @@ impl SessionLoop {
                 DomainCommand::LeaveLobby { participant_id, .. } => {
                     tracing::info!("📥 Participant {} leaving", participant_id);
                 }
-                DomainCommand::SubmitResult { result, .. } => {
+                DomainCommand::SubmitResult { result, run_id, .. } => {
                     tracing::info!(
-                        "📥 HOST: Received result from participant {} for activity {}",
+                        "📥 HOST: Received result from participant {} for run {}",
                         result.participant_id,
-                        result.activity_id
+                        run_id
                     );
                 }
                 _ => {
@@ -362,14 +362,14 @@ impl SessionLoop {
                         new_mode
                     );
                 }
-                CoreDomainEvent::ActivityCompleted {
-                    activity_id,
+                CoreDomainEvent::RunEnded {
+                    run_id,
                     results,
                     ..
                 } => {
                     tracing::info!(
-                        "📤 Domain event: ActivityCompleted - {} ({} results)",
-                        activity_id,
+                        "📤 Domain event: RunEnded - {} ({} results)",
+                        run_id,
                         results.len()
                     );
                 }

@@ -51,14 +51,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Example: Submit a command
         if tick_count == 100 {
             if let Some(lobby) = session_loop.get_lobby() {
-                println!("📝 Testing command submission...");
-                session_loop.submit_command(DomainCommand::PlanActivity {
+                println!("📝 Queueing activity...");
+                let config = konnekt_session_core::domain::ActivityConfig::new(
+                    "test".to_string(),
+                    "Test Activity".to_string(),
+                    serde_json::json!({}),
+                );
+                session_loop.submit_command(DomainCommand::QueueActivity {
                     lobby_id: lobby.id(),
-                    metadata: konnekt_session_core::domain::ActivityMetadata::new(
-                        "test".to_string(),
-                        "Test Activity".to_string(),
-                        serde_json::json!({}),
-                    ),
+                    config,
                 })?;
             }
         }
