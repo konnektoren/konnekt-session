@@ -18,9 +18,12 @@ output-junit = ["cucumber/output-junit"]
 [dependencies]
 konnekt-session-core = { path = "../konnekt-session-core" }
 konnekt-session-p2p = { path = "../konnekt-session-p2p" }
+konnekt-session-bevy = { path = "../konnekt-session-bevy" }
+konnekt-session-yew = { path = "../konnekt-session-yew" }
 cucumber = { version = "0.22" }
 tokio = { version = "1.37", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
+bevy_app = { workspace = true }
 
 # Serialization
 serde = { workspace=true }
@@ -31,4 +34,12 @@ tokio = { version = "1.37", features = ["macros", "rt-multi-thread"] }
 
 [[test]]
 name = "bdd_tests"
+harness = false
+
+[[test]]
+name = "bdd_bevy"
+harness = false
+
+[[test]]
+name = "bdd_who_am_i"
 harness = false

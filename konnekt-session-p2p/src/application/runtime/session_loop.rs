@@ -70,16 +70,16 @@ impl SessionLoop {
 
     /// Register participant with peer (for tracking disconnections)
     fn register_participant_for_peer(&mut self, participant_id: Uuid) {
-        if let Some(peer_id) = self.local_peer_id() {
-            if let Some(state) = self.p2p.peer_registry_mut().get_peer_mut(&peer_id) {
-                state.set_participant_info(participant_id, String::new(), self.is_host);
+        if let Some(peer_id) = self.local_peer_id()
+            && let Some(state) = self.p2p.peer_registry_mut().get_peer_mut(&peer_id)
+        {
+            state.set_participant_info(participant_id, String::new(), self.is_host);
 
-                tracing::debug!(
-                    "📝 Registered participant {} for peer {}",
-                    participant_id,
-                    peer_id
-                );
-            }
+            tracing::debug!(
+                "📝 Registered participant {} for peer {}",
+                participant_id,
+                peer_id
+            );
         }
     }
 
@@ -209,23 +209,59 @@ impl SessionLoop {
                         }
                     }
 
+                    crate::application::ConnectionEvent::SyncNeeded {
+                        for_peer,
+                        since_sequence,
+                    } => {
+                        tracing::info!(
+                            "📤 HOST: Guest {} explicitly requested full sync (since_sequence={})",
+                            for_peer,
+                            since_sequence
+                        );
+
+                        if let Some(lobby) = self.get_lobby() {
+                            let snapshot = LobbySnapshot {
+                                lobby_id: lobby.id(),
+                                name: lobby.name().to_string(),
+                                host_id: lobby.host_id(),
+                                participants: lobby.participants().values().cloned().collect(),
+                                as_of_sequence: self.p2p.current_sequence(),
+                            };
+
+                            if let Err(e) = self.p2p.send_full_sync_to_peer(*for_peer, snapshot) {
+                                tracing::error!(
+                                    "❌ HOST: Failed to send on-demand full sync to {}: {}",
+                                    for_peer,
+                                    e
+                                );
+                            } else {
+                                tracing::info!(
+                                    "✅ HOST: Sent on-demand full sync to {}",
+                                    for_peer
+                                );
+                            }
+                        } else {
+                            tracing::warn!(
+                                "⚠️  HOST: Guest {} requested sync but no lobby exists yet",
+                                for_peer
+                            );
+                        }
+                    }
+
                     _ => {}
                 }
             }
         } else {
             // ✅ GUEST: Handle peer connections
             for event in &connection_events {
-                match event {
-                    crate::application::ConnectionEvent::PeerConnected(peer_id) => {
-                        tracing::info!("🟢 GUEST: Connected to host peer {}", peer_id);
-                        tracing::info!("📤 GUEST: Requesting full sync from host");
+                if let crate::application::ConnectionEvent::PeerConnected(peer_id) = event {
+                    tracing::info!("🟢 GUEST: Connected to host peer {}", peer_id);
+                    tracing::info!("📤 GUEST: Requesting full sync from host");
 
-                        // ✅ Request sync now that we have a connection
-                        if let Err(e) = self.p2p.request_full_sync() {
-                            tracing::error!("❌ GUEST: Failed to request full sync: {:?}", e);
-                        }
+                    // ✅ Request sync now that we have a connection
+                    if let Err(e) = self.p2p.request_full_sync() {
+                        tracing::error!("❌ GUEST: Failed to request full sync: {:?}", e);
                     }
-                    _ => {}
                 }
             }
         }
@@ -248,11 +284,11 @@ impl SessionLoop {
                 DomainCommand::LeaveLobby { participant_id, .. } => {
                     tracing::info!("📥 Participant {} leaving", participant_id);
                 }
-                DomainCommand::SubmitResult { result, .. } => {
+                DomainCommand::SubmitResult { result, run_id, .. } => {
                     tracing::info!(
-                        "📥 HOST: Received result from participant {} for activity {}",
+                        "📥 HOST: Received result from participant {} for run {}",
                         result.participant_id,
-                        result.activity_id
+                        run_id
                     );
                 }
                 _ => {
@@ -362,14 +398,14 @@ impl SessionLoop {
                         new_mode
                     );
                 }
-                CoreDomainEvent::ActivityCompleted {
-                    activity_id,
+                CoreDomainEvent::RunEnded {
+                    run_id,
                     results,
                     ..
                 } => {
                     tracing::info!(
-                        "📤 Domain event: ActivityCompleted - {} ({} results)",
-                        activity_id,
+                        "📤 Domain event: RunEnded - {} ({} results)",
+                        run_id,
                         results.len()
                     );
                 }

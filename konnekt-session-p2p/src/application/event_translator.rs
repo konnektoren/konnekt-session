@@ -3,26 +3,18 @@ use uuid::Uuid;
 
 use crate::domain::{DelegationReason, DomainEvent as P2PDomainEvent};
 
-/// Translates between P2P domain events and Core domain commands/events
-///
-/// Enforces 1:1 mappings:
-/// - Session ID ↔ Lobby ID (same UUID)
-/// - Peer ID ↔ Participant ID (managed by PeerRegistry)
 #[derive(Debug, Clone)]
 pub struct EventTranslator {
-    /// Lobby ID (same as Session ID - 1:1 relationship)
     lobby_id: Uuid,
 }
 
 impl EventTranslator {
-    /// Create a new translator for a specific lobby
     pub fn new(lobby_id: Uuid) -> Self {
         Self { lobby_id }
     }
 
-    /// Translate a P2P domain event to a Core domain command
-    ///
-    /// Returns `None` if the event doesn't map to a command (e.g., LobbyCreated is a state snapshot)
+    /// Translate a P2P event received from a peer into a core domain command.
+    /// Returns `None` for events that are state snapshots (not commands).
     pub fn to_domain_command(&self, event: &P2PDomainEvent) -> Option<DomainCommand> {
         match event {
             P2PDomainEvent::GuestLeft { participant_id } => Some(DomainCommand::LeaveLobby {
@@ -30,14 +22,13 @@ impl EventTranslator {
                 participant_id: *participant_id,
             }),
 
-            P2PDomainEvent::GuestKicked {
-                participant_id,
-                kicked_by,
-            } => Some(DomainCommand::KickGuest {
-                lobby_id: self.lobby_id,
-                host_id: *kicked_by,
-                guest_id: *participant_id,
-            }),
+            P2PDomainEvent::GuestKicked { participant_id, kicked_by } => {
+                Some(DomainCommand::KickGuest {
+                    lobby_id: self.lobby_id,
+                    host_id: *kicked_by,
+                    guest_id: *participant_id,
+                })
+            }
 
             P2PDomainEvent::HostDelegated { from, to, .. } => Some(DomainCommand::DelegateHost {
                 lobby_id: self.lobby_id,
@@ -45,11 +36,7 @@ impl EventTranslator {
                 new_host_id: *to,
             }),
 
-            P2PDomainEvent::ParticipationModeChanged {
-                participant_id,
-                new_mode,
-            } => {
-                // Parse mode string
+            P2PDomainEvent::ParticipationModeChanged { participant_id, new_mode } => {
                 let mode = match new_mode.as_str() {
                     "Active" => ParticipationMode::Active,
                     "Spectating" => ParticipationMode::Spectating,
@@ -58,7 +45,6 @@ impl EventTranslator {
                         return None;
                     }
                 };
-
                 Some(DomainCommand::UpdateParticipantMode {
                     lobby_id: self.lobby_id,
                     participant_id: *participant_id,
@@ -66,45 +52,31 @@ impl EventTranslator {
                 })
             }
 
-            // ✅ ADD: Activity events → Commands
-            P2PDomainEvent::ActivityPlanned { metadata } => Some(DomainCommand::PlanActivity {
+            P2PDomainEvent::GuestJoined { participant } => Some(DomainCommand::AddParticipant {
                 lobby_id: self.lobby_id,
-                metadata: metadata.clone(),
+                participant: participant.clone(),
             }),
 
-            P2PDomainEvent::ActivityStarted { activity_id } => Some(DomainCommand::StartActivity {
+            P2PDomainEvent::ActivityQueued { config } => Some(DomainCommand::QueueActivity {
                 lobby_id: self.lobby_id,
-                activity_id: *activity_id,
+                config: config.clone(),
             }),
 
-            P2PDomainEvent::ResultSubmitted { result } => Some(DomainCommand::SubmitResult {
+            P2PDomainEvent::ResultSubmitted { run_id, result } => Some(DomainCommand::SubmitResult {
                 lobby_id: self.lobby_id,
+                run_id: *run_id,
                 result: result.clone(),
             }),
 
-            P2PDomainEvent::ActivityCancelled { activity_id } => {
-                Some(DomainCommand::CancelActivity {
-                    lobby_id: self.lobby_id,
-                    activity_id: *activity_id,
-                })
-            }
-
-            // State snapshots - don't map to commands
+            // State snapshots — applied via snapshot sync, not commands
             P2PDomainEvent::LobbyCreated { .. } => None,
-            P2PDomainEvent::GuestJoined { participant } => {
-                // ✅ Guests receiving this event should add the exact participant
-                Some(DomainCommand::AddParticipant {
-                    lobby_id: self.lobby_id,
-                    participant: participant.clone(),
-                })
-            }
-            P2PDomainEvent::ActivityCompleted { .. } => None,
+            P2PDomainEvent::RunStarted { .. } => None,
+            P2PDomainEvent::RunEnded { .. } => None,
         }
     }
 
-    /// Translate a Core domain event to a P2P domain event
-    ///
-    /// Returns `None` for events that shouldn't be broadcast (e.g., CommandFailed)
+    /// Translate a core domain event into a P2P event for broadcasting.
+    /// Returns `None` for events that should not be broadcast.
     pub fn to_p2p_event(&self, event: CoreDomainEvent) -> Option<P2PDomainEvent> {
         match event {
             CoreDomainEvent::LobbyCreated { lobby } => Some(P2PDomainEvent::LobbyCreated {
@@ -113,80 +85,61 @@ impl EventTranslator {
                 name: lobby.name().to_string(),
             }),
 
-            CoreDomainEvent::GuestJoined {
-                participant,
-                lobby_id: _,
-            } => Some(P2PDomainEvent::GuestJoined { participant }),
+            CoreDomainEvent::GuestJoined { participant, .. } => {
+                Some(P2PDomainEvent::GuestJoined { participant })
+            }
 
-            CoreDomainEvent::GuestLeft {
-                participant_id,
-                lobby_id: _,
-            } => Some(P2PDomainEvent::GuestLeft { participant_id }),
+            CoreDomainEvent::GuestLeft { participant_id, .. } => {
+                Some(P2PDomainEvent::GuestLeft { participant_id })
+            }
 
-            CoreDomainEvent::GuestKicked {
-                participant_id,
-                kicked_by,
-                lobby_id: _,
-            } => Some(P2PDomainEvent::GuestKicked {
-                participant_id,
-                kicked_by,
-            }),
+            CoreDomainEvent::GuestKicked { participant_id, kicked_by, .. } => {
+                Some(P2PDomainEvent::GuestKicked { participant_id, kicked_by })
+            }
 
-            CoreDomainEvent::HostDelegated {
-                from,
-                to,
-                lobby_id: _,
-            } => Some(P2PDomainEvent::HostDelegated {
-                from,
-                to,
-                reason: DelegationReason::Manual,
-            }),
+            CoreDomainEvent::HostDelegated { from, to, .. } => {
+                Some(P2PDomainEvent::HostDelegated {
+                    from,
+                    to,
+                    reason: DelegationReason::Manual,
+                })
+            }
 
-            CoreDomainEvent::ParticipationModeChanged {
-                participant_id,
-                new_mode,
-                lobby_id: _,
-            } => Some(P2PDomainEvent::ParticipationModeChanged {
-                participant_id,
-                new_mode: format!("{}", new_mode),
-            }),
+            CoreDomainEvent::ParticipationModeChanged { participant_id, new_mode, .. } => {
+                Some(P2PDomainEvent::ParticipationModeChanged {
+                    participant_id,
+                    new_mode: format!("{}", new_mode),
+                })
+            }
 
-            // ✅ ADD: Activity events
-            CoreDomainEvent::ActivityPlanned {
-                metadata,
-                lobby_id: _,
-            } => Some(P2PDomainEvent::ActivityPlanned { metadata }),
+            CoreDomainEvent::ActivityQueued { config, .. } => {
+                Some(P2PDomainEvent::ActivityQueued { config })
+            }
 
-            CoreDomainEvent::ActivityStarted {
-                activity_id,
-                lobby_id: _,
-            } => Some(P2PDomainEvent::ActivityStarted { activity_id }),
+            CoreDomainEvent::RunStarted { run_id, config, .. } => {
+                // required_submitters comes from the ActivityRun — caller must enrich this.
+                // For now we broadcast without submitters; snapshot sync covers guests.
+                Some(P2PDomainEvent::RunStarted {
+                    run_id,
+                    config,
+                    required_submitters: vec![],
+                })
+            }
 
-            CoreDomainEvent::ResultSubmitted {
-                result,
-                lobby_id: _,
-            } => Some(P2PDomainEvent::ResultSubmitted { result }),
+            CoreDomainEvent::ResultSubmitted { run_id, result, .. } => {
+                Some(P2PDomainEvent::ResultSubmitted { run_id, result })
+            }
 
-            CoreDomainEvent::ActivityCompleted {
-                activity_id,
-                results,
-                lobby_id: _,
-            } => Some(P2PDomainEvent::ActivityCompleted {
-                activity_id,
-                results,
-            }),
+            CoreDomainEvent::SubmitterRemoved { .. } => None,
 
-            CoreDomainEvent::ActivityCancelled {
-                activity_id,
-                lobby_id: _,
-            } => Some(P2PDomainEvent::ActivityCancelled { activity_id }),
+            CoreDomainEvent::RunEnded { run_id, status, results, .. } => {
+                Some(P2PDomainEvent::RunEnded { run_id, status, results })
+            }
 
-            // Don't broadcast command failures
             CoreDomainEvent::CommandFailed { .. } => None,
         }
     }
 
-    /// Get the lobby ID this translator is bound to
     pub fn lobby_id(&self) -> Uuid {
         self.lobby_id
     }
@@ -196,8 +149,8 @@ impl EventTranslator {
 mod tests {
     use super::*;
     use konnekt_session_core::{
-        EchoChallenge, Participant,
-        domain::{ActivityMetadata, ActivityResult},
+        Participant,
+        domain::{ActivityConfig, ActivityResult},
     };
 
     #[test]
@@ -209,97 +162,45 @@ mod tests {
         let lobby =
             konnekt_session_core::Lobby::with_id(lobby_id, "Test".to_string(), host).unwrap();
 
-        let core_event = CoreDomainEvent::LobbyCreated { lobby };
-
-        let p2p_event = translator.to_p2p_event(core_event);
+        let p2p_event = translator.to_p2p_event(CoreDomainEvent::LobbyCreated { lobby });
 
         match p2p_event {
-            Some(P2PDomainEvent::LobbyCreated {
-                lobby_id: lid,
-                host_id,
-                name,
-            }) => {
+            Some(P2PDomainEvent::LobbyCreated { lobby_id: lid, name, .. }) => {
                 assert_eq!(lid, lobby_id);
                 assert_eq!(name, "Test");
-                assert_ne!(host_id, Uuid::nil());
             }
-            _ => panic!("Expected LobbyCreated event, got: {:?}", p2p_event),
+            _ => panic!("Expected LobbyCreated, got: {:?}", p2p_event),
         }
     }
 
     #[test]
     fn test_command_failed_not_translated() {
-        let lobby_id = Uuid::new_v4();
-        let translator = EventTranslator::new(lobby_id);
-
-        let core_event = CoreDomainEvent::CommandFailed {
+        let translator = EventTranslator::new(Uuid::new_v4());
+        let p2p_event = translator.to_p2p_event(CoreDomainEvent::CommandFailed {
             command: "Test".to_string(),
             reason: "Error".to_string(),
-        };
-
-        let p2p_event = translator.to_p2p_event(core_event);
+        });
         assert!(p2p_event.is_none());
     }
 
     #[test]
-    fn test_activity_planned_to_p2p() {
+    fn test_activity_queued_roundtrip() {
         let lobby_id = Uuid::new_v4();
         let translator = EventTranslator::new(lobby_id);
 
-        let challenge = EchoChallenge::new("Test".to_string());
-        let metadata = ActivityMetadata::new(
-            "echo-challenge-v1".to_string(),
-            "Echo Test".to_string(),
-            challenge.to_config(),
-        );
+        let config = ActivityConfig::new("quiz".to_string(), "Q1".to_string(), serde_json::json!({}));
 
-        let core_event = CoreDomainEvent::ActivityPlanned {
-            lobby_id,
-            metadata: metadata.clone(),
-        };
+        let core_event = CoreDomainEvent::ActivityQueued { lobby_id, config: config.clone() };
+        let p2p_event = translator.to_p2p_event(core_event).expect("Should translate");
 
-        let p2p_event = translator
-            .to_p2p_event(core_event)
-            .expect("Should translate");
-
-        match p2p_event {
-            P2PDomainEvent::ActivityPlanned { metadata: meta } => {
-                assert_eq!(meta.activity_type, "echo-challenge-v1");
-                assert_eq!(meta.name, "Echo Test");
-            }
-            _ => panic!("Expected ActivityPlanned event"),
-        }
-    }
-
-    #[test]
-    fn test_activity_started_roundtrip() {
-        let lobby_id = Uuid::new_v4();
-        let translator = EventTranslator::new(lobby_id);
-        let activity_id = Uuid::new_v4();
-
-        // Core → P2P
-        let core_event = CoreDomainEvent::ActivityStarted {
-            lobby_id,
-            activity_id,
-        };
-        let p2p_event = translator
-            .to_p2p_event(core_event)
-            .expect("Should translate");
-
-        // P2P → Command
-        let command = translator
-            .to_domain_command(&p2p_event)
-            .expect("Should translate");
+        let command = translator.to_domain_command(&p2p_event).expect("Should map to command");
 
         match command {
-            DomainCommand::StartActivity {
-                lobby_id: lid,
-                activity_id: aid,
-            } => {
+            DomainCommand::QueueActivity { lobby_id: lid, config: c } => {
                 assert_eq!(lid, lobby_id);
-                assert_eq!(aid, activity_id);
+                assert_eq!(c.activity_type, "quiz");
             }
-            _ => panic!("Expected StartActivity command"),
+            _ => panic!("Expected QueueActivity, got {:?}", command),
         }
     }
 
@@ -308,75 +209,43 @@ mod tests {
         let lobby_id = Uuid::new_v4();
         let translator = EventTranslator::new(lobby_id);
 
-        let activity_id = Uuid::new_v4();
+        let run_id = Uuid::new_v4();
         let participant_id = Uuid::new_v4();
-
-        let result = ActivityResult::new(activity_id, participant_id).with_score(100);
+        let result = ActivityResult::new(run_id, participant_id).with_score(100);
 
         let core_event = CoreDomainEvent::ResultSubmitted {
             lobby_id,
+            run_id,
             result: result.clone(),
         };
 
-        let p2p_event = translator
-            .to_p2p_event(core_event)
-            .expect("Should translate");
+        let p2p_event = translator.to_p2p_event(core_event).expect("Should translate");
 
-        match p2p_event {
-            P2PDomainEvent::ResultSubmitted { result: res } => {
-                assert_eq!(res.activity_id, activity_id);
+        match &p2p_event {
+            P2PDomainEvent::ResultSubmitted { run_id: rid, result: res } => {
+                assert_eq!(*rid, run_id);
                 assert_eq!(res.participant_id, participant_id);
                 assert_eq!(res.score, Some(100));
             }
-            _ => panic!("Expected ResultSubmitted event"),
+            _ => panic!("Expected ResultSubmitted"),
         }
-    }
-
-    #[test]
-    fn test_activity_completed_not_a_command() {
-        let lobby_id = Uuid::new_v4();
-        let translator = EventTranslator::new(lobby_id);
-
-        let p2p_event = P2PDomainEvent::ActivityCompleted {
-            activity_id: Uuid::new_v4(),
-            results: vec![],
-        };
-
-        let command = translator.to_domain_command(&p2p_event);
-
-        // ActivityCompleted is a state snapshot, not a command
-        assert!(command.is_none());
-    }
-
-    #[test]
-    fn test_activity_cancelled_roundtrip() {
-        let lobby_id = Uuid::new_v4();
-        let translator = EventTranslator::new(lobby_id);
-        let activity_id = Uuid::new_v4();
-
-        // Core → P2P
-        let core_event = CoreDomainEvent::ActivityCancelled {
-            lobby_id,
-            activity_id,
-        };
-        let p2p_event = translator
-            .to_p2p_event(core_event)
-            .expect("Should translate");
 
         // P2P → Command
-        let command = translator
-            .to_domain_command(&p2p_event)
-            .expect("Should translate");
-
+        let command = translator.to_domain_command(&p2p_event).expect("Should map");
         match command {
-            DomainCommand::CancelActivity {
-                lobby_id: lid,
-                activity_id: aid,
-            } => {
-                assert_eq!(lid, lobby_id);
-                assert_eq!(aid, activity_id);
-            }
-            _ => panic!("Expected CancelActivity command"),
+            DomainCommand::SubmitResult { run_id: rid, .. } => assert_eq!(rid, run_id),
+            _ => panic!("Expected SubmitResult"),
         }
+    }
+
+    #[test]
+    fn test_run_ended_not_a_command() {
+        let translator = EventTranslator::new(Uuid::new_v4());
+        let p2p_event = P2PDomainEvent::RunEnded {
+            run_id: Uuid::new_v4(),
+            status: konnekt_session_core::domain::RunStatus::Completed,
+            results: vec![],
+        };
+        assert!(translator.to_domain_command(&p2p_event).is_none());
     }
 }

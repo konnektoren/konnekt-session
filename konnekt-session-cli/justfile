@@ -10,6 +10,14 @@ run *ARGS:
 host NAME="TestHost":
     cargo run -- create-host --name "{{ NAME }}"
 
+# Create a host session with deterministic session/lobby ID from seed
+host-seed SEED NAME="TestHost":
+    cargo run -- create-host --name "{{ NAME }}" --seed "{{ SEED }}"
+
+# Join a session via deterministic seed (computes same UUID as host seed)
+join-seed SEED NAME="TestGuest":
+    SESSION_ID=$(python3 -c "import uuid,sys; print(uuid.uuid5(uuid.NAMESPACE_OID, sys.argv[1]))" "{{ SEED }}"); cargo run -- join --session-id "$SESSION_ID" --name "{{ NAME }}"
+
 # Join a session (example - requires session ID)
 join SESSION_ID NAME="TestGuest":
     cargo run -- join --session-id "{{ SESSION_ID }}" --name "{{ NAME }}"
@@ -76,3 +84,7 @@ host-with-console NAME="TestHost":
 # 🆕 Kill tmux session
 kill-console:
     tmux kill-session -t konnekt || true
+
+# Run automated host+guest smoke connection test from repo root script
+smoke SERVER="wss://match.konnektoren.help" SEED="smoke-seed":
+    HOST_SEED="{{ SEED }}" ../scripts/smoke-two-cli.sh "{{ SERVER }}"

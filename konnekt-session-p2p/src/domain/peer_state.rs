@@ -71,13 +71,9 @@ impl PeerState {
     /// Check if grace period has expired
     pub fn check_grace_period(&mut self, grace_period: Duration) -> bool {
         match self.status {
-            ConnectionStatus::Disconnected { since } => {
-                if since.elapsed() >= grace_period {
-                    self.status = ConnectionStatus::TimedOut;
-                    true
-                } else {
-                    false
-                }
+            ConnectionStatus::Disconnected { since } if since.elapsed() >= grace_period => {
+                self.status = ConnectionStatus::TimedOut;
+                true
             }
             _ => false,
         }

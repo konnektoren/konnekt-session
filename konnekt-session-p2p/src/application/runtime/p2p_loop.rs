@@ -1,7 +1,7 @@
 use crate::application::runtime::MessageQueue;
 use crate::application::sync_manager::{EventSyncManager, SyncMessage, SyncResponse};
 use crate::application::{ConnectionEvent, EventTranslator, LobbySnapshot};
-use crate::domain::{DomainEvent as P2PDomainEvent, LobbyEvent, PeerId, PeerRegistry};
+use crate::domain::{LobbyEvent, PeerId, PeerRegistry};
 use crate::infrastructure::connection::MatchboxConnection;
 use crate::infrastructure::error::Result;
 use instant::Duration;
@@ -38,8 +38,6 @@ pub struct P2PLoop {
     /// Domain commands to be processed by SessionLoop
     pending_domain_commands: VecDeque<DomainCommand>,
 
-    /// Max events to process per poll
-    batch_size: usize,
 }
 
 impl P2PLoop {
@@ -48,7 +46,7 @@ impl P2PLoop {
     pub fn new_host(
         connection: MatchboxConnection,
         lobby_id: Uuid,
-        batch_size: usize,
+        _batch_size: usize,
         max_queue_size: usize,
     ) -> Self {
         info!("P2PLoop initialized as HOST");
@@ -61,7 +59,6 @@ impl P2PLoop {
             inbound_events: Vec::new(),
             inbound_lobby_events: Vec::new(),
             pending_domain_commands: VecDeque::new(),
-            batch_size,
         }
     }
 
@@ -70,7 +67,7 @@ impl P2PLoop {
     pub fn new_guest(
         connection: MatchboxConnection,
         lobby_id: Uuid,
-        batch_size: usize,
+        _batch_size: usize,
         max_queue_size: usize,
     ) -> Self {
         info!("P2PLoop initialized as GUEST");
@@ -83,7 +80,6 @@ impl P2PLoop {
             inbound_events: Vec::new(),
             inbound_lobby_events: Vec::new(),
             pending_domain_commands: VecDeque::new(),
-            batch_size,
         }
     }
 
@@ -94,7 +90,7 @@ impl P2PLoop {
 
         let msg = SyncMessage::CommandRequest { command };
         let data = serde_json::to_vec(&msg)
-            .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
+            .map_err(crate::infrastructure::error::P2PError::Serialization)?;
 
         self.connection.broadcast(data)?;
         trace!("Command broadcast complete");
@@ -110,7 +106,7 @@ impl P2PLoop {
             .map_err(|e| crate::infrastructure::error::P2PError::SendFailed(e.to_string()))?;
 
         let data = serde_json::to_vec(&sync_msg)
-            .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
+            .map_err(crate::infrastructure::error::P2PError::Serialization)?;
 
         self.connection.broadcast(data)?;
 
@@ -143,16 +139,18 @@ impl P2PLoop {
             host_participant.id()
         );
 
-        // ✅ FIX: Use CreateLobbyWithHost to preserve host ID
+        // Use CreateLobbyWithHost to preserve host ID — creates lobby with host only.
         let create_lobby_cmd = DomainCommand::CreateLobbyWithHost {
             lobby_id: snapshot.lobby_id,
-            lobby_name: snapshot.name,
+            lobby_name: snapshot.name.clone(),
             host: host_participant,
         };
-
         self.pending_domain_commands.push_back(create_lobby_cmd);
 
-        // ✅ Add other participants (non-host)
+        // Add non-host participants directly from the snapshot. These are already
+        // the authoritative final state; we must NOT also replay the historical
+        // events that were used to produce this snapshot, as that would add every
+        // guest a second time via GuestJoined.
         for participant in snapshot.participants.iter() {
             if !participant.is_host() {
                 tracing::info!(
@@ -168,9 +166,18 @@ impl P2PLoop {
             }
         }
 
-        // Translate subsequent events to commands
-        for event in events {
+        // Only translate events whose sequence is AFTER the snapshot's as_of_sequence.
+        // Events at or before that sequence are already represented by the snapshot
+        // participants above — replaying them would produce duplicate GuestJoined etc.
+        let delta_events = events
+            .into_iter()
+            .filter(|e| e.sequence > snapshot.as_of_sequence);
+        for event in delta_events {
             if let Some(cmd) = self.translator.to_domain_command(&event.event) {
+                tracing::debug!(
+                    sequence = %event.sequence,
+                    "📥 GUEST: Applying post-snapshot delta event"
+                );
                 self.pending_domain_commands.push_back(cmd);
             }
         }
@@ -196,7 +203,7 @@ impl P2PLoop {
 
         // Serialize and broadcast
         let data = serde_json::to_vec(&sync_msg)
-            .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
+            .map_err(crate::infrastructure::error::P2PError::Serialization)?;
 
         self.connection.broadcast(data)?;
 
@@ -258,8 +265,12 @@ impl P2PLoop {
                                 info!(
                                     peer_id = %for_peer,
                                     since_sequence = %since_sequence,
-                                    "Peer needs snapshot"
+                                    "Peer needs snapshot - bubbling up to SessionLoop"
                                 );
+                                self.inbound_events.push(ConnectionEvent::SyncNeeded {
+                                    for_peer,
+                                    since_sequence,
+                                });
                             }
                             Ok(SyncResponse::None) => {
                                 trace!("Sync message processed (no action)");
@@ -278,6 +289,9 @@ impl P2PLoop {
                     self.peer_registry.remove_peer(peer_id);
                     debug!(peer_id = %peer_id, "Removed peer after timeout");
                 }
+                // SyncNeeded is synthesized internally inside MessageReceived above and
+                // pushed directly to inbound_events — it never arrives from poll_events().
+                ConnectionEvent::SyncNeeded { .. } => {}
             }
 
             self.inbound_events.push(event);
@@ -339,7 +353,7 @@ impl P2PLoop {
             .map_err(|e| crate::infrastructure::error::P2PError::SendFailed(e.to_string()))?;
 
         let data = serde_json::to_vec(&sync_msg)
-            .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
+            .map_err(crate::infrastructure::error::P2PError::Serialization)?;
 
         self.connection.send_to(PeerId(peer_id.inner()), data)?;
 
@@ -370,7 +384,16 @@ impl P2PLoop {
     }
 
     pub fn connected_peers(&self) -> Vec<PeerId> {
-        self.connection.connected_peers()
+        // Use the peer registry as the source of truth — it is authoritatively
+        // updated during poll() via PeerConnected / PeerDisconnected events.
+        // The raw socket's connected_peers() only reflects what update_peers()
+        // last saw and will return stale (empty) results when called outside
+        // of poll_events().
+        self.peer_registry
+            .all_peers()
+            .filter(|(_, state)| !state.is_timed_out() && !state.is_disconnected())
+            .map(|(peer_id, _)| *peer_id)
+            .collect()
     }
 
     pub fn current_sequence(&self) -> u64 {

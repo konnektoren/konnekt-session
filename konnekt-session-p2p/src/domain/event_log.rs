@@ -87,14 +87,14 @@ impl EventLog {
         trace!(event_count = %self.events.len(), "Added event to buffer");
 
         // Evict oldest if over capacity
-        if self.events.len() > self.max_size {
-            if let Some(evicted) = self.events.pop_front() {
-                warn!(
-                    evicted_sequence = %evicted.sequence,
-                    buffer_size = %self.events.len(),
-                    "Evicted oldest event (buffer full)"
-                );
-            }
+        if self.events.len() > self.max_size
+            && let Some(evicted) = self.events.pop_front()
+        {
+            warn!(
+                evicted_sequence = %evicted.sequence,
+                buffer_size = %self.events.len(),
+                "Evicted oldest event (buffer full)"
+            );
         }
     }
 

@@ -18,6 +18,10 @@ test-verbose:
 test-bdd:
     @cd konnekt-session-tests && just test
 
+# Run Bevy BDD tests specifically
+test-bdd-bevy:
+    cargo test -p konnekt-session-tests --test bdd_bevy
+
 # Run BDD tests with JSON output
 test-bdd-json:
     @cd konnekt-session-tests && just test-json

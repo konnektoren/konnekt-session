@@ -1,3 +1,6 @@
+use bevy_ecs::prelude::{Resource, World};
+use bevy_ecs::schedule::Schedule;
+use bevy_ecs::system::ResMut;
 use konnekt_session_core::{DomainCommand, Lobby};
 use konnekt_session_p2p::{SessionId, SessionLoop};
 use tokio::sync::{mpsc, watch};
@@ -39,12 +42,24 @@ pub struct SessionRuntime {
 
 impl SessionRuntime {
     /// Spawn a new runtime with existing SessionLoop
-    pub fn spawn(mut session_loop: SessionLoop, session_id: SessionId) -> Self {
+    pub fn spawn(session_loop: SessionLoop, session_id: SessionId) -> Self {
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<DomainCommand>(100);
         let (state_tx, state_rx) = watch::channel(SessionSnapshot::default());
 
         let lobby_id = session_loop.lobby_id();
         let is_host = session_loop.is_host();
+
+        let mut world = World::new();
+        world.insert_resource(RuntimeState {
+            session_loop,
+            state_tx,
+            lobby_id,
+            is_host,
+        });
+        world.insert_resource(PendingCommands::default());
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(drive_session_runtime);
 
         let task_handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
@@ -55,31 +70,13 @@ impl SessionRuntime {
             loop {
                 interval.tick().await;
 
-                // 1. Process incoming commands
+                // Queue incoming user commands into the Bevy message bus.
                 while let Ok(cmd) = cmd_rx.try_recv() {
-                    if let Err(e) = session_loop.submit_command(cmd) {
-                        tracing::error!("Failed to submit command: {:?}", e);
-                    }
+                    world.resource_mut::<PendingCommands>().0.push(cmd);
                 }
 
-                // 2. Poll SessionLoop (P2P + Domain)
-                let processed = session_loop.poll();
-
-                if processed > 0 {
-                    tracing::debug!("SessionRuntime processed {} events", processed);
-                }
-
-                // 3. Publish snapshot (non-blocking, only if changed)
-                let snapshot = SessionSnapshot {
-                    lobby: session_loop.get_lobby().cloned(),
-                    local_peer_id: session_loop.local_peer_id().map(|p| p.to_string()),
-                    peer_count: session_loop.connected_peers().len(),
-                    is_host: session_loop.is_host(),
-                    lobby_id,
-                };
-
-                // Only send if changed (watch channel deduplicates)
-                let _ = state_tx.send(snapshot);
+                // Run one Bevy ECS tick (command handling + SessionLoop poll + snapshot publish).
+                schedule.run(&mut world);
             }
         });
 
@@ -113,6 +110,42 @@ impl SessionRuntime {
         self.task_handle.abort();
         let _ = self.task_handle.await;
     }
+}
+
+#[derive(Resource)]
+struct RuntimeState {
+    session_loop: SessionLoop,
+    state_tx: watch::Sender<SessionSnapshot>,
+    lobby_id: Uuid,
+    is_host: bool,
+}
+
+#[derive(Resource, Default)]
+struct PendingCommands(Vec<DomainCommand>);
+
+fn drive_session_runtime(
+    mut state: ResMut<RuntimeState>,
+    mut pending_commands: ResMut<PendingCommands>,
+) {
+    for cmd in pending_commands.0.drain(..) {
+        if let Err(e) = state.session_loop.submit_command(cmd) {
+            tracing::error!("Failed to submit command: {:?}", e);
+        }
+    }
+
+    let processed = state.session_loop.poll();
+    if processed > 0 {
+        tracing::debug!("SessionRuntime processed {} events", processed);
+    }
+
+    let snapshot = SessionSnapshot {
+        lobby: state.session_loop.get_lobby().cloned(),
+        local_peer_id: state.session_loop.local_peer_id().map(|p| p.to_string()),
+        peer_count: state.session_loop.connected_peers().len(),
+        is_host: state.is_host,
+        lobby_id: state.lobby_id,
+    };
+    let _ = state.state_tx.send(snapshot);
 }
 
 #[cfg(test)]

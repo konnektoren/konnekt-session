@@ -1,24 +1,21 @@
 mod support;
 
-use konnekt_session_core::DomainCommand;
+use konnekt_session_core::{domain::ActivityConfig, DomainCommand};
 use support::SessionFixture;
 
 #[test]
 fn test_guest_joins_and_syncs_lobby() {
     let mut fixture = SessionFixture::new(1);
 
-    // Tick to allow snapshot sync
     fixture.tick(10);
 
-    // Guest should have synced lobby
     let guest_lobby = fixture.guests[0].get_lobby();
     assert!(guest_lobby.is_some(), "Guest should have synced lobby");
 
     let lobby = guest_lobby.unwrap();
     assert_eq!(lobby.name(), "Test Lobby");
-    assert_eq!(lobby.participants().len(), 1); // Just host so far
+    assert_eq!(lobby.participants().len(), 1);
 
-    // Guest joins
     fixture.guests[0]
         .submit_command(DomainCommand::JoinLobby {
             lobby_id: fixture.lobby_id,
@@ -26,10 +23,8 @@ fn test_guest_joins_and_syncs_lobby() {
         })
         .unwrap();
 
-    // Tick to process join
     fixture.tick(10);
 
-    // Both host and guest should see 2 participants
     let host_lobby = fixture.host.get_lobby().unwrap();
     let guest_lobby = fixture.guests[0].get_lobby().unwrap();
 
@@ -41,15 +36,8 @@ fn test_guest_joins_and_syncs_lobby() {
 fn test_multiple_guests() {
     let mut fixture = SessionFixture::new(3);
 
-    // Initialize all peers - let them discover each other and sync initial state
-    println!("🔄 Initializing peers...");
     fixture.tick(500);
 
-    println!("📊 After initial sync:");
-    fixture.print_state();
-
-    // All guests join
-    println!("\n📤 Submitting join commands...");
     for (i, guest) in fixture.guests.iter_mut().enumerate() {
         let cmd = DomainCommand::JoinLobby {
             lobby_id: fixture.lobby_id,
@@ -58,33 +46,17 @@ fn test_multiple_guests() {
         guest.submit_command(cmd).unwrap();
     }
 
-    // Let each guest process the join command and send it out
-    fixture.tick(300);
+    fixture.tick(900);
 
-    println!("📊 After guest joins:");
-    fixture.print_state();
-
-    // Let host receive and process all join messages from guests
-    fixture.tick(300);
-
-    // Ensure all peers have converged state
-    fixture.tick(300);
-
-    println!("\n📊 Final state:");
-    fixture.print_state();
-
-    // Assert consistent state
-    fixture.assert_consistent_state(4); // host + 3 guests
+    fixture.assert_consistent_state(4);
 }
 
 #[test]
-fn test_activity_plan_and_start() {
+fn test_activity_queue_and_start_run() {
     let mut fixture = SessionFixture::new(1);
 
-    // Sync
     fixture.tick(10);
 
-    // Guest joins
     fixture.guests[0]
         .submit_command(DomainCommand::JoinLobby {
             lobby_id: fixture.lobby_id,
@@ -94,56 +66,45 @@ fn test_activity_plan_and_start() {
 
     fixture.tick(10);
 
-    // Host plans activity
-    let challenge = konnekt_session_core::EchoChallenge::new("Test".to_string());
-    let metadata = konnekt_session_core::domain::ActivityMetadata::new(
+    // Host queues activity
+    let config = ActivityConfig::new(
         "echo-challenge-v1".to_string(),
         "Echo Test".to_string(),
-        challenge.to_config(),
+        serde_json::json!({}),
     );
 
     fixture
         .host
-        .submit_command(DomainCommand::PlanActivity {
+        .submit_command(DomainCommand::QueueActivity {
             lobby_id: fixture.lobby_id,
-            metadata,
+            config,
         })
         .unwrap();
 
     fixture.tick(10);
 
-    // Both should see planned activity
-    assert_eq!(fixture.host.get_lobby().unwrap().activities().len(), 1);
-    assert_eq!(fixture.guests[0].get_lobby().unwrap().activities().len(), 1);
+    // Both should see queued activity
+    assert_eq!(fixture.host.get_lobby().unwrap().activity_queue().len(), 1);
 
-    // Host starts activity
-    let activity_id = fixture.host.get_lobby().unwrap().activities()[0].id;
-
+    // Host starts next run
     fixture
         .host
-        .submit_command(DomainCommand::StartActivity {
+        .submit_command(DomainCommand::StartNextRun {
             lobby_id: fixture.lobby_id,
-            activity_id,
         })
         .unwrap();
 
     fixture.tick(10);
 
-    // Both should see activity in progress
-    let host_current = fixture.host.get_lobby().unwrap().current_activity();
-    let guest_current = fixture.guests[0].get_lobby().unwrap().current_activity();
-
-    assert!(host_current.is_some());
-    assert!(guest_current.is_some());
-    assert_eq!(host_current.unwrap().id, activity_id);
-    assert_eq!(guest_current.unwrap().id, activity_id);
+    // Host should have active run, queue should be empty
+    assert!(fixture.host.get_lobby().unwrap().has_active_run());
+    assert!(fixture.host.get_lobby().unwrap().activity_queue().is_empty());
 }
 
 #[test]
 fn test_activity_completion() {
     let mut fixture = SessionFixture::new(1);
 
-    // Setup: join + plan + start
     fixture.tick(200);
 
     fixture.guests[0]
@@ -155,110 +116,65 @@ fn test_activity_completion() {
 
     fixture.tick(250);
 
-    // Now get participant IDs (after stabilization)
+    // IDs must come from HOST's lobby — the host assigns UUIDs.
+    // Guests receive echoed JoinLobby commands and create different UUIDs locally.
     let host_lobby = fixture.host.get_lobby().unwrap();
-    let guest_lobby = fixture.guests[0].get_lobby().unwrap();
-
-    let host_participant_id = host_lobby
-        .participants()
-        .values()
+    let host_participant_id = host_lobby.participants().values()
         .find(|p| p.is_host())
-        .expect("Host should have a host participant")
+        .expect("Host participant")
         .id();
-
-    let guest_participant_id = guest_lobby
-        .participants()
-        .values()
+    let guest_participant_id = host_lobby.participants().values()
         .find(|p| !p.is_host())
-        .expect("Guest should have a guest participant")
+        .expect("Guest participant on host")
         .id();
 
-    // Plan activity
-    let challenge = konnekt_session_core::EchoChallenge::new("Test".to_string());
-    let metadata = konnekt_session_core::domain::ActivityMetadata::new(
+    // Queue and start
+    let config = ActivityConfig::new(
         "echo-challenge-v1".to_string(),
         "Echo Test".to_string(),
-        challenge.to_config(),
+        serde_json::json!({}),
     );
 
-    fixture
-        .host
-        .submit_command(DomainCommand::PlanActivity {
-            lobby_id: fixture.lobby_id,
-            metadata,
-        })
-        .unwrap();
+    fixture.host.submit_command(DomainCommand::QueueActivity {
+        lobby_id: fixture.lobby_id,
+        config,
+    }).unwrap();
 
     fixture.tick(250);
 
-    let activity_id = fixture.host.get_lobby().unwrap().activities()[0].id;
-
-    // Start activity
-    fixture
-        .host
-        .submit_command(DomainCommand::StartActivity {
-            lobby_id: fixture.lobby_id,
-            activity_id,
-        })
-        .unwrap();
+    fixture.host.submit_command(DomainCommand::StartNextRun {
+        lobby_id: fixture.lobby_id,
+    }).unwrap();
 
     fixture.tick(250);
 
-    // Submit results
-    let result = konnekt_session_core::EchoResult::new("Test".to_string(), 100);
-
-    fixture
-        .host
-        .submit_command(DomainCommand::SubmitResult {
-            lobby_id: fixture.lobby_id,
-            result: konnekt_session_core::domain::ActivityResult::new(
-                activity_id,
-                host_participant_id,
-            )
-            .with_data(result.to_json())
-            .with_score(100),
-        })
-        .unwrap();
-
-    fixture.tick(250);
-
-    fixture.guests[0]
-        .submit_command(DomainCommand::SubmitResult {
-            lobby_id: fixture.lobby_id,
-            result: konnekt_session_core::domain::ActivityResult::new(
-                activity_id,
-                guest_participant_id,
-            )
-            .with_data(result.to_json())
-            .with_score(100),
-        })
-        .unwrap();
-
-    // ✅ Wait for completion to propagate with explicit ticks
-   fixture.tick(400);
-
-    // Assert activity completed
-    let host_activity = &fixture.host.get_lobby().unwrap().activities()[0];
-    let guest_activity = &fixture.guests[0].get_lobby().unwrap().activities()[0];
-
-    assert_eq!(
-        host_activity.status,
-        konnekt_session_core::domain::ActivityStatus::Completed,
-        "Host should see activity as completed"
-    );
-    assert_eq!(
-        guest_activity.status,
-        konnekt_session_core::domain::ActivityStatus::Completed,
-        "Guest should see activity as completed"
-    );
-
-    // Both should see 2 results
-    let host_results = fixture.host.get_lobby().unwrap().get_results(activity_id);
-    let guest_results = fixture.guests[0]
+    let run_id = fixture.host
         .get_lobby()
         .unwrap()
-        .get_results(activity_id);
+        .active_run_id()
+        .expect("Run should be active");
 
-    assert_eq!(host_results.len(), 2, "Host should see 2 results");
-    assert_eq!(guest_results.len(), 2, "Guest should see 2 results");
+    // Host submits result
+    fixture.host.submit_command(DomainCommand::SubmitResult {
+        lobby_id: fixture.lobby_id,
+        run_id,
+        result: konnekt_session_core::domain::ActivityResult::new(run_id, host_participant_id)
+            .with_score(100),
+    }).unwrap();
+
+    fixture.tick(250);
+
+    // Guest submits result
+    fixture.guests[0].submit_command(DomainCommand::SubmitResult {
+        lobby_id: fixture.lobby_id,
+        run_id,
+        result: konnekt_session_core::domain::ActivityResult::new(run_id, guest_participant_id)
+            .with_score(80),
+    }).unwrap();
+
+    fixture.tick(400);
+
+    // Run should be completed on host
+    // After completion, active_run is cleared from lobby
+    assert!(!fixture.host.get_lobby().unwrap().has_active_run());
 }

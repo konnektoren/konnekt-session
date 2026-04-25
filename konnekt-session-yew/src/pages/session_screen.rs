@@ -1,58 +1,54 @@
-use crate::components::{
-    ActivityList, ActivityPlanner, ActivitySubmission, ParticipantList, ResultsView, SessionInfo,
-};
-use crate::hooks::use_session;
-use konnekt_session_core::DomainCommand;
+use crate::components::{ActivityList, ActivityPlanner, ActivitySubmission, ParticipantList, SessionInfo};
+use crate::hooks::{HostConnectivityOptions, use_host_connectivity, use_session};
+use chrono::Utc;
+use konnekt_session_core::{DomainCommand, RunStatus};
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct SessionScreenProps {
     pub on_leave: Callback<()>,
+    #[prop_or(true)]
+    pub show_host_connectivity_warning: bool,
+    #[prop_or(5_000)]
+    pub host_disconnect_grace_ms: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ViewMode {
     Lobby,
     ActivityInProgress,
-    Results,
 }
 
 #[function_component(SessionScreen)]
 pub fn session_screen(props: &SessionScreenProps) -> Html {
     let session = use_session();
     let view_mode = use_state(|| ViewMode::Lobby);
+    let host_connectivity = use_host_connectivity(
+        session.is_host,
+        session.peer_count,
+        HostConnectivityOptions {
+            enabled: props.show_host_connectivity_warning,
+            unreachable_delay_ms: props.host_disconnect_grace_ms,
+        },
+    );
 
-    // ✅ NO LOCAL STATE - determine view mode from Core only
     {
         let view_mode = view_mode.clone();
-        let lobby = session.lobby.clone();
+        let active_run = session.active_run.clone();
 
-        use_effect_with(lobby.clone(), move |lobby_opt| {
-            if let Some(lobby) = lobby_opt {
-                // Check Core's activity status
-                if let Some(current) = lobby.current_activity() {
-                    if current.status == konnekt_session_core::domain::ActivityStatus::InProgress {
-                        view_mode.set(ViewMode::ActivityInProgress);
-                    } else if current.status
-                        == konnekt_session_core::domain::ActivityStatus::Completed
-                    {
-                        view_mode.set(ViewMode::Results);
-                    }
-                } else if lobby
-                    .activities()
-                    .iter()
-                    .any(|a| a.status == konnekt_session_core::domain::ActivityStatus::Completed)
-                {
-                    view_mode.set(ViewMode::Results);
+        use_effect_with(active_run, move |run| {
+            if let Some(run) = run {
+                if run.status == RunStatus::InProgress {
+                    view_mode.set(ViewMode::ActivityInProgress);
                 } else {
                     view_mode.set(ViewMode::Lobby);
                 }
+            } else {
+                view_mode.set(ViewMode::Lobby);
             }
             || ()
         });
     }
-
-    // ===== CALLBACKS =====
 
     let on_toggle_participation = {
         let send_command = session.send_command.clone();
@@ -60,21 +56,16 @@ pub fn session_screen(props: &SessionScreenProps) -> Html {
         let session_clone = session.clone();
 
         Callback::from(move |_: MouseEvent| {
-            if let (Some(lobby), Some(participant_id)) =
-                (&lobby, session_clone.get_local_participant_id())
+            if let (Some(lobby), Some(participant_id)) = (&lobby, session_clone.get_local_participant_id())
             {
-                let activity_in_progress = lobby.current_activity().is_some();
                 send_command(DomainCommand::ToggleParticipationMode {
                     lobby_id: lobby.id(),
                     participant_id,
                     requester_id: participant_id,
-                    activity_in_progress,
                 });
             }
         })
     };
-
-    // ===== RENDER =====
 
     html! {
         <div class="konnekt-session-screen">
@@ -98,25 +89,40 @@ pub fn session_screen(props: &SessionScreenProps) -> Html {
                 session_id={session.session_id.to_string()}
                 peer_count={session.peer_count}
                 is_host={session.is_host}
+                show_connectivity_warning={props.show_host_connectivity_warning}
+                host_unreachable={host_connectivity.host_unreachable}
+                last_host_connection={host_connectivity
+                    .last_host_connection_secs
+                    .as_ref()
+                    .map(|ts| {
+                        let now = Utc::now().timestamp() as u64;
+                        let delta = now.saturating_sub(*ts);
+                        if delta < 60 {
+                            format!("{}s ago", delta)
+                        } else if delta < 3600 {
+                            format!("{}m {}s ago", delta / 60, delta % 60)
+                        } else {
+                            format!("{}h {}m ago", delta / 3600, (delta % 3600) / 60)
+                        }
+                    })}
             />
 
             {match *view_mode {
                 ViewMode::Lobby => render_lobby_view(
                     &session.lobby,
+                    &session.active_run,
                     session.is_host,
+                    session.peer_count,
+                    session.runtime_error.clone(),
+                    session.get_local_participant_id(),
                     on_toggle_participation,
                 ),
                 ViewMode::ActivityInProgress => html! {
                     <ActivitySubmission
                         lobby={session.lobby.clone()}
+                        active_run={session.active_run.clone()}
                         is_host={session.is_host}
                         participant_id={session.get_local_participant_id()}
-                    />
-                },
-                ViewMode::Results => html! {
-                    <ResultsView
-                        lobby={session.lobby.clone()}
-                        is_host={session.is_host}
                     />
                 },
             }}
@@ -126,16 +132,23 @@ pub fn session_screen(props: &SessionScreenProps) -> Html {
 
 fn render_lobby_view(
     lobby: &Option<konnekt_session_core::Lobby>,
+    active_run: &Option<crate::hooks::ActiveRunSnapshot>,
     is_host: bool,
+    peer_count: usize,
+    runtime_error: Option<String>,
+    local_participant_id: Option<uuid::Uuid>,
     on_toggle_participation: Callback<MouseEvent>,
 ) -> Html {
     if let Some(lobby) = lobby {
-        let has_planned_activities = !lobby.activities().is_empty();
+        let has_planned_activities = !lobby.activity_queue().is_empty();
 
         html! {
             <div class="konnekt-session-screen__content">
                 <div class="konnekt-session-screen__column">
-                    <ParticipantList lobby={lobby.clone()} />
+                    <ParticipantList
+                        lobby={lobby.clone()}
+                        local_participant_id={local_participant_id}
+                    />
 
                     <div class="konnekt-session-screen__participation">
                         <button
@@ -156,9 +169,9 @@ fn render_lobby_view(
                 </div>
 
                 <div class="konnekt-session-screen__column">
-                    <ActivityList lobby={lobby.clone()} />
+                    <ActivityList lobby={lobby.clone()} active_run={active_run.clone()} />
 
-                    {if !is_host && !has_planned_activities {
+                    {if !is_host && !has_planned_activities && active_run.is_none() {
                         html! {
                             <div class="konnekt-session-screen__waiting">
                                 <p>{"Waiting for host to plan activities..."}</p>
@@ -171,30 +184,28 @@ fn render_lobby_view(
             </div>
         }
     } else {
+        if let Some(error) = runtime_error {
+            return html! {
+                <div class="konnekt-session-screen__loading">
+                    <p>{"Connection failed."}</p>
+                    <p>{error}</p>
+                </div>
+            };
+        }
+
         html! {
             <div class="konnekt-session-screen__loading">
-                <p>{"Syncing lobby from host..."}</p>
+                <p>
+                    {if is_host {
+                        "Creating lobby and waiting for peers..."
+                    } else if peer_count == 0 {
+                        "Connecting to host..."
+                    } else {
+                        "Syncing lobby from host..."
+                    }}
+                </p>
                 <div class="konnekt-spinner"></div>
             </div>
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_session_screen_has_leave_callback() {
-        let on_leave = Callback::from(|_: ()| {});
-        let _props = yew::props!(SessionScreenProps { on_leave });
-        assert!(true);
-    }
-
-    #[test]
-    fn test_view_mode_enum() {
-        let mode = ViewMode::Lobby;
-        assert_eq!(mode, ViewMode::Lobby);
-        assert_ne!(mode, ViewMode::ActivityInProgress);
     }
 }

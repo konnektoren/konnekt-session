@@ -1,6 +1,5 @@
 use crossterm::event::KeyCode;
-use konnekt_session_core::{Lobby, domain::ActivityMetadata};
-use std::collections::VecDeque;
+use konnekt_session_core::{Lobby, domain::ActivityConfig};
 use uuid::Uuid;
 
 mod activities_tab;
@@ -80,7 +79,7 @@ pub enum UserAction {
     KickParticipant(Uuid),
 
     // Activity actions (🆕)
-    PlanActivity(ActivityMetadata),
+    PlanActivity(ActivityConfig),
     StartActivity(Uuid),
     CancelActivity(Uuid),
     SubmitActivityResult { activity_id: Uuid, response: String },

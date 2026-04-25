@@ -1,4 +1,4 @@
-use konnekt_session_p2p::{IceServer, P2PLoopBuilder, SessionId};
+use konnekt_session_p2p::{IceServer, P2PLoopBuilder};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 fn init_test_tracing() {

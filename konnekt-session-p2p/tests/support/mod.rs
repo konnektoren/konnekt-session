@@ -99,12 +99,6 @@ impl SessionFixture {
         SessionLoopV2::new(domain, transport, false, lobby_id)
     }
 
-    pub fn poll_all(&mut self) {
-        self.host.poll();
-        for guest in self.guests.iter_mut() {
-            guest.poll();
-        }
-    }
     /// Poll all peers N times with proper ordering
     pub fn tick(&mut self, count: usize) {
         for i in 0..count {
@@ -121,63 +115,6 @@ impl SessionFixture {
                 tracing::trace!("🔄 Tick {}/{}", i, count);
             }
         }
-    }
-
-    /// Poll until lobby state stabilizes (same participant count for N iterations)
-    pub fn poll_until_stable(&mut self, max_iterations: usize) -> usize {
-        let mut last_state = self.get_participant_counts();
-        let mut stable_count = 0;
-        const STABLE_THRESHOLD: usize = 5; // Must be stable for 5 ticks
-
-        for i in 0..max_iterations {
-            self.tick(1); // Single tick
-
-            let current_state = self.get_participant_counts();
-
-            if current_state == last_state {
-                stable_count += 1;
-                if stable_count >= STABLE_THRESHOLD {
-                    tracing::info!(
-                        "✅ Stabilized after {} iterations (state: {:?})",
-                        i + 1,
-                        current_state
-                    );
-                    return i + 1;
-                }
-            } else {
-                stable_count = 0; // Reset if state changed
-            }
-
-            last_state = current_state;
-        }
-
-        tracing::warn!(
-            "⚠️  Did not stabilize after {} iterations (final state: {:?})",
-            max_iterations,
-            last_state
-        );
-        max_iterations
-    }
-
-    /// Get participant counts for all peers (for stability detection)
-    fn get_participant_counts(&self) -> Vec<usize> {
-        let mut counts = vec![
-            self.host
-                .get_lobby()
-                .map(|l| l.participants().len())
-                .unwrap_or(0),
-        ];
-
-        for guest in &self.guests {
-            counts.push(
-                guest
-                    .get_lobby()
-                    .map(|l| l.participants().len())
-                    .unwrap_or(0),
-            );
-        }
-
-        counts
     }
 
     /// Assert all peers have the same participant count
@@ -213,41 +150,4 @@ impl SessionFixture {
         }
     }
 
-    /// Print current state (for debugging)
-    pub fn print_state(&self) {
-        println!("\n📊 Current State:");
-        if let Some(lobby) = self.host.get_lobby() {
-            println!("   Host: {} participants", lobby.participants().len());
-            for (id, p) in lobby.participants() {
-                println!(
-                    "      {} - {} ({})",
-                    id,
-                    p.name(),
-                    if p.is_host() { "host" } else { "guest" }
-                );
-            }
-        } else {
-            println!("   Host: No lobby");
-        }
-
-        for (i, guest) in self.guests.iter().enumerate() {
-            if let Some(lobby) = guest.get_lobby() {
-                println!(
-                    "   Guest {}: {} participants",
-                    i + 1,
-                    lobby.participants().len()
-                );
-                for (id, p) in lobby.participants() {
-                    println!(
-                        "      {} - {} ({})",
-                        id,
-                        p.name(),
-                        if p.is_host() { "host" } else { "guest" }
-                    );
-                }
-            } else {
-                println!("   Guest {}: No lobby", i + 1);
-            }
-        }
-    }
 }

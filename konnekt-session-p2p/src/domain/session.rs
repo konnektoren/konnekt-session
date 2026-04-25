@@ -20,6 +20,11 @@ impl SessionId {
             .map_err(|e| P2PError::InvalidSessionId(e.to_string()))
     }
 
+    /// Create a SessionId from an existing UUID.
+    pub fn from_uuid(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+
     /// Get the session ID as a string
     pub fn as_str(&self) -> String {
         self.0.to_string()

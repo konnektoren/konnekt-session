@@ -46,7 +46,7 @@ impl IceServer {
         self
     }
 
-    /// Get default Google STUN servers
+    /// Get default STUN servers (Google + Cloudflare)
     pub fn default_stun_servers() -> Vec<Self> {
         vec![
             Self::stun("stun:stun.l.google.com:19302".to_string()),
@@ -54,6 +54,7 @@ impl IceServer {
             Self::stun("stun:stun2.l.google.com:19302".to_string()),
             Self::stun("stun:stun3.l.google.com:19302".to_string()),
             Self::stun("stun:stun4.l.google.com:19302".to_string()),
+            Self::stun("stun:stun.cloudflare.com:3478".to_string()),
         ]
     }
 }
@@ -94,7 +95,7 @@ mod tests {
     #[test]
     fn test_default_stun_servers() {
         let servers = IceServer::default_stun_servers();
-        assert_eq!(servers.len(), 5);
+        assert_eq!(servers.len(), 6);
         assert!(servers.iter().all(|s| s.username.is_none()));
     }
 

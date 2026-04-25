@@ -2,6 +2,7 @@ use crate::application::ConnectionEvent;
 use crate::domain::{IceServer, PeerId};
 use crate::infrastructure::error::{P2PError, Result};
 use matchbox_socket::{RtcIceServerConfig, WebRtcSocket, WebRtcSocketBuilder};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 
 /// Infrastructure adapter: Manages WebRTC connection via Matchbox signalling
@@ -145,20 +146,32 @@ impl MatchboxConnection {
     }
 }
 
-/// Build ICE server configuration for Matchbox
+/// Build ICE server configuration for Matchbox.
+/// Groups all no-auth servers into one config so every STUN URL is tried.
 fn build_ice_server_config(ice_servers: &[IceServer]) -> RtcIceServerConfig {
     if ice_servers.is_empty() {
-        // Use default if none provided
         return RtcIceServerConfig::default();
     }
 
-    // Convert first server (Matchbox only supports one ICE server config currently)
-    let first_server = &ice_servers[0];
+    let urls: Vec<String> = ice_servers
+        .iter()
+        .filter(|s| s.username.is_none())
+        .flat_map(|s| s.urls.iter().cloned())
+        .collect();
+
+    if urls.is_empty() {
+        let first = &ice_servers[0];
+        return RtcIceServerConfig {
+            urls: first.urls.clone(),
+            username: first.username.clone(),
+            credential: first.credential.clone(),
+        };
+    }
 
     RtcIceServerConfig {
-        urls: first_server.urls.clone(),
-        username: first_server.username.clone(),
-        credential: first_server.credential.clone(),
+        urls,
+        username: None,
+        credential: None,
     }
 }
 
@@ -167,18 +180,43 @@ async fn wait_for_peer_id(socket: &mut WebRtcSocket) -> Result<PeerId> {
     use instant::Duration;
 
     let start = instant::Instant::now();
-    let timeout = Duration::from_secs(5);
+    let timeout_ms = std::env::var("KONNEKT_PEER_ID_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(30_000);
+    let timeout = Duration::from_millis(timeout_ms);
+    let mut last_log_at_ms = 0u64;
 
     loop {
-        socket.update_peers();
+        let update_result = catch_unwind(AssertUnwindSafe(|| {
+            socket.update_peers();
+        }));
+        if update_result.is_err() {
+            return Err(P2PError::ConnectionFailed(
+                "Signalling socket closed while waiting for peer ID".to_string(),
+            ));
+        }
 
         if let Some(id) = socket.id() {
             return Ok(PeerId::new(id));
         }
 
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        if elapsed_ms.saturating_sub(last_log_at_ms) >= 1_000 {
+            tracing::warn!(
+                "Still waiting for peer ID from signalling server ({}ms elapsed, timeout={}ms)",
+                elapsed_ms,
+                timeout_ms
+            );
+            last_log_at_ms = elapsed_ms;
+        }
+
         if start.elapsed() > timeout {
             return Err(P2PError::ConnectionFailed(
-                "Timeout waiting for peer ID".to_string(),
+                format!(
+                    "Timeout waiting for peer ID ({}ms). Set KONNEKT_PEER_ID_TIMEOUT_MS to override.",
+                    timeout_ms
+                ),
             ));
         }
 

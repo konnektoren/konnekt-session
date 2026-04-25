@@ -1,18 +1,11 @@
 use instant::Instant;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
 
-/// Role within the lobby - determines authority and permissions
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(description = "Role determining participant permissions and capabilities")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LobbyRole {
-    /// Can manage lobby, kick guests, start activities, delegate role
-    #[schemars(description = "Host role with full management privileges")]
     Host,
-    /// Regular participant without management privileges
-    #[schemars(description = "Guest role with standard participant capabilities")]
     Guest,
 }
 
@@ -25,15 +18,10 @@ impl fmt::Display for LobbyRole {
     }
 }
 
-/// Participation mode - determines whether participant can play activities
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(description = "Mode determining if participant can actively play or only watch")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ParticipationMode {
-    /// Can participate in activities and submit results
-    #[schemars(description = "Actively participating - can submit activity results")]
+    #[default]
     Active,
-    /// View-only, cannot submit results
-    #[schemars(description = "Spectating only - cannot submit results")]
     Spectating,
 }
 
@@ -46,50 +34,21 @@ impl fmt::Display for ParticipationMode {
     }
 }
 
-impl Default for ParticipationMode {
-    fn default() -> Self {
-        // New guests join in Active mode by default (from requirements)
-        ParticipationMode::Active
-    }
-}
-
-/// Timestamp in milliseconds since application start (monotonic)
-///
-/// This is serializable and comparable, suitable for deterministic ordering.
-/// Uses instant::Instant internally for WASM compatibility (ADR-0013).
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
-)]
-#[schemars(description = "Monotonic timestamp in milliseconds since session start")]
-pub struct Timestamp(
-    #[schemars(
-        description = "Milliseconds since session start",
-        example = "example_timestamp()"
-    )]
-    u64,
-);
-
-fn example_timestamp() -> u64 {
-    12345
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct Timestamp(u64);
 
 impl Timestamp {
-    /// Create a timestamp representing the current moment
     pub fn now() -> Self {
-        // Use a static anchor point for all timestamps in the session
         static ANCHOR: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
         let anchor = ANCHOR.get_or_init(Instant::now);
-
         let elapsed = Instant::now().duration_since(*anchor);
         Timestamp(elapsed.as_millis() as u64)
     }
 
-    /// Get the raw milliseconds value
     pub fn as_millis(&self) -> u64 {
         self.0
     }
 
-    /// Create a timestamp from a raw milliseconds value (for testing)
     pub fn from_millis(millis: u64) -> Self {
         Timestamp(millis)
     }
@@ -101,90 +60,30 @@ impl fmt::Display for Timestamp {
     }
 }
 
-/// Domain entity representing a participant in the lobby.
-///
-/// A participant can be either a Host (with management privileges) or a Guest (regular participant).
-/// Participants can also switch between Active (can play) and Spectating (view-only) modes.
-///
-/// # Examples
-///
-/// ```json
-/// {
-///   "id": "550e8400-e29b-41d4-a716-446655440000",
-///   "name": "Alice",
-///   "lobby_role": "Host",
-///   "participation_mode": "Active",
-///   "joined_at": 12345
-/// }
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(description = "A participant in a lobby session")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Participant {
-    /// Unique identifier for this participant
-    #[schemars(
-        description = "Unique participant identifier (UUID v4)",
-        example = "example_uuid()"
-    )]
     id: Uuid,
-
-    /// Display name (unique within lobby)
-    #[schemars(
-        description = "Display name (must be unique within lobby)",
-        length(min = 1, max = 50),
-        example = "example_name()"
-    )]
     name: String,
-
-    /// Role determining permissions
-    #[schemars(description = "Participant's role (Host or Guest)")]
     lobby_role: LobbyRole,
-
-    /// Participation mode determining activity involvement
-    #[schemars(description = "Participation mode (Active or Spectating)")]
     participation_mode: ParticipationMode,
-
-    /// Timestamp when participant joined (for host election)
-    /// Monotonic timestamp in milliseconds (WASM-compatible via ADR-0013)
-    #[schemars(
-        description = "Monotonic timestamp when participant joined (for deterministic host election)"
-    )]
     joined_at: Timestamp,
 }
 
-fn example_uuid() -> &'static str {
-    "550e8400-e29b-41d4-a716-446655440000"
-}
-
-fn example_name() -> &'static str {
-    "Alice"
-}
-
-/// Errors that can occur when working with participants
-#[derive(Debug, thiserror::Error, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[schemars(description = "Participant validation and operation errors")]
+#[derive(Debug, thiserror::Error, PartialEq, Serialize, Deserialize)]
 pub enum ParticipantError {
     #[error("Name cannot be empty")]
-    #[schemars(description = "Attempted to create participant with empty name")]
     EmptyName,
 
     #[error("Name must be between 1 and 50 characters")]
-    #[schemars(description = "Name length exceeds maximum (50 characters)")]
     InvalidNameLength,
 
     #[error("Cannot change participation mode during active activity")]
-    #[schemars(
-        description = "Attempted to toggle participation mode while activity is in progress"
-    )]
     CannotToggleDuringActivity,
 }
 
-// ... rest of implementation stays the same ...
-
 impl Participant {
-    /// Create a new participant with Host role
     pub fn new_host(name: String) -> Result<Self, ParticipantError> {
         Self::validate_name(&name)?;
-
         Ok(Participant {
             id: Uuid::new_v4(),
             name,
@@ -194,10 +93,8 @@ impl Participant {
         })
     }
 
-    /// Create a new participant with Guest role
     pub fn new_guest(name: String) -> Result<Self, ParticipantError> {
         Self::validate_name(&name)?;
-
         Ok(Participant {
             id: Uuid::new_v4(),
             name,
@@ -207,7 +104,6 @@ impl Participant {
         })
     }
 
-    /// Create a participant with a specific ID (for deserialization/sync)
     pub fn with_id(
         id: Uuid,
         name: String,
@@ -216,7 +112,6 @@ impl Participant {
         joined_at: Timestamp,
     ) -> Result<Self, ParticipantError> {
         Self::validate_name(&name)?;
-
         Ok(Participant {
             id,
             name,
@@ -226,7 +121,6 @@ impl Participant {
         })
     }
 
-    /// Create a host participant with a specific ID
     pub fn host_with_id(id: Uuid, name: String) -> Result<Self, ParticipantError> {
         Self::with_id(
             id,
@@ -237,7 +131,6 @@ impl Participant {
         )
     }
 
-    /// Create a guest participant with a specific ID
     pub fn guest_with_id(id: Uuid, name: String) -> Result<Self, ParticipantError> {
         Self::with_id(
             id,
@@ -248,14 +141,12 @@ impl Participant {
         )
     }
 
-    /// Create a participant with an explicit timestamp (for testing or deserialization)
     pub fn with_timestamp(
         name: String,
         lobby_role: LobbyRole,
         joined_at: Timestamp,
     ) -> Result<Self, ParticipantError> {
         Self::validate_name(&name)?;
-
         Ok(Participant {
             id: Uuid::new_v4(),
             name,
@@ -265,20 +156,15 @@ impl Participant {
         })
     }
 
-    /// Validate name according to business rules
     fn validate_name(name: &str) -> Result<(), ParticipantError> {
         if name.is_empty() {
             return Err(ParticipantError::EmptyName);
         }
-
         if name.len() > 50 {
             return Err(ParticipantError::InvalidNameLength);
         }
-
         Ok(())
     }
-
-    // Getters
 
     pub fn id(&self) -> Uuid {
         self.id
@@ -300,27 +186,18 @@ impl Participant {
         self.joined_at
     }
 
-    // Business logic queries
-
-    /// Check if this participant is the host
     pub fn is_host(&self) -> bool {
         matches!(self.lobby_role, LobbyRole::Host)
     }
 
-    /// Check if this participant can submit activity results
     pub fn can_submit_results(&self) -> bool {
         matches!(self.participation_mode, ParticipationMode::Active)
     }
 
-    /// Check if this participant can manage the lobby
     pub fn can_manage_lobby(&self) -> bool {
         self.is_host()
     }
 
-    // State mutations
-
-    /// Toggle participation mode (Active ↔ Spectating)
-    /// Returns error if activity is currently running
     pub fn toggle_participation_mode(
         &mut self,
         activity_in_progress: bool,
@@ -337,17 +214,14 @@ impl Participant {
         Ok(self.participation_mode)
     }
 
-    /// Force set participation mode (used by host)
     pub fn force_participation_mode(&mut self, mode: ParticipationMode) {
         self.participation_mode = mode;
     }
 
-    /// Promote this participant to host role
     pub fn promote_to_host(&mut self) {
         self.lobby_role = LobbyRole::Host;
     }
 
-    /// Demote this participant to guest role
     pub fn demote_to_guest(&mut self) {
         self.lobby_role = LobbyRole::Guest;
     }
@@ -357,7 +231,6 @@ impl Participant {
 mod tests {
     use super::*;
     use instant::Duration;
-    use schemars::schema_for;
 
     #[test]
     fn test_create_host() {
@@ -581,68 +454,10 @@ mod tests {
         .unwrap();
 
         let mut participants = vec![bob.clone(), carol.clone(), alice.clone()];
-
         participants.sort_by_key(|p| p.joined_at());
 
         assert_eq!(participants[0].name(), "Alice");
         assert_eq!(participants[1].name(), "Carol");
         assert_eq!(participants[2].name(), "Bob");
-    }
-
-    #[test]
-    fn test_participant_json_schema() {
-        let schema = schema_for!(Participant);
-
-        // Convert to JSON and verify it's valid
-        let json = serde_json::to_string(&schema).unwrap();
-        assert!(!json.is_empty());
-
-        // Verify schema contains expected $schema field
-        let schema_json: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(schema_json.get("$schema").is_some());
-    }
-
-    #[test]
-    fn test_lobby_role_json_schema() {
-        let schema = schema_for!(LobbyRole);
-
-        // Verify we can generate a schema for enum
-        let json = serde_json::to_string(&schema).unwrap();
-        assert!(!json.is_empty());
-
-        // Should be a valid JSON schema
-        let schema_json: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(schema_json.get("$schema").is_some());
-    }
-
-    #[test]
-    fn test_participation_mode_json_schema() {
-        let schema = schema_for!(ParticipationMode);
-
-        // Verify we can generate a schema for enum
-        let json = serde_json::to_string(&schema).unwrap();
-        assert!(!json.is_empty());
-
-        // Should be a valid JSON schema
-        let schema_json: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(schema_json.get("$schema").is_some());
-    }
-
-    #[test]
-    fn test_participant_error_json_schema() {
-        let schema = schema_for!(ParticipantError);
-
-        // Verify we can generate a schema for error enum
-        let json = serde_json::to_string(&schema).unwrap();
-        assert!(!json.is_empty());
-    }
-
-    #[test]
-    fn test_timestamp_json_schema() {
-        let schema = schema_for!(Timestamp);
-
-        // Verify we can generate a schema
-        let json = serde_json::to_string(&schema).unwrap();
-        assert!(!json.is_empty());
     }
 }

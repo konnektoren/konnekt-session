@@ -1,4 +1,5 @@
 use konnekt_session_core::Lobby;
+use uuid::Uuid;
 use yew::prelude::*;
 
 #[cfg(feature = "preview")]
@@ -9,6 +10,8 @@ use yew_preview::test_utils::{exists, has_text};
 #[derive(Properties, PartialEq, Clone)]
 pub struct ParticipantListProps {
     pub lobby: Lobby,
+    #[prop_or_default]
+    pub local_participant_id: Option<Uuid>,
 }
 
 /// Displays list of participants in the lobby
@@ -36,6 +39,7 @@ pub fn participant_list(props: &ParticipantListProps) -> Html {
                     } else {
                         ""
                     };
+                    let is_me = Some(participant.id()) == props.local_participant_id;
 
                     let mode_class = if participant.can_submit_results() {
                         "active"
@@ -59,6 +63,11 @@ pub fn participant_list(props: &ParticipantListProps) -> Html {
                             <span class="konnekt-participant-list__name">
                                 {participant.name()}
                                 <span class="konnekt-participant-list__role">{role_text}</span>
+                                {if is_me {
+                                    html! { <span class="konnekt-participant-list__you">{" (you)"}</span> }
+                                } else {
+                                    html! {}
+                                }}
                             </span>
                             <span class="konnekt-participant-list__mode">
                                 {if participant.can_submit_results() {

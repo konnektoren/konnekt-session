@@ -75,6 +75,9 @@ pub struct P2PTransport<C: NetworkConnection> {
     /// Are we the host?
     is_host: bool,
 
+    /// Learned host peer (guest only). Used to route commands deterministically.
+    host_peer: Option<PeerId>,
+
     /// Transport events (for SessionLoop)
     pending_events: Vec<TransportEvent>,
 }
@@ -90,6 +93,7 @@ impl<C: NetworkConnection> P2PTransport<C> {
             message_cache: VecDeque::with_capacity(cache_size),
             cache_size,
             is_host: true,
+            host_peer: None,
             pending_events: Vec::new(),
         }
     }
@@ -104,6 +108,7 @@ impl<C: NetworkConnection> P2PTransport<C> {
             message_cache: VecDeque::new(),
             cache_size,
             is_host: false,
+            host_peer: None,
             pending_events: Vec::new(),
         }
     }
@@ -145,13 +150,27 @@ impl<C: NetworkConnection> P2PTransport<C> {
 
         let data = serde_json::to_vec(&msg).map_err(P2PError::Serialization)?;
 
-        // Send to first connected peer (should be host)
         let peers = self.connection.connected_peers();
-        if let Some(host_peer) = peers.first() {
-            self.connection.send_to(*host_peer, data)?;
-        } else {
+        if peers.is_empty() {
             return Err(P2PError::SendFailed("No host connected".to_string()));
         }
+
+        // Prefer the learned host peer; fallback for startup before snapshot response.
+        let target = if let Some(host_peer) = self.host_peer {
+            if peers.contains(&host_peer) {
+                host_peer
+            } else {
+                let fallback = peers[0];
+                self.host_peer = Some(fallback);
+                fallback
+            }
+        } else {
+            let fallback = peers[0];
+            self.host_peer = Some(fallback);
+            fallback
+        };
+
+        self.connection.send_to(target, data)?;
 
         Ok(())
     }
@@ -225,6 +244,10 @@ impl<C: NetworkConnection> P2PTransport<C> {
                                 snapshot,
                                 as_of_sequence,
                             } => {
+                                if !self.is_host {
+                                    // Snapshot responses are authoritative from host.
+                                    self.host_peer = Some(from);
+                                }
                                 tracing::info!("📥 Received snapshot (seq: {})", as_of_sequence);
                                 self.pending_events.push(TransportEvent::SnapshotReceived {
                                     snapshot,

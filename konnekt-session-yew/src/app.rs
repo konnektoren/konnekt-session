@@ -1,6 +1,5 @@
 use crate::pages::{LoginScreen, SessionScreen};
 use crate::providers::SessionProvider;
-use konnekt_session_p2p::SessionId;
 use yew::prelude::*;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -15,11 +14,6 @@ enum AppState {
     JoiningSession {
         session_id: String,
         guest_name: String,
-    },
-    InSession {
-        session_id: SessionId,
-        name: String,
-        is_host: bool,
     },
 }
 
@@ -101,6 +95,7 @@ pub fn app() -> Html {
                     html! {
                         <SessionProvider
                             signalling_server="wss://match.konnektoren.help"
+                            lobby_name={Some(AttrValue::from(lobby_name.clone()))}
                             name={Some(AttrValue::from(host_name.clone()))}
                         >
                             <SessionScreen on_leave={on_leave.clone()} />
@@ -117,12 +112,6 @@ pub fn app() -> Html {
                         >
                             <SessionScreen on_leave={on_leave.clone()} />
                         </SessionProvider>
-                    }
-                }
-
-                AppState::InSession { .. } => {
-                    html! {
-                        <SessionScreen on_leave={on_leave.clone()} />
                     }
                 }
             }}
