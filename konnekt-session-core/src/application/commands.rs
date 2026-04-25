@@ -1,91 +1,100 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Commands that can be executed on the lobby domain
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DomainCommand {
-    /// Create a new lobby with specific ID
+    // ── Lobby commands ────────────────────────────────────────────────────────
+
     CreateLobby {
         lobby_id: Option<Uuid>,
         lobby_name: String,
         host_name: String,
     },
 
-    // Create lobby with specific host participant (for P2P sync)
     CreateLobbyWithHost {
         lobby_id: Uuid,
         lobby_name: String,
         host: crate::domain::Participant,
     },
 
-    /// Join an existing lobby as guest
-    JoinLobby { lobby_id: Uuid, guest_name: String },
+    JoinLobby {
+        lobby_id: Uuid,
+        guest_name: String,
+    },
 
-    /// Leave the lobby
     LeaveLobby {
         lobby_id: Uuid,
         participant_id: Uuid,
     },
 
-    /// Kick a guest (host only)
     KickGuest {
         lobby_id: Uuid,
         host_id: Uuid,
         guest_id: Uuid,
     },
 
-    /// Toggle participation mode (Active ↔ Spectating)
+    /// `activity_in_progress` no longer needed — Lobby tracks this via `active_run_id`.
     ToggleParticipationMode {
         lobby_id: Uuid,
         participant_id: Uuid,
         requester_id: Uuid,
-        activity_in_progress: bool,
     },
 
-    /// Delegate host role to another participant
     DelegateHost {
         lobby_id: Uuid,
         current_host_id: Uuid,
         new_host_id: Uuid,
     },
 
-    /// Plan an activity
-    PlanActivity {
-        lobby_id: Uuid,
-        metadata: crate::domain::ActivityMetadata,
-    },
-
-    /// Start a planned activity
-    StartActivity {
-        lobby_id: Uuid,
-        activity_id: crate::domain::ActivityId,
-    },
-
-    /// Submit activity result
-    SubmitResult {
-        lobby_id: Uuid,
-        result: crate::domain::ActivityResult,
-    },
-
-    /// Cancel activity
-    CancelActivity {
-        lobby_id: Uuid,
-        activity_id: crate::domain::ActivityId,
-    },
-
-    /// Add a participant directly (used for P2P sync)
-    /// This is different from JoinLobby because it specifies the exact participant to add
+    /// Add a participant directly (P2P sync).
     AddParticipant {
         lobby_id: Uuid,
         participant: crate::domain::Participant,
     },
 
-    /// Update a participant's mode directly (used for P2P sync)
-    /// This is different from ToggleParticipationMode because it sets a specific mode
+    /// Force-set a participant's mode (P2P sync).
     UpdateParticipantMode {
         lobby_id: Uuid,
         participant_id: Uuid,
         new_mode: crate::domain::ParticipationMode,
+    },
+
+    QueueActivity {
+        lobby_id: Uuid,
+        config: crate::domain::ActivityConfig,
+    },
+
+    // ── Run commands ──────────────────────────────────────────────────────────
+
+    /// Dequeue the next activity and start a run.
+    StartNextRun {
+        lobby_id: Uuid,
+    },
+
+    SubmitResult {
+        lobby_id: Uuid,
+        run_id: crate::domain::ActivityRunId,
+        result: crate::domain::ActivityResult,
+    },
+
+    CancelRun {
+        lobby_id: Uuid,
+        run_id: crate::domain::ActivityRunId,
+    },
+
+    /// Remove a participant from a run's required submitters (on disconnect).
+    RemoveSubmitter {
+        lobby_id: Uuid,
+        run_id: crate::domain::ActivityRunId,
+        participant_id: Uuid,
+    },
+
+    /// P2P sync: guest applies a run that the host already started.
+    SyncRunStarted {
+        lobby_id: Uuid,
+        run_id: crate::domain::ActivityRunId,
+        config: crate::domain::ActivityConfig,
+        required_submitters: Vec<Uuid>,
     },
 }
 
@@ -98,22 +107,9 @@ mod tests {
         let cmd = DomainCommand::CreateLobby {
             lobby_name: "Test".to_string(),
             host_name: "Alice".to_string(),
-            lobby_id: None, // 🆕 Let the system generate an ID
+            lobby_id: None,
         };
-
         let cloned = cmd.clone();
         assert_eq!(cmd, cloned);
-    }
-
-    #[test]
-    fn test_command_debug() {
-        let cmd = DomainCommand::JoinLobby {
-            lobby_id: Uuid::new_v4(),
-            guest_name: "Bob".to_string(),
-        };
-
-        let debug = format!("{:?}", cmd);
-        assert!(debug.contains("JoinLobby"));
-        assert!(debug.contains("Bob"));
     }
 }

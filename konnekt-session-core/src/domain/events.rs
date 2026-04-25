@@ -1,40 +1,68 @@
-use crate::domain::{ActivityId, ActivityMetadata, ActivityResult, ParticipationMode};
+use crate::domain::{ActivityConfig, ActivityResult, ActivityRunId, ParticipationMode, RunStatus};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Domain events that occur in the lobby
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum DomainEvent {
-    /// A participant's participation mode changed
+    // ── Lobby events ─────────────────────────────────────────────────────────
+
+    ParticipantJoined {
+        lobby_id: Uuid,
+        participant: crate::domain::Participant,
+    },
+
+    ParticipantLeft {
+        lobby_id: Uuid,
+        participant_id: Uuid,
+    },
+
+    ParticipantKicked {
+        lobby_id: Uuid,
+        participant_id: Uuid,
+    },
+
+    HostDelegated {
+        lobby_id: Uuid,
+        old_host_id: Uuid,
+        new_host_id: Uuid,
+    },
+
     ParticipationModeChanged {
+        lobby_id: Uuid,
         participant_id: Uuid,
         new_mode: ParticipationMode,
-        forced: bool, // true if changed by host, false if self-requested
     },
 
-    /// Host planned a new activity
-    ActivityPlanned {
+    ActivityQueued {
         lobby_id: Uuid,
-        metadata: ActivityMetadata, // Contains serialized config
+        config: ActivityConfig,
     },
 
-    /// Host started an activity
-    ActivityStarted {
+    // ── Run events ────────────────────────────────────────────────────────────
+
+    RunStarted {
         lobby_id: Uuid,
-        activity_id: ActivityId,
+        run_id: ActivityRunId,
+        config: ActivityConfig,
     },
 
-    /// Participant submitted result
     ResultSubmitted {
         lobby_id: Uuid,
-        result: ActivityResult, // Contains serialized result data
+        run_id: ActivityRunId,
+        result: ActivityResult,
     },
 
-    /// Activity completed (all active participants done)
-    ActivityCompleted {
+    SubmitterRemoved {
         lobby_id: Uuid,
-        activity_id: ActivityId,
+        run_id: ActivityRunId,
+        participant_id: Uuid,
+    },
+
+    RunEnded {
+        lobby_id: Uuid,
+        run_id: ActivityRunId,
+        status: RunStatus,
         results: Vec<ActivityResult>,
     },
 }

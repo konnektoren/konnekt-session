@@ -1,94 +1,61 @@
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Activity ID (unique within lobby)
 pub type ActivityId = Uuid;
 
-/// Activity lifecycle state
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub enum ActivityStatus {
-    /// Queued for later
-    Planned,
-    /// Currently active
-    InProgress,
-    /// Finished successfully
-    Completed,
-    /// Stopped early
-    Cancelled,
-}
-
-/// Activity metadata (transported over P2P)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct ActivityMetadata {
-    /// Unique ID
+/// Value object sitting in the Lobby's activity queue.
+/// Promoted to ActivityRun when the host starts it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActivityConfig {
     pub id: ActivityId,
-
-    /// Activity type identifier (e.g., "trivia-quiz-v1")
     pub activity_type: String,
-
-    /// Display name
     pub name: String,
-
-    /// Current status
-    pub status: ActivityStatus,
-
-    /// Activity-specific configuration (opaque to core)
+    /// Game-specific config — opaque to the library.
     #[serde(default)]
     pub config: serde_json::Value,
 }
 
-impl ActivityMetadata {
-    /// Create a new planned activity
+impl ActivityConfig {
     pub fn new(activity_type: String, name: String, config: serde_json::Value) -> Self {
         Self {
             id: Uuid::new_v4(),
             activity_type,
             name,
-            status: ActivityStatus::Planned,
             config,
         }
     }
 
-    /// Create with specific ID (for deserialization/sync)
     pub fn with_id(
         id: ActivityId,
         activity_type: String,
         name: String,
-        status: ActivityStatus,
         config: serde_json::Value,
     ) -> Self {
         Self {
             id,
             activity_type,
             name,
-            status,
             config,
         }
     }
 }
 
-/// Activity result submitted by a participant
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// Result submitted by a participant for a run.
+/// `data` is opaque — the consuming app owns the concrete type.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActivityResult {
-    pub activity_id: ActivityId,
+    pub run_id: Uuid,
     pub participant_id: Uuid,
-
-    /// Result data (opaque to core)
     #[serde(default)]
     pub data: serde_json::Value,
-
-    /// Optional score (for leaderboard)
     pub score: Option<u32>,
-
-    /// Time taken (milliseconds)
     pub time_taken_ms: Option<u64>,
 }
 
 impl ActivityResult {
-    pub fn new(activity_id: ActivityId, participant_id: Uuid) -> Self {
+    pub fn new(run_id: Uuid, participant_id: Uuid) -> Self {
         Self {
-            activity_id,
+            run_id,
             participant_id,
             data: serde_json::Value::Null,
             score: None,
@@ -117,30 +84,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_create_activity_metadata() {
-        let config = serde_json::json!({
-            "question_count": 10,
-            "time_limit": 60
-        });
+    fn test_create_activity_config() {
+        let config = serde_json::json!({"question_count": 10});
+        let ac = ActivityConfig::new("trivia-v1".to_string(), "Friday Quiz".to_string(), config.clone());
 
-        let metadata = ActivityMetadata::new(
-            "trivia-quiz-v1".to_string(),
-            "Friday Quiz".to_string(),
-            config.clone(),
-        );
-
-        assert_eq!(metadata.activity_type, "trivia-quiz-v1");
-        assert_eq!(metadata.name, "Friday Quiz");
-        assert_eq!(metadata.status, ActivityStatus::Planned);
-        assert_eq!(metadata.config, config);
+        assert_eq!(ac.activity_type, "trivia-v1");
+        assert_eq!(ac.name, "Friday Quiz");
+        assert_eq!(ac.config, config);
     }
 
     #[test]
     fn test_activity_result_builder() {
-        let activity_id = Uuid::new_v4();
+        let run_id = Uuid::new_v4();
         let participant_id = Uuid::new_v4();
 
-        let result = ActivityResult::new(activity_id, participant_id)
+        let result = ActivityResult::new(run_id, participant_id)
             .with_score(42)
             .with_time(1500)
             .with_data(serde_json::json!({"answers": [1, 2, 3]}));
