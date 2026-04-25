@@ -36,6 +36,18 @@ impl P2PLoopBuilder {
         ice_servers: Vec<IceServer>,
     ) -> Result<(P2PLoop, SessionId, Uuid)> {
         let session_id = SessionId::new();
+        self.build_host_with_session_id(signalling_server, session_id, ice_servers)
+            .await
+    }
+
+    /// Build P2P loop for host with a preselected session ID.
+    /// Returns (p2p_loop, session_id, lobby_id)
+    pub async fn build_host_with_session_id(
+        self,
+        signalling_server: &str,
+        session_id: SessionId,
+        ice_servers: Vec<IceServer>,
+    ) -> Result<(P2PLoop, SessionId, Uuid)> {
         let lobby_id = session_id.inner(); // 1:1 mapping
 
         let room_url = format!("{}/{}", signalling_server, session_id.as_str());
@@ -129,6 +141,53 @@ impl P2PLoopBuilder {
 
         tracing::info!("✅ SessionLoop created for HOST");
 
+        Ok((session_loop, session_id))
+    }
+
+    /// Build complete SessionLoop for HOST using a deterministic/preselected session ID.
+    ///
+    /// Returns (session_loop, session_id)
+    pub async fn build_session_host_with_session_id(
+        self,
+        signalling_server: &str,
+        session_id: SessionId,
+        ice_servers: Vec<IceServer>,
+        lobby_name: String,
+        host_name: String,
+    ) -> Result<(SessionLoop, SessionId)> {
+        let batch_size = self.batch_size;
+        let queue_size = self.queue_size;
+
+        let (p2p_loop, session_id, lobby_id) = self
+            .build_host_with_session_id(signalling_server, session_id, ice_servers)
+            .await?;
+
+        let mut domain_loop = DomainLoop::new(batch_size, queue_size);
+
+        let create_cmd = konnekt_session_core::DomainCommand::CreateLobby {
+            lobby_id: Some(lobby_id),
+            lobby_name,
+            host_name,
+        };
+
+        domain_loop
+            .submit(create_cmd)
+            .map_err(|e| crate::infrastructure::error::P2PError::SendFailed(e.to_string()))?;
+
+        domain_loop.poll();
+
+        let events = domain_loop.drain_events();
+        if !events
+            .iter()
+            .any(|e| matches!(e, konnekt_session_core::DomainEvent::LobbyCreated { .. }))
+        {
+            return Err(crate::infrastructure::error::P2PError::ConnectionFailed(
+                "Failed to create lobby".to_string(),
+            ));
+        }
+
+        let session_loop = SessionLoop::new_host(p2p_loop, domain_loop, lobby_id);
+        tracing::info!("✅ SessionLoop created for HOST");
         Ok((session_loop, session_id))
     }
 

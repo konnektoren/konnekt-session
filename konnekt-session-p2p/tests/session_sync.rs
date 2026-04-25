@@ -1,6 +1,6 @@
 mod support;
 
-use konnekt_session_core::{domain::ActivityConfig, DomainCommand, RunStatus};
+use konnekt_session_core::{domain::ActivityConfig, DomainCommand};
 use support::SessionFixture;
 
 #[test]
@@ -175,7 +175,6 @@ fn test_activity_completion() {
     fixture.tick(400);
 
     // Run should be completed on host
-    let host_run = fixture.host.get_active_run();
     // After completion, active_run is cleared from lobby
     assert!(!fixture.host.get_lobby().unwrap().has_active_run());
 }

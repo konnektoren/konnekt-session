@@ -38,8 +38,6 @@ pub struct P2PLoop {
     /// Domain commands to be processed by SessionLoop
     pending_domain_commands: VecDeque<DomainCommand>,
 
-    /// Max events to process per poll
-    batch_size: usize,
 }
 
 impl P2PLoop {
@@ -48,7 +46,7 @@ impl P2PLoop {
     pub fn new_host(
         connection: MatchboxConnection,
         lobby_id: Uuid,
-        batch_size: usize,
+        _batch_size: usize,
         max_queue_size: usize,
     ) -> Self {
         info!("P2PLoop initialized as HOST");
@@ -61,7 +59,6 @@ impl P2PLoop {
             inbound_events: Vec::new(),
             inbound_lobby_events: Vec::new(),
             pending_domain_commands: VecDeque::new(),
-            batch_size,
         }
     }
 
@@ -70,7 +67,7 @@ impl P2PLoop {
     pub fn new_guest(
         connection: MatchboxConnection,
         lobby_id: Uuid,
-        batch_size: usize,
+        _batch_size: usize,
         max_queue_size: usize,
     ) -> Self {
         info!("P2PLoop initialized as GUEST");
@@ -83,7 +80,6 @@ impl P2PLoop {
             inbound_events: Vec::new(),
             inbound_lobby_events: Vec::new(),
             pending_domain_commands: VecDeque::new(),
-            batch_size,
         }
     }
 
@@ -94,7 +90,7 @@ impl P2PLoop {
 
         let msg = SyncMessage::CommandRequest { command };
         let data = serde_json::to_vec(&msg)
-            .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
+            .map_err(crate::infrastructure::error::P2PError::Serialization)?;
 
         self.connection.broadcast(data)?;
         trace!("Command broadcast complete");
@@ -110,7 +106,7 @@ impl P2PLoop {
             .map_err(|e| crate::infrastructure::error::P2PError::SendFailed(e.to_string()))?;
 
         let data = serde_json::to_vec(&sync_msg)
-            .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
+            .map_err(crate::infrastructure::error::P2PError::Serialization)?;
 
         self.connection.broadcast(data)?;
 
@@ -196,7 +192,7 @@ impl P2PLoop {
 
         // Serialize and broadcast
         let data = serde_json::to_vec(&sync_msg)
-            .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
+            .map_err(crate::infrastructure::error::P2PError::Serialization)?;
 
         self.connection.broadcast(data)?;
 
@@ -339,7 +335,7 @@ impl P2PLoop {
             .map_err(|e| crate::infrastructure::error::P2PError::SendFailed(e.to_string()))?;
 
         let data = serde_json::to_vec(&sync_msg)
-            .map_err(|e| crate::infrastructure::error::P2PError::Serialization(e))?;
+            .map_err(crate::infrastructure::error::P2PError::Serialization)?;
 
         self.connection.send_to(PeerId(peer_id.inner()), data)?;
 

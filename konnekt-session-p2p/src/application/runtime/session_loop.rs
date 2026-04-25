@@ -70,16 +70,16 @@ impl SessionLoop {
 
     /// Register participant with peer (for tracking disconnections)
     fn register_participant_for_peer(&mut self, participant_id: Uuid) {
-        if let Some(peer_id) = self.local_peer_id() {
-            if let Some(state) = self.p2p.peer_registry_mut().get_peer_mut(&peer_id) {
-                state.set_participant_info(participant_id, String::new(), self.is_host);
+        if let Some(peer_id) = self.local_peer_id()
+            && let Some(state) = self.p2p.peer_registry_mut().get_peer_mut(&peer_id)
+        {
+            state.set_participant_info(participant_id, String::new(), self.is_host);
 
-                tracing::debug!(
-                    "📝 Registered participant {} for peer {}",
-                    participant_id,
-                    peer_id
-                );
-            }
+            tracing::debug!(
+                "📝 Registered participant {} for peer {}",
+                participant_id,
+                peer_id
+            );
         }
     }
 
@@ -215,17 +215,14 @@ impl SessionLoop {
         } else {
             // ✅ GUEST: Handle peer connections
             for event in &connection_events {
-                match event {
-                    crate::application::ConnectionEvent::PeerConnected(peer_id) => {
-                        tracing::info!("🟢 GUEST: Connected to host peer {}", peer_id);
-                        tracing::info!("📤 GUEST: Requesting full sync from host");
+                if let crate::application::ConnectionEvent::PeerConnected(peer_id) = event {
+                    tracing::info!("🟢 GUEST: Connected to host peer {}", peer_id);
+                    tracing::info!("📤 GUEST: Requesting full sync from host");
 
-                        // ✅ Request sync now that we have a connection
-                        if let Err(e) = self.p2p.request_full_sync() {
-                            tracing::error!("❌ GUEST: Failed to request full sync: {:?}", e);
-                        }
+                    // ✅ Request sync now that we have a connection
+                    if let Err(e) = self.p2p.request_full_sync() {
+                        tracing::error!("❌ GUEST: Failed to request full sync: {:?}", e);
                     }
-                    _ => {}
                 }
             }
         }

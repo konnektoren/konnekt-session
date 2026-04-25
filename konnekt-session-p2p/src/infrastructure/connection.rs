@@ -2,6 +2,7 @@ use crate::application::ConnectionEvent;
 use crate::domain::{IceServer, PeerId};
 use crate::infrastructure::error::{P2PError, Result};
 use matchbox_socket::{RtcIceServerConfig, WebRtcSocket, WebRtcSocketBuilder};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
 
 /// Infrastructure adapter: Manages WebRTC connection via Matchbox signalling
@@ -167,18 +168,43 @@ async fn wait_for_peer_id(socket: &mut WebRtcSocket) -> Result<PeerId> {
     use instant::Duration;
 
     let start = instant::Instant::now();
-    let timeout = Duration::from_secs(5);
+    let timeout_ms = std::env::var("KONNEKT_PEER_ID_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(30_000);
+    let timeout = Duration::from_millis(timeout_ms);
+    let mut last_log_at_ms = 0u64;
 
     loop {
-        socket.update_peers();
+        let update_result = catch_unwind(AssertUnwindSafe(|| {
+            socket.update_peers();
+        }));
+        if update_result.is_err() {
+            return Err(P2PError::ConnectionFailed(
+                "Signalling socket closed while waiting for peer ID".to_string(),
+            ));
+        }
 
         if let Some(id) = socket.id() {
             return Ok(PeerId::new(id));
         }
 
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        if elapsed_ms.saturating_sub(last_log_at_ms) >= 1_000 {
+            tracing::warn!(
+                "Still waiting for peer ID from signalling server ({}ms elapsed, timeout={}ms)",
+                elapsed_ms,
+                timeout_ms
+            );
+            last_log_at_ms = elapsed_ms;
+        }
+
         if start.elapsed() > timeout {
             return Err(P2PError::ConnectionFailed(
-                "Timeout waiting for peer ID".to_string(),
+                format!(
+                    "Timeout waiting for peer ID ({}ms). Set KONNEKT_PEER_ID_TIMEOUT_MS to override.",
+                    timeout_ms
+                ),
             ));
         }
 
