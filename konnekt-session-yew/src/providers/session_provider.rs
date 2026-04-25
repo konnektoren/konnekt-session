@@ -1,14 +1,19 @@
-use crate::hooks::SessionContext;
+use crate::hooks::{ActiveRunSnapshot, SessionContext};
+use bevy_ecs::prelude::{Resource, World};
+use bevy_ecs::schedule::Schedule;
+use bevy_ecs::system::ResMut;
 use futures::StreamExt;
 use konnekt_session_core::{DomainCommand, Lobby};
-use konnekt_session_p2p::{IceServer, P2PLoopBuilder, SessionId};
-use std::cell::RefCell;
+use konnekt_session_p2p::{IceServer, P2PLoopBuilder, SessionId, SessionLoop};
 use std::rc::Rc;
+use uuid::Uuid;
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct SessionProviderProps {
     pub signalling_server: AttrValue,
+    #[prop_or_default]
+    pub lobby_name: Option<AttrValue>,
     #[prop_or_default]
     pub session_id: Option<AttrValue>,
     #[prop_or_default]
@@ -36,9 +41,133 @@ impl SessionState {
     }
 }
 
+#[derive(Resource)]
+struct RuntimeState {
+    session_loop: SessionLoop,
+    is_host: bool,
+    lobby_id: Uuid,
+    local_name: String,
+    sync_retry_ticks: u16,
+    join_retry_ticks: u16,
+}
+
+#[derive(Resource, Default)]
+struct PendingCommands(Vec<DomainCommand>);
+
+#[derive(Resource, Clone, Default)]
+struct RuntimeSnapshot {
+    lobby: Option<Lobby>,
+    active_run: Option<ActiveRunSnapshot>,
+    peer_count: usize,
+}
+
+fn drive_session_runtime(
+    mut state: ResMut<RuntimeState>,
+    mut pending_commands: ResMut<PendingCommands>,
+    mut snapshot: ResMut<RuntimeSnapshot>,
+) {
+    for cmd in pending_commands.0.drain(..) {
+        if let Err(e) = state.session_loop.submit_command(cmd) {
+            tracing::error!("❌ Command failed: {:?}", e);
+        }
+    }
+
+    let processed = state.session_loop.poll();
+    if processed > 0 {
+        tracing::debug!("SessionRuntime processed {} events", processed);
+    }
+
+    // Guest resiliency: periodically request full sync until lobby arrives,
+    // then periodically retry JoinLobby until guest appears in lobby.
+    if !state.is_host {
+        let has_connected_peers = !state.session_loop.connected_peers().is_empty();
+        let has_lobby = state.session_loop.get_lobby().is_some();
+
+        if has_connected_peers && !has_lobby {
+            state.sync_retry_ticks = state.sync_retry_ticks.saturating_add(1);
+            if state.sync_retry_ticks >= 20 {
+                state.sync_retry_ticks = 0;
+                if let Err(e) = state.session_loop.p2p_mut().request_full_sync() {
+                    tracing::warn!("⚠️ Retry full sync request failed: {:?}", e);
+                } else {
+                    tracing::info!("🔁 Retried full sync request");
+                }
+            }
+        } else {
+            state.sync_retry_ticks = 0;
+        }
+
+        if has_lobby {
+            let joined = state
+                .session_loop
+                .get_lobby()
+                .map(|l| {
+                    l.participants()
+                        .values()
+                        .any(|p| p.name() == state.local_name && !p.is_host())
+                })
+                .unwrap_or(false);
+
+            if !joined {
+                state.join_retry_ticks = state.join_retry_ticks.saturating_add(1);
+                if state.join_retry_ticks >= 10 {
+                    state.join_retry_ticks = 0;
+                    let lobby_id = state.lobby_id;
+                    let guest_name = state.local_name.clone();
+                    if let Err(e) = state.session_loop.submit_command(DomainCommand::JoinLobby {
+                        lobby_id,
+                        guest_name: guest_name.clone(),
+                    }) {
+                        tracing::warn!("⚠️ Retry JoinLobby failed: {:?}", e);
+                    } else {
+                        tracing::info!("🔁 Retried JoinLobby for '{}'", guest_name);
+                    }
+                }
+            } else {
+                state.join_retry_ticks = 0;
+            }
+        }
+    }
+
+    *snapshot = RuntimeSnapshot {
+        lobby: state.session_loop.get_lobby().cloned(),
+        active_run: state
+            .session_loop
+            .get_lobby()
+            .and_then(|l| l.active_run_id())
+            .and_then(|run_id| state.session_loop.domain().event_loop().get_run(&run_id))
+            .map(|run| ActiveRunSnapshot {
+                run_id: run.id(),
+                status: run.status(),
+                name: run.config().name.clone(),
+                config: run.config().config.clone(),
+                required_submitters: run.required_submitters().iter().copied().collect(),
+                results: run.results().values().cloned().collect(),
+            }),
+        peer_count: state.session_loop.connected_peers().len(),
+    };
+}
+
+fn parse_session_reference(raw: &str) -> Option<SessionId> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Ok(id) = SessionId::parse(trimmed) {
+        return Some(id);
+    }
+
+    let without_query = trimmed.split('?').next().unwrap_or(trimmed);
+    let candidate = without_query.trim_end_matches('/');
+    let tail = candidate.rsplit('/').next().unwrap_or(candidate);
+    SessionId::parse(tail).ok()
+}
+
 #[function_component(SessionProvider)]
 pub fn session_provider(props: &SessionProviderProps) -> Html {
     let lobby = use_state(|| None::<Lobby>);
+    let active_run = use_state(|| None::<ActiveRunSnapshot>);
     let peer_count = use_state(|| 0usize);
     let is_host = use_state(|| false);
     let actual_session_id = use_state(|| SessionId::new());
@@ -55,11 +184,17 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
 
     {
         let signalling_server = props.signalling_server.to_string();
+        let lobby_name = props
+            .lobby_name
+            .clone()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "Yew Lobby".to_string());
         let session_id_prop = props.session_id.clone();
         let name = props.name.clone().unwrap_or_else(|| "Guest".into());
         let is_host_clone = is_host.clone();
         let actual_session_id_clone = actual_session_id.clone();
         let lobby_clone = lobby.clone();
+        let active_run_clone = active_run.clone();
         let peer_count_clone = peer_count.clone();
         let local_participant_name_clone = local_participant_name.clone();
         let session_state_clone = session_state.clone();
@@ -69,85 +204,34 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
 
             wasm_bindgen_futures::spawn_local(async move {
                 let ice_servers = IceServer::default_stun_servers();
+                let local_name = name.to_string();
 
-                let (mut session_loop, sid) = if let Some(sid_str) = session_id_prop {
-                    let sid = SessionId::parse(&sid_str).expect("Invalid session ID");
+                let (session_loop, sid) = if let Some(sid_str) = session_id_prop {
+                    let sid = match parse_session_reference(&sid_str) {
+                        Some(parsed) => parsed,
+                        None => {
+                            tracing::error!(
+                                "❌ Invalid session reference '{}'. Expected UUID or room URL ending with UUID.",
+                                sid_str
+                            );
+                            return;
+                        }
+                    };
                     tracing::info!("🔗 Joining session: {}", sid);
 
-                    let (mut loop_, lobby_id) = P2PLoopBuilder::new()
+                    let (loop_, _lobby_id) = match P2PLoopBuilder::new()
                         .build_session_guest(&signalling_server, sid.clone(), ice_servers)
                         .await
-                        .expect("Failed to join session");
-
-                    // Wait for peer connection
-                    tracing::info!("⏳ Waiting for peer connection...");
-                    for i in 0..100 {
-                        loop_.poll();
-                        if !loop_.connected_peers().is_empty() {
-                            tracing::info!(
-                                "✅ Connected to {} peer(s)",
-                                loop_.connected_peers().len()
-                            );
-                            break;
+                    {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::error!("❌ Failed to join session {}: {:?}", sid, e);
+                            return;
                         }
-
-                        if i == 99 {
-                            tracing::error!("❌ Timeout: No peer connection");
-                        }
-
-                        gloo_timers::future::TimeoutFuture::new(100).await;
-                    }
-
-                    // Wait for lobby sync
-                    tracing::info!("⏳ Waiting for lobby sync...");
-                    for i in 0..100 {
-                        loop_.poll();
-                        if loop_.get_lobby().is_some() {
-                            tracing::info!("✅ Lobby synced");
-                            break;
-                        }
-
-                        if i == 99 {
-                            tracing::error!("❌ Timeout: Lobby never synced");
-                        }
-
-                        gloo_timers::future::TimeoutFuture::new(100).await;
-                    }
-
-                    // Submit join command
-                    tracing::info!("📤 Submitting JoinLobby as '{}'", name);
-                    if let Err(e) = loop_.submit_command(DomainCommand::JoinLobby {
-                        lobby_id,
-                        guest_name: name.to_string(),
-                    }) {
-                        tracing::error!("❌ Failed to join: {:?}", e);
-                    }
-
-                    // Wait to see ourselves in lobby
-                    let name_str = name.to_string();
-                    for i in 0..50 {
-                        loop_.poll();
-
-                        if let Some(lobby) = loop_.get_lobby() {
-                            if lobby
-                                .participants()
-                                .values()
-                                .any(|p| p.name() == name_str.as_str() && !p.is_host())
-                            {
-                                tracing::info!("✅ Found ourselves in lobby");
-                                break;
-                            }
-                        }
-
-                        if i == 49 {
-                            tracing::error!("❌ Timeout: Never appeared in lobby");
-                        }
-
-                        gloo_timers::future::TimeoutFuture::new(100).await;
-                    }
+                    };
 
                     // Store our name
-                    local_participant_name_clone.set(Some(name.to_string()));
+                    local_participant_name_clone.set(Some(local_name.clone()));
                     is_host_clone.set(false);
 
                     (loop_, sid)
@@ -155,18 +239,24 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                     // Host creation
                     tracing::info!("👑 Creating host session as '{}'", name);
 
-                    let (loop_, sid) = P2PLoopBuilder::new()
+                    let (loop_, sid) = match P2PLoopBuilder::new()
                         .build_session_host(
                             &signalling_server,
                             ice_servers,
-                            "Yew Lobby".to_string(),
-                            name.to_string(),
+                            lobby_name.clone(),
+                            local_name.clone(),
                         )
                         .await
-                        .expect("Failed to create session");
+                    {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::error!("❌ Failed to create host session: {:?}", e);
+                            return;
+                        }
+                    };
 
                     // Store our name
-                    local_participant_name_clone.set(Some(name.to_string()));
+                    local_participant_name_clone.set(Some(local_name.clone()));
                     is_host_clone.set(true);
 
                     (loop_, sid)
@@ -174,27 +264,42 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
 
                 actual_session_id_clone.set(sid);
 
+                // Run the session through a Bevy ECS application tick.
+                let runtime_is_host = session_loop.is_host();
+                let runtime_lobby_id = session_loop.lobby_id();
+                let mut world = World::new();
+                world.insert_resource(RuntimeState {
+                    session_loop,
+                    is_host: runtime_is_host,
+                    lobby_id: runtime_lobby_id,
+                    local_name,
+                    // Make first retry happen quickly on startup.
+                    sync_retry_ticks: 19,
+                    join_retry_ticks: 9,
+                });
+                world.insert_resource(PendingCommands::default());
+                world.insert_resource(RuntimeSnapshot::default());
+
+                let mut schedule = Schedule::default();
+                schedule.add_systems(drive_session_runtime);
+
                 let mut interval = gloo_timers::future::IntervalStream::new(100);
 
                 tracing::info!("🔄 Starting main polling loop");
 
                 while interval.next().await.is_some() {
-                    // 1. Process commands
+                    // 1. Drain Yew command queue into Bevy resources
                     let commands = session_state_clone.borrow_mut().drain_commands();
-                    for cmd in commands {
-                        if let Err(e) = session_loop.submit_command(cmd) {
-                            tracing::error!("❌ Command failed: {:?}", e);
-                        }
-                    }
+                    world.resource_mut::<PendingCommands>().0.extend(commands);
 
-                    // 2. Poll
-                    session_loop.poll();
+                    // 2. Run one Bevy ECS tick
+                    schedule.run(&mut world);
 
-                    // 3. Update state (simple - just clone from core)
-                    if let Some(l) = session_loop.get_lobby() {
-                        lobby_clone.set(Some(l.clone()));
-                    }
-                    peer_count_clone.set(session_loop.connected_peers().len());
+                    // 3. Publish snapshot to Yew state
+                    let snapshot = world.resource::<RuntimeSnapshot>().clone();
+                    lobby_clone.set(snapshot.lobby);
+                    active_run_clone.set(snapshot.active_run);
+                    peer_count_clone.set(snapshot.peer_count);
                 }
 
                 tracing::warn!("🛑 Polling loop ended");
@@ -211,6 +316,7 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
         lobby: (*lobby).clone(),
         peer_count: *peer_count,
         is_host: *is_host,
+        active_run: (*active_run).clone(),
         send_command,
         local_participant_name: (*local_participant_name).clone(),
     };

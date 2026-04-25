@@ -1,8 +1,18 @@
-use konnekt_session_core::{DomainCommand, Lobby, Participant};
+use konnekt_session_core::{DomainCommand, Lobby, Participant, RunStatus};
 use konnekt_session_p2p::SessionId;
 use std::rc::Rc;
 use uuid::Uuid;
 use yew::prelude::*;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActiveRunSnapshot {
+    pub run_id: Uuid,
+    pub status: RunStatus,
+    pub name: String,
+    pub config: serde_json::Value,
+    pub required_submitters: Vec<Uuid>,
+    pub results: Vec<konnekt_session_core::domain::ActivityResult>,
+}
 
 /// Session state accessible via hook
 #[derive(Clone)]
@@ -11,6 +21,7 @@ pub struct SessionContext {
     pub lobby: Option<Lobby>,
     pub peer_count: usize,
     pub is_host: bool,
+    pub active_run: Option<ActiveRunSnapshot>,
 
     /// Send commands to SessionLoop
     pub send_command: Rc<dyn Fn(DomainCommand)>,
@@ -43,6 +54,7 @@ impl PartialEq for SessionContext {
             && self.lobby == other.lobby
             && self.peer_count == other.peer_count
             && self.is_host == other.is_host
+            && self.active_run == other.active_run
             && self.local_participant_name == other.local_participant_name
     }
 }

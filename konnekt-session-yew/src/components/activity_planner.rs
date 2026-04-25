@@ -1,5 +1,5 @@
 use crate::hooks::use_session;
-use konnekt_session_core::{DomainCommand, EchoChallenge};
+use konnekt_session_core::{ActivityConfig, DomainCommand, EchoChallenge};
 use uuid::Uuid;
 use yew::prelude::*;
 
@@ -36,13 +36,13 @@ pub fn activity_planner(props: &ActivityPlannerProps) -> Html {
         Callback::from(move |_: MouseEvent| {
             if let Some((name, prompt)) = ACTIVITY_TEMPLATES.get(selected) {
                 let challenge = EchoChallenge::new((*prompt).to_string());
-                let metadata = konnekt_session_core::domain::ActivityMetadata::new(
+                let config = ActivityConfig::new(
                     "echo-challenge-v1".to_string(),
                     (*name).to_string(),
                     challenge.to_config(),
                 );
 
-                send_command(DomainCommand::PlanActivity { lobby_id, metadata });
+                send_command(DomainCommand::QueueActivity { lobby_id, config });
             }
         })
     };
@@ -53,11 +53,8 @@ pub fn activity_planner(props: &ActivityPlannerProps) -> Html {
 
         Callback::from(move |_: MouseEvent| {
             if let Some(lobby) = &lobby {
-                if let Some(first_activity) = lobby.activities().first() {
-                    send_command(DomainCommand::StartActivity {
-                        lobby_id: lobby.id(),
-                        activity_id: first_activity.id,
-                    });
+                if !lobby.activity_queue().is_empty() && !lobby.has_active_run() {
+                    send_command(DomainCommand::StartNextRun { lobby_id: lobby.id() });
                 }
             }
         })
@@ -66,7 +63,7 @@ pub fn activity_planner(props: &ActivityPlannerProps) -> Html {
     let has_planned = session
         .lobby
         .as_ref()
-        .map(|l| !l.activities().is_empty())
+        .map(|l| !l.activity_queue().is_empty())
         .unwrap_or(false);
 
     html! {

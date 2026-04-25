@@ -5,8 +5,13 @@ target = "index.html"
 dist = "dist"
 
 [watch]
-# Watch the parent src directory
-watch = ["src"]
+# Watch local and workspace crates used by the Yew app
+watch = [
+    "src",
+    "../konnekt-session-core/src",
+    "../konnekt-session-p2p/src",
+    "../konnekt-session-bevy/src",
+]
 
 [serve]
 # Serve configuration

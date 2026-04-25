@@ -26,7 +26,7 @@ pub fn lobby_view() -> Html {
                             <ParticipantList lobby={lobby.clone()} />
                         </div>
                         <div class="konnekt-lobby-view__section">
-                            <ActivityList lobby={lobby.clone()} />
+                            <ActivityList lobby={lobby.clone()} active_run={session.active_run.clone()} />
                         </div>
                     </div>
                 }

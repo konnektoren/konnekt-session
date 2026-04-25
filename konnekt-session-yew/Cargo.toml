@@ -28,6 +28,8 @@ required-features = ["preview"]
 # Core domain
 konnekt-session-core = { path = "../konnekt-session-core" }
 konnekt-session-p2p = { path = "../konnekt-session-p2p" }
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
 
 # Yew framework
 yew = { version = "0.23", features = ["csr"] }
