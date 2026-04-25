@@ -59,6 +59,8 @@ struct RuntimeSnapshot {
     lobby: Option<Lobby>,
     active_run: Option<ActiveRunSnapshot>,
     peer_count: usize,
+    local_participant_id: Option<Uuid>,
+    local_peer_id: Option<String>,
 }
 
 fn drive_session_runtime(
@@ -145,6 +147,12 @@ fn drive_session_runtime(
                 results: run.results().values().cloned().collect(),
             }),
         peer_count: state.session_loop.connected_peers().len(),
+        local_participant_id: state
+            .session_loop
+            .local_peer_id()
+            .and_then(|peer_id| state.session_loop.p2p().peer_registry().get_peer(&peer_id))
+            .and_then(|peer_state| peer_state.participant_id),
+        local_peer_id: state.session_loop.local_peer_id().map(|p| p.to_string()),
     };
 }
 
@@ -169,6 +177,8 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
     let lobby = use_state(|| None::<Lobby>);
     let active_run = use_state(|| None::<ActiveRunSnapshot>);
     let peer_count = use_state(|| 0usize);
+    let local_participant_id = use_state(|| None::<Uuid>);
+    let local_peer_id = use_state(|| None::<String>);
     let is_host = use_state(|| false);
     let actual_session_id = use_state(|| SessionId::new());
     let local_participant_name = use_state(|| None::<String>);
@@ -196,6 +206,8 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
         let lobby_clone = lobby.clone();
         let active_run_clone = active_run.clone();
         let peer_count_clone = peer_count.clone();
+        let local_participant_id_clone = local_participant_id.clone();
+        let local_peer_id_clone = local_peer_id.clone();
         let local_participant_name_clone = local_participant_name.clone();
         let session_state_clone = session_state.clone();
 
@@ -300,6 +312,8 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                     lobby_clone.set(snapshot.lobby);
                     active_run_clone.set(snapshot.active_run);
                     peer_count_clone.set(snapshot.peer_count);
+                    local_participant_id_clone.set(snapshot.local_participant_id);
+                    local_peer_id_clone.set(snapshot.local_peer_id);
                 }
 
                 tracing::warn!("🛑 Polling loop ended");
@@ -317,6 +331,8 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
         peer_count: *peer_count,
         is_host: *is_host,
         active_run: (*active_run).clone(),
+        local_participant_id: *local_participant_id,
+        local_peer_id: (*local_peer_id).clone(),
         send_command,
         local_participant_name: (*local_participant_name).clone(),
     };

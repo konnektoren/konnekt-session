@@ -83,6 +83,7 @@ pub fn session_screen(props: &SessionScreenProps) -> Html {
                     &session.lobby,
                     &session.active_run,
                     session.is_host,
+                    session.get_local_participant_id(),
                     on_toggle_participation,
                 ),
                 ViewMode::ActivityInProgress => html! {
@@ -102,6 +103,7 @@ fn render_lobby_view(
     lobby: &Option<konnekt_session_core::Lobby>,
     active_run: &Option<crate::hooks::ActiveRunSnapshot>,
     is_host: bool,
+    local_participant_id: Option<uuid::Uuid>,
     on_toggle_participation: Callback<MouseEvent>,
 ) -> Html {
     if let Some(lobby) = lobby {
@@ -110,7 +112,10 @@ fn render_lobby_view(
         html! {
             <div class="konnekt-session-screen__content">
                 <div class="konnekt-session-screen__column">
-                    <ParticipantList lobby={lobby.clone()} />
+                    <ParticipantList
+                        lobby={lobby.clone()}
+                        local_participant_id={local_participant_id}
+                    />
 
                     <div class="konnekt-session-screen__participation">
                         <button

@@ -1,4 +1,6 @@
-use konnekt_session_core::{DomainCommand, Lobby, Participant, RunStatus};
+use konnekt_session_core::{
+    DomainCommand, Lobby, LobbyRole, Participant, ParticipationMode, RunStatus,
+};
 use konnekt_session_p2p::SessionId;
 use std::rc::Rc;
 use uuid::Uuid;
@@ -14,6 +16,22 @@ pub struct ActiveRunSnapshot {
     pub results: Vec<konnekt_session_core::domain::ActivityResult>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum P2PRole {
+    Host,
+    Guest,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WhoAmI {
+    pub local_peer_id: Option<String>,
+    pub p2p_role: P2PRole,
+    pub participant_id: Option<Uuid>,
+    pub participant_name: Option<String>,
+    pub lobby_role: Option<LobbyRole>,
+    pub participation_mode: Option<ParticipationMode>,
+}
+
 /// Session state accessible via hook
 #[derive(Clone)]
 pub struct SessionContext {
@@ -22,6 +40,8 @@ pub struct SessionContext {
     pub peer_count: usize,
     pub is_host: bool,
     pub active_run: Option<ActiveRunSnapshot>,
+    pub local_participant_id: Option<Uuid>,
+    pub local_peer_id: Option<String>,
 
     /// Send commands to SessionLoop
     pub send_command: Rc<dyn Fn(DomainCommand)>,
@@ -31,20 +51,54 @@ pub struct SessionContext {
 }
 
 impl SessionContext {
-    /// Get our participant from the lobby (single source of truth)
-    pub fn get_local_participant(&self) -> Option<&Participant> {
-        let lobby = self.lobby.as_ref()?;
-        let name = self.local_participant_name.as_ref()?;
+    /// Rich identity view combining P2P and lobby/domain identity.
+    pub fn who_am_i_info(&self) -> WhoAmI {
+        let participant = self.who_am_i();
 
+        WhoAmI {
+            local_peer_id: self.local_peer_id.clone(),
+            p2p_role: if self.is_host {
+                P2PRole::Host
+            } else {
+                P2PRole::Guest
+            },
+            participant_id: participant.map(|p| p.id()),
+            participant_name: participant.map(|p| p.name().to_string()),
+            lobby_role: participant.map(|p| p.lobby_role()),
+            participation_mode: participant.map(|p| p.participation_mode()),
+        }
+    }
+
+    /// Resolve local participant from current lobby state.
+    ///
+    /// Resolution order:
+    /// 1. Runtime-resolved participant ID (peer registry mapping)
+    /// 2. Name + role fallback (legacy path)
+    pub fn who_am_i(&self) -> Option<&Participant> {
+        let lobby = self.lobby.as_ref()?;
+
+        if let Some(participant_id) = self.local_participant_id {
+            if let Some(p) = lobby.participants().get(&participant_id) {
+                return Some(p);
+            }
+        }
+
+        let name = self.local_participant_name.as_ref()?;
         lobby
             .participants()
             .values()
             .find(|p| p.name() == name.as_str() && p.is_host() == self.is_host)
     }
 
+    /// Get our participant from the lobby (single source of truth)
+    pub fn get_local_participant(&self) -> Option<&Participant> {
+        self.who_am_i()
+    }
+
     /// Get our participant ID (looked up from core)
     pub fn get_local_participant_id(&self) -> Option<Uuid> {
-        self.get_local_participant().map(|p| p.id())
+        self.local_participant_id
+            .or_else(|| self.get_local_participant().map(|p| p.id()))
     }
 }
 
@@ -55,6 +109,8 @@ impl PartialEq for SessionContext {
             && self.peer_count == other.peer_count
             && self.is_host == other.is_host
             && self.active_run == other.active_run
+            && self.local_participant_id == other.local_participant_id
+            && self.local_peer_id == other.local_peer_id
             && self.local_participant_name == other.local_participant_name
     }
 }
