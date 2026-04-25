@@ -1,9 +1,8 @@
 use crossterm::event::KeyCode;
 use konnekt_session_core::{
     EchoChallenge, Lobby,
-    domain::{ActivityMetadata, ActivityStatus},
+    domain::ActivityConfig,
 };
-use uuid::Uuid;
 
 use crate::presentation::tui::app::UserAction;
 
@@ -17,9 +16,9 @@ pub struct ActivityTemplate {
 }
 
 impl ActivityTemplate {
-    /// Create metadata from this template
-    pub fn to_metadata(&self) -> ActivityMetadata {
-        ActivityMetadata::new(
+    /// Create activity config from this template
+    pub fn to_config(&self) -> ActivityConfig {
+        ActivityConfig::new(
             self.activity_type.clone(),
             self.name.clone(),
             self.config.clone(),
@@ -34,8 +33,8 @@ pub struct ActivitiesTab {
     selected_template: usize,
 
     // Shared: Planned/running activities
-    planned_activities: Vec<ActivityMetadata>,
-    current_activity: Option<ActivityMetadata>,
+    planned_activities: Vec<ActivityConfig>,
+    current_activity: Option<ActivityConfig>,
 
     // Host + Guest: Activity input
     activity_input: String,
@@ -180,8 +179,8 @@ impl ActivitiesTab {
             // Plan activity (only when no activity running)
             KeyCode::Char('p') => {
                 if let Some(template) = self.available_activities.get(self.selected_template) {
-                    let metadata = template.to_metadata();
-                    Some(UserAction::PlanActivity(metadata))
+                    let config = template.to_config();
+                    Some(UserAction::PlanActivity(config))
                 } else {
                     None
                 }
@@ -201,14 +200,15 @@ impl ActivitiesTab {
     }
 
     pub fn update_lobby(&mut self, lobby: &Lobby) {
-        self.planned_activities = lobby
-            .activities()
-            .iter()
-            .filter(|a| matches!(a.status, ActivityStatus::Planned))
-            .cloned()
-            .collect();
-
-        self.current_activity = lobby.current_activity().cloned();
+        self.planned_activities = lobby.activity_queue().to_vec();
+        self.current_activity = lobby.active_run_id().map(|run_id| {
+            ActivityConfig::with_id(
+                run_id,
+                "in-progress".to_string(),
+                "Activity In Progress".to_string(),
+                serde_json::Value::Null,
+            )
+        });
 
         // Clear input if activity completed
         if self.current_activity.is_none() {
@@ -230,11 +230,11 @@ impl ActivitiesTab {
         self.selected_template
     }
 
-    pub fn planned_activities(&self) -> &[ActivityMetadata] {
+    pub fn planned_activities(&self) -> &[ActivityConfig] {
         &self.planned_activities
     }
 
-    pub fn current_activity(&self) -> Option<&ActivityMetadata> {
+    pub fn current_activity(&self) -> Option<&ActivityConfig> {
         self.current_activity.as_ref()
     }
 
@@ -254,6 +254,7 @@ impl ActivitiesTab {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use konnekt_session_core::domain::ActivityConfig;
 
     #[test]
     fn test_host_can_input_during_activity() {
@@ -262,7 +263,7 @@ mod tests {
 
         // Simulate activity starting
         let challenge = EchoChallenge::new("Test".to_string());
-        let metadata = ActivityMetadata::new(
+        let metadata = ActivityConfig::new(
             "echo-challenge-v1".to_string(),
             "Test Activity".to_string(),
             challenge.to_config(),
@@ -282,7 +283,7 @@ mod tests {
         tab.update_is_host(true);
 
         let challenge = EchoChallenge::new("Test".to_string());
-        let metadata = ActivityMetadata::new(
+        let metadata = ActivityConfig::new(
             "echo-challenge-v1".to_string(),
             "Test Activity".to_string(),
             challenge.to_config(),
@@ -307,7 +308,7 @@ mod tests {
         tab.update_is_host(true);
 
         let challenge = EchoChallenge::new("Test".to_string());
-        let metadata = ActivityMetadata::new(
+        let metadata = ActivityConfig::new(
             "echo-challenge-v1".to_string(),
             "Test Activity".to_string(),
             challenge.to_config(),

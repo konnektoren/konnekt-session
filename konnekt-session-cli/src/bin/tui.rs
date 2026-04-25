@@ -3,7 +3,7 @@ use konnekt_session_cli::infrastructure::LogConfig;
 use konnekt_session_cli::presentation::tui::{self, App, AppEvent, UserAction};
 use konnekt_session_cli::{CliError, Result};
 use konnekt_session_core::DomainCommand;
-use konnekt_session_core::domain::{ActivityMetadata, ActivityResult};
+use konnekt_session_core::domain::{ActivityConfig, ActivityResult};
 use konnekt_session_p2p::{IceServer, P2PLoopBuilder, SessionId, SessionLoop};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -169,16 +169,16 @@ enum UserCommand {
         participant_id: Uuid,
     },
     PlanActivity {
-        metadata: ActivityMetadata,
+        config: ActivityConfig,
     },
     StartActivity {
-        activity_id: Uuid,
+        _activity_id: Uuid,
     },
     CancelActivity {
-        activity_id: Uuid,
+        run_id: Uuid,
     },
     SubmitActivityResult {
-        activity_id: Uuid,
+        run_id: Uuid,
         participant_id: Uuid,
         response: String,
     },
@@ -310,7 +310,6 @@ fn handle_user_command(
                 lobby_id,
                 participant_id,
                 requester_id: participant_id,
-                activity_in_progress: false,
             })?;
         }
         UserCommand::KickGuest { guest_id } => {
@@ -331,45 +330,32 @@ fn handle_user_command(
                 participant_id,
             })?;
         }
-        UserCommand::PlanActivity { metadata } => {
-            session_loop.submit_command(DomainCommand::PlanActivity { lobby_id, metadata })?;
+        UserCommand::PlanActivity { config } => {
+            session_loop.submit_command(DomainCommand::QueueActivity { lobby_id, config })?;
         }
-        UserCommand::StartActivity { activity_id } => {
-            session_loop.submit_command(DomainCommand::StartActivity {
-                lobby_id,
-                activity_id,
-            })?;
+        UserCommand::StartActivity { _activity_id: _ } => {
+            session_loop.submit_command(DomainCommand::StartNextRun { lobby_id })?;
         }
-        UserCommand::CancelActivity { activity_id } => {
-            session_loop.submit_command(DomainCommand::CancelActivity {
+        UserCommand::CancelActivity { run_id } => {
+            session_loop.submit_command(DomainCommand::CancelRun {
                 lobby_id,
-                activity_id,
+                run_id
             })?;
         }
         UserCommand::SubmitActivityResult {
-            activity_id,
+            run_id,
             participant_id,
             response,
         } => {
-            if let Some(lobby) = session_loop.get_lobby() {
-                if let Some(activity) = lobby.get_activity(activity_id) {
-                    if let Ok(challenge) =
-                        konnekt_session_core::EchoChallenge::from_config(activity.config.clone())
-                    {
-                        let score = challenge.calculate_score(&response);
-                        let echo_result =
-                            konnekt_session_core::EchoResult::new(response.clone(), 1000);
+            let result = ActivityResult::new(run_id, participant_id)
+                .with_data(serde_json::json!({ "response": response }))
+                .with_time(1000);
 
-                        let result = ActivityResult::new(activity_id, participant_id)
-                            .with_data(echo_result.to_json())
-                            .with_score(score)
-                            .with_time(1000);
-
-                        session_loop
-                            .submit_command(DomainCommand::SubmitResult { lobby_id, result })?;
-                    }
-                }
-            }
+            session_loop.submit_command(DomainCommand::SubmitResult {
+                lobby_id,
+                run_id,
+                result,
+            })?;
         }
     }
     Ok(())
@@ -404,32 +390,32 @@ async fn handle_user_action(
                 .await
                 .map_err(|e| CliError::InvalidConfig(format!("Failed to send command: {}", e)))?;
         }
-        UserAction::PlanActivity(metadata) => {
+        UserAction::PlanActivity(config) => {
             cmd_tx
-                .send(UserCommand::PlanActivity { metadata })
+                .send(UserCommand::PlanActivity { config })
                 .await
                 .map_err(|e| CliError::InvalidConfig(format!("Failed to send command: {}", e)))?;
         }
         UserAction::StartActivity(activity_id) => {
             cmd_tx
-                .send(UserCommand::StartActivity { activity_id })
+                .send(UserCommand::StartActivity { _activity_id: activity_id })
                 .await
                 .map_err(|e| CliError::InvalidConfig(format!("Failed to send command: {}", e)))?;
         }
-        UserAction::CancelActivity(activity_id) => {
+        UserAction::CancelActivity(run_id) => {
             cmd_tx
-                .send(UserCommand::CancelActivity { activity_id })
+                .send(UserCommand::CancelActivity { run_id })
                 .await
                 .map_err(|e| CliError::InvalidConfig(format!("Failed to send command: {}", e)))?;
         }
         UserAction::SubmitActivityResult {
-            activity_id,
+            activity_id: run_id,
             response,
         } => {
             if let Some(participant_id) = app.get_local_participant_id() {
                 cmd_tx
                     .send(UserCommand::SubmitActivityResult {
-                        activity_id,
+                        run_id,
                         participant_id,
                         response,
                     })

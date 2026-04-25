@@ -1,9 +1,10 @@
 use clap::{Parser, Subcommand};
-use konnekt_session_cli::{LogConfig, Result}; // 🆕 Import LogConfig
+use konnekt_session_cli::{LogConfig, Result, SessionRuntime}; // 🆕 Import LogConfig
 use konnekt_session_core::DomainCommand;
-use konnekt_session_p2p::{ConnectionEvent, IceServer, P2PLoopBuilder, SessionId, SessionLoop};
+use konnekt_session_p2p::{IceServer, P2PLoopBuilder, SessionId, SessionLoop};
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
+use uuid::Uuid;
 
 #[derive(Parser)]
 #[command(name = "konnekt-cli")]
@@ -31,6 +32,10 @@ enum Commands {
         /// Host display name
         #[arg(short = 'n', long, default_value = "Host")]
         name: String,
+
+        /// Deterministic seed for session/lobby ID generation
+        #[arg(long)]
+        seed: Option<String>,
 
         /// TURN server URL (optional, format: turn:host:port)
         #[arg(long)]
@@ -94,7 +99,7 @@ async fn main() -> Result<()> {
 
     log_config
         .init()
-        .map_err(|e| konnekt_session_cli::CliError::InvalidInput(e))?;
+        .map_err(konnekt_session_cli::CliError::InvalidInput)?;
 
     let cli = Cli::parse();
 
@@ -103,12 +108,13 @@ async fn main() -> Result<()> {
             server,
             lobby_name,
             name,
+            seed,
             turn_server,
             turn_username,
             turn_credential,
         } => {
             let ice_servers = build_ice_servers(turn_server, turn_username, turn_credential)?;
-            create_host(&server, &lobby_name, &name, ice_servers).await?;
+            create_host(&server, &lobby_name, &name, seed, ice_servers).await?;
         }
         Commands::Join {
             server,
@@ -154,19 +160,37 @@ async fn create_host(
     server: &str,
     lobby_name: &str,
     host_name: &str,
+    seed: Option<String>,
     ice_servers: Vec<IceServer>,
 ) -> Result<()> {
     info!("Creating new session as host '{}'", host_name);
 
-    // Build session using SessionLoop
-    let (mut session_loop, session_id) = P2PLoopBuilder::new()
-        .build_session_host(
-            server,
-            ice_servers.clone(),
-            lobby_name.to_string(),
-            host_name.to_string(),
-        )
-        .await?;
+    let builder = P2PLoopBuilder::new();
+    let (mut session_loop, session_id) = if let Some(seed) = seed {
+        let deterministic_id = session_id_from_seed(&seed);
+        info!(
+            "Using deterministic session id derived from seed '{}' -> {}",
+            seed, deterministic_id
+        );
+        builder
+            .build_session_host_with_session_id(
+                server,
+                deterministic_id,
+                ice_servers.clone(),
+                lobby_name.to_string(),
+                host_name.to_string(),
+            )
+            .await?
+    } else {
+        builder
+            .build_session_host(
+                server,
+                ice_servers.clone(),
+                lobby_name.to_string(),
+                host_name.to_string(),
+            )
+            .await?
+    };
 
     let lobby_id = session_loop.lobby_id();
 
@@ -187,7 +211,12 @@ async fn create_host(
     // Wait for peer ID to be assigned
     wait_for_peer_id(&mut session_loop).await?;
 
-    run_event_loop(session_loop, true).await
+    run_event_loop(session_loop, true, session_id).await
+}
+
+fn session_id_from_seed(seed: &str) -> SessionId {
+    let uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, seed.as_bytes());
+    SessionId::from_uuid(uuid)
 }
 
 async fn join_session(
@@ -202,7 +231,7 @@ async fn join_session(
 
     // Build session using SessionLoop
     let (mut session_loop, lobby_id) = P2PLoopBuilder::new()
-        .build_session_guest(server, session_id, ice_servers.clone())
+        .build_session_guest(server, session_id.clone(), ice_servers.clone())
         .await?;
 
     info!("✅ Connected to P2P network");
@@ -228,7 +257,7 @@ async fn join_session(
     info!("  Press Ctrl+C to quit");
     info!("");
 
-    run_event_loop(session_loop, false).await
+    run_event_loop(session_loop, false, session_id).await
 }
 
 /// Wait for peer ID to be assigned by Matchbox
@@ -296,26 +325,21 @@ async fn wait_for_lobby_sync(session_loop: &mut SessionLoop) -> Result<()> {
 
 /// Main event loop - PRESENTATION ONLY
 /// All business logic is in SessionLoop (P2P + Core)
-async fn run_event_loop(mut session_loop: SessionLoop, is_host: bool) -> Result<()> {
+async fn run_event_loop(session_loop: SessionLoop, is_host: bool, session_id: SessionId) -> Result<()> {
+    let runtime = SessionRuntime::spawn(session_loop, session_id);
     let mut interval = tokio::time::interval(Duration::from_millis(100));
     let mut last_participant_count = 0;
 
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                // Poll session loop (auto-syncs P2P ↔ Core)
-                let processed = session_loop.poll();
-
-                if processed > 0 {
-                    debug!("Processed {} events", processed);
-                }
+                let snapshot = runtime.snapshot();
 
                 // PRESENTATION: Display lobby state changes
-                display_lobby_changes(&session_loop, &mut last_participant_count);
+                display_lobby_changes(snapshot.lobby.as_ref(), &mut last_participant_count);
 
                 // PRESENTATION: Display peer connections
-                let peer_count = session_loop.connected_peers().len();
-                debug!("Connected peers: {}", peer_count);
+                debug!("Connected peers: {}", snapshot.peer_count);
             }
 
             _ = tokio::signal::ctrl_c() => {
@@ -324,7 +348,7 @@ async fn run_event_loop(mut session_loop: SessionLoop, is_host: bool) -> Result<
 
                 // Leave lobby gracefully if we're a guest
                 if !is_host {
-                    handle_graceful_shutdown(&mut session_loop).await?;
+                    handle_graceful_shutdown(&runtime).await?;
                 }
 
                 break;
@@ -332,13 +356,14 @@ async fn run_event_loop(mut session_loop: SessionLoop, is_host: bool) -> Result<
         }
     }
 
+    runtime.shutdown().await;
     info!("✅ Shutdown complete");
     Ok(())
 }
 
 /// Display lobby changes (presentation only)
-fn display_lobby_changes(session_loop: &SessionLoop, last_count: &mut usize) {
-    if let Some(lobby) = session_loop.get_lobby() {
+fn display_lobby_changes(lobby: Option<&konnekt_session_core::Lobby>, last_count: &mut usize) {
+    if let Some(lobby) = lobby {
         let current_count = lobby.participants().len();
 
         if current_count != *last_count {
@@ -365,18 +390,20 @@ fn display_lobby_changes(session_loop: &SessionLoop, last_count: &mut usize) {
 }
 
 /// Handle graceful shutdown for guests
-async fn handle_graceful_shutdown(session_loop: &mut SessionLoop) -> Result<()> {
-    if let Some(lobby) = session_loop.get_lobby() {
+async fn handle_graceful_shutdown(runtime: &SessionRuntime) -> Result<()> {
+    let snapshot = runtime.snapshot();
+    if let Some(lobby) = snapshot.lobby {
         // Find our participant ID (non-host)
         if let Some(participant) = lobby.participants().values().find(|p| !p.is_host()) {
-            session_loop.submit_command(DomainCommand::LeaveLobby {
-                lobby_id: session_loop.lobby_id(),
+            runtime.submit_command(DomainCommand::LeaveLobby {
+                lobby_id: snapshot.lobby_id,
                 participant_id: participant.id(),
+            }).await.map_err(|e| {
+                konnekt_session_cli::CliError::InvalidInput(format!("Failed to send leave command: {e}"))
             })?;
 
             // Give it a moment to send
             tokio::time::sleep(Duration::from_millis(200)).await;
-            session_loop.poll();
         }
     }
 
@@ -449,5 +476,43 @@ mod tests {
         );
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_create_host_with_seed_parsing() {
+        let cli = Cli::parse_from(&[
+            "konnekt-cli",
+            "create-host",
+            "--name",
+            "Alice",
+            "--lobby-name",
+            "Seed Lobby",
+            "--seed",
+            "stable-seed-123",
+        ]);
+
+        match cli.command {
+            Commands::CreateHost {
+                name,
+                lobby_name,
+                seed,
+                ..
+            } => {
+                assert_eq!(name, "Alice");
+                assert_eq!(lobby_name, "Seed Lobby");
+                assert_eq!(seed.as_deref(), Some("stable-seed-123"));
+            }
+            _ => panic!("Expected CreateHost command"),
+        }
+    }
+
+    #[test]
+    fn test_deterministic_session_id_from_seed() {
+        let a = session_id_from_seed("stable-seed");
+        let b = session_id_from_seed("stable-seed");
+        let c = session_id_from_seed("other-seed");
+
+        assert_eq!(a, b);
+        assert_ne!(a, c);
     }
 }

@@ -18,8 +18,9 @@ impl fmt::Display for LobbyRole {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ParticipationMode {
+    #[default]
     Active,
     Spectating,
 }
@@ -30,12 +31,6 @@ impl fmt::Display for ParticipationMode {
             ParticipationMode::Active => write!(f, "Active"),
             ParticipationMode::Spectating => write!(f, "Spectating"),
         }
-    }
-}
-
-impl Default for ParticipationMode {
-    fn default() -> Self {
-        ParticipationMode::Active
     }
 }
 

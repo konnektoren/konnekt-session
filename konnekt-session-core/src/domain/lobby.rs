@@ -99,10 +99,10 @@ impl Lobby {
         if guest.is_host() {
             return Err(LobbyError::CannotDelegateToNonGuest);
         }
-        if let Some(existing) = self.participants.get(&guest.id()) {
-            if existing.name() == guest.name() {
-                return Ok(());
-            }
+        if let Some(existing) = self.participants.get(&guest.id())
+            && existing.name() == guest.name()
+        {
+            return Ok(());
         }
         self.participants.insert(guest.id(), guest);
         Ok(())
@@ -160,10 +160,10 @@ impl Lobby {
             return Err(LobbyError::CannotDelegateToNonGuest);
         }
         new_host.promote_to_host();
-        if let Some(old_host) = self.participants.get_mut(&self.host_id) {
-            if old_host.id() != new_host_id {
-                old_host.demote_to_guest();
-            }
+        if let Some(old_host) = self.participants.get_mut(&self.host_id)
+            && old_host.id() != new_host_id
+        {
+            old_host.demote_to_guest();
         }
         self.host_id = new_host_id;
         Ok(())

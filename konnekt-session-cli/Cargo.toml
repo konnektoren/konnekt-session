@@ -25,6 +25,8 @@ required-features = ["tui"]
 [dependencies]
 konnekt-session-core = { path = "../konnekt-session-core" }
 konnekt-session-p2p = { path = "../konnekt-session-p2p", features = ["native"] }
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
 
 # CLI
 clap = { workspace = true }
