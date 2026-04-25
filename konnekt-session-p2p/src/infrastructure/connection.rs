@@ -146,20 +146,32 @@ impl MatchboxConnection {
     }
 }
 
-/// Build ICE server configuration for Matchbox
+/// Build ICE server configuration for Matchbox.
+/// Groups all no-auth servers into one config so every STUN URL is tried.
 fn build_ice_server_config(ice_servers: &[IceServer]) -> RtcIceServerConfig {
     if ice_servers.is_empty() {
-        // Use default if none provided
         return RtcIceServerConfig::default();
     }
 
-    // Convert first server (Matchbox only supports one ICE server config currently)
-    let first_server = &ice_servers[0];
+    let urls: Vec<String> = ice_servers
+        .iter()
+        .filter(|s| s.username.is_none())
+        .flat_map(|s| s.urls.iter().cloned())
+        .collect();
+
+    if urls.is_empty() {
+        let first = &ice_servers[0];
+        return RtcIceServerConfig {
+            urls: first.urls.clone(),
+            username: first.username.clone(),
+            credential: first.credential.clone(),
+        };
+    }
 
     RtcIceServerConfig {
-        urls: first_server.urls.clone(),
-        username: first_server.username.clone(),
-        credential: first_server.credential.clone(),
+        urls,
+        username: None,
+        credential: None,
     }
 }
 

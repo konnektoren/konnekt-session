@@ -13,6 +13,8 @@ pub mod providers;
 // Re-exports for convenience
 pub use app::App;
 pub use components::{ActivityList, LobbyView, ParticipantList, SessionInfo};
-pub use hooks::{use_lobby, use_session};
+pub use hooks::{
+    HostConnectivityOptions, HostConnectivityState, use_host_connectivity, use_lobby, use_session,
+};
 pub use pages::{LoginScreen, SessionScreen};
 pub use providers::{SessionProvider, SessionProviderProps};

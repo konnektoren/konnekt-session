@@ -49,6 +49,10 @@ struct RuntimeState {
     local_name: String,
     sync_retry_ticks: u16,
     join_retry_ticks: u16,
+    /// True while we are waiting for the host to acknowledge our JoinLobby
+    /// (i.e. the GuestJoined broadcast to arrive back). Prevents sending
+    /// duplicate JoinLobby commands while the round-trip is in flight.
+    join_in_flight: bool,
 }
 
 #[derive(Resource, Default)]
@@ -79,12 +83,15 @@ fn drive_session_runtime(
         tracing::debug!("SessionRuntime processed {} events", processed);
     }
 
-    // Guest resiliency: periodically request full sync until lobby arrives,
-    // then periodically retry JoinLobby until guest appears in lobby.
+    // Guest resiliency:
+    // 1) periodically request full sync until lobby arrives
+    // 2) periodically retry JoinLobby once at least one peer is connected
+    //    (don't wait for lobby snapshot, to avoid sync deadlocks)
     if !state.is_host {
         let has_connected_peers = !state.session_loop.connected_peers().is_empty();
         let has_lobby = state.session_loop.get_lobby().is_some();
 
+        // ── 1. Sync retry: keep requesting full state until lobby arrives ────
         if has_connected_peers && !has_lobby {
             state.sync_retry_ticks = state.sync_retry_ticks.saturating_add(1);
             if state.sync_retry_ticks >= 20 {
@@ -99,35 +106,61 @@ fn drive_session_runtime(
             state.sync_retry_ticks = 0;
         }
 
-        if has_lobby {
-            let joined = state
-                .session_loop
-                .get_lobby()
-                .map(|l| {
-                    l.participants()
-                        .values()
-                        .any(|p| p.name() == state.local_name && !p.is_host())
-                })
-                .unwrap_or(false);
+        // ── 2. Determine whether the guest is present in the lobby ──────────
+        // Check by participant_id first (most accurate), fall back to name-match
+        // for the brief window before local_participant_id is resolved.
+        let joined = has_lobby && {
+            let by_id = snapshot.local_participant_id.and_then(|id| {
+                state
+                    .session_loop
+                    .get_lobby()
+                    .and_then(|l| l.participants().get(&id).map(|_| true))
+            });
+            by_id.unwrap_or_else(|| {
+                state
+                    .session_loop
+                    .get_lobby()
+                    .map(|l| {
+                        l.participants()
+                            .values()
+                            .any(|p| p.name() == state.local_name && !p.is_host())
+                    })
+                    .unwrap_or(false)
+            })
+        };
 
-            if !joined {
-                state.join_retry_ticks = state.join_retry_ticks.saturating_add(1);
-                if state.join_retry_ticks >= 10 {
-                    state.join_retry_ticks = 0;
-                    let lobby_id = state.lobby_id;
-                    let guest_name = state.local_name.clone();
-                    if let Err(e) = state.session_loop.submit_command(DomainCommand::JoinLobby {
-                        lobby_id,
-                        guest_name: guest_name.clone(),
-                    }) {
-                        tracing::warn!("⚠️ Retry JoinLobby failed: {:?}", e);
-                    } else {
-                        tracing::info!("🔁 Retried JoinLobby for '{}'", guest_name);
-                    }
-                }
-            } else {
+        // Once confirmed joined, clear the in-flight flag so we don't re-send.
+        if joined {
+            state.join_in_flight = false;
+        }
+
+        // ── 3. JoinLobby retry ───────────────────────────────────────────────
+        // Send JoinLobby whenever we have peers but are not yet in the lobby.
+        // This covers two cases:
+        //   a) No lobby yet  — keep retrying every ~1s until snapshot arrives.
+        //   b) Lobby arrived without the guest (host snapshotted before processing
+        //      the initial join) — retry until the GuestJoined ack comes back.
+        // The `join_in_flight` flag suppresses duplicate sends while the
+        // round-trip (guest → host → GuestJoined broadcast → guest) is in flight.
+        if has_connected_peers && !joined && !state.join_in_flight {
+            state.join_retry_ticks = state.join_retry_ticks.saturating_add(1);
+            if state.join_retry_ticks >= 10 {
                 state.join_retry_ticks = 0;
+                let lobby_id = state.lobby_id;
+                let guest_name = state.local_name.clone();
+                if let Err(e) = state.session_loop.submit_command(DomainCommand::JoinLobby {
+                    lobby_id,
+                    guest_name: guest_name.clone(),
+                }) {
+                    tracing::warn!("⚠️ JoinLobby failed: {:?}", e);
+                } else {
+                    tracing::info!("🔁 Sent JoinLobby for '{}' (in-flight)", guest_name);
+                    state.join_in_flight = true;
+                }
             }
+        } else if !has_connected_peers {
+            // Reset tick counter while disconnected so we retry quickly on reconnect.
+            state.join_retry_ticks = 0;
         }
     }
 
@@ -174,14 +207,16 @@ fn parse_session_reference(raw: &str) -> Option<SessionId> {
 
 #[function_component(SessionProvider)]
 pub fn session_provider(props: &SessionProviderProps) -> Html {
+    let starts_as_host = props.session_id.is_none();
     let lobby = use_state(|| None::<Lobby>);
     let active_run = use_state(|| None::<ActiveRunSnapshot>);
     let peer_count = use_state(|| 0usize);
     let local_participant_id = use_state(|| None::<Uuid>);
     let local_peer_id = use_state(|| None::<String>);
-    let is_host = use_state(|| false);
+    let is_host = use_state(move || starts_as_host);
     let actual_session_id = use_state(|| SessionId::new());
     let local_participant_name = use_state(|| None::<String>);
+    let runtime_error = use_state(|| None::<String>);
 
     let session_state = use_mut_ref(SessionState::new);
 
@@ -209,6 +244,7 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
         let local_participant_id_clone = local_participant_id.clone();
         let local_peer_id_clone = local_peer_id.clone();
         let local_participant_name_clone = local_participant_name.clone();
+        let runtime_error_clone = runtime_error.clone();
         let session_state_clone = session_state.clone();
 
         use_effect_with((), move |_| {
@@ -222,10 +258,12 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                     let sid = match parse_session_reference(&sid_str) {
                         Some(parsed) => parsed,
                         None => {
-                            tracing::error!(
-                                "❌ Invalid session reference '{}'. Expected UUID or room URL ending with UUID.",
+                            let msg = format!(
+                                "Invalid session reference '{}'. Expected UUID or room URL ending with UUID.",
                                 sid_str
                             );
+                            tracing::error!("❌ {}", msg);
+                            runtime_error_clone.set(Some(msg));
                             return;
                         }
                     };
@@ -237,7 +275,9 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                     {
                         Ok(v) => v,
                         Err(e) => {
-                            tracing::error!("❌ Failed to join session {}: {:?}", sid, e);
+                            let msg = format!("Failed to join session {}: {:?}", sid, e);
+                            tracing::error!("❌ {}", msg);
+                            runtime_error_clone.set(Some(msg));
                             return;
                         }
                     };
@@ -262,7 +302,9 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                     {
                         Ok(v) => v,
                         Err(e) => {
-                            tracing::error!("❌ Failed to create host session: {:?}", e);
+                            let msg = format!("Failed to create host session: {:?}", e);
+                            tracing::error!("❌ {}", msg);
+                            runtime_error_clone.set(Some(msg));
                             return;
                         }
                     };
@@ -275,6 +317,7 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                 };
 
                 actual_session_id_clone.set(sid);
+                runtime_error_clone.set(None);
 
                 // Run the session through a Bevy ECS application tick.
                 let runtime_is_host = session_loop.is_host();
@@ -288,6 +331,7 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                     // Make first retry happen quickly on startup.
                     sync_retry_ticks: 19,
                     join_retry_ticks: 9,
+                    join_in_flight: false,
                 });
                 world.insert_resource(PendingCommands::default());
                 world.insert_resource(RuntimeSnapshot::default());
@@ -304,16 +348,31 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                     let commands = session_state_clone.borrow_mut().drain_commands();
                     world.resource_mut::<PendingCommands>().0.extend(commands);
 
-                    // 2. Run one Bevy ECS tick
+                    // 2. Run one Bevy ECS tick (synchronous — blocks JS event loop)
                     schedule.run(&mut world);
 
-                    // 3. Publish snapshot to Yew state
+                    // Yield for a few ms so the WebRTC loop_fut gets multiple event-loop
+                    // turns to process ICE candidates, DTLS handshakes, and signaling
+                    // messages. A single 0ms yield is not enough for ICE negotiation.
+                    gloo_timers::future::TimeoutFuture::new(5).await;
+
+                    // 3. Publish snapshot to Yew state — only set when changed to avoid render spam
                     let snapshot = world.resource::<RuntimeSnapshot>().clone();
-                    lobby_clone.set(snapshot.lobby);
-                    active_run_clone.set(snapshot.active_run);
-                    peer_count_clone.set(snapshot.peer_count);
-                    local_participant_id_clone.set(snapshot.local_participant_id);
-                    local_peer_id_clone.set(snapshot.local_peer_id);
+                    if *lobby_clone != snapshot.lobby {
+                        lobby_clone.set(snapshot.lobby);
+                    }
+                    if *active_run_clone != snapshot.active_run {
+                        active_run_clone.set(snapshot.active_run);
+                    }
+                    if *peer_count_clone != snapshot.peer_count {
+                        peer_count_clone.set(snapshot.peer_count);
+                    }
+                    if *local_participant_id_clone != snapshot.local_participant_id {
+                        local_participant_id_clone.set(snapshot.local_participant_id);
+                    }
+                    if *local_peer_id_clone != snapshot.local_peer_id {
+                        local_peer_id_clone.set(snapshot.local_peer_id);
+                    }
                 }
 
                 tracing::warn!("🛑 Polling loop ended");
@@ -335,6 +394,7 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
         local_peer_id: (*local_peer_id).clone(),
         send_command,
         local_participant_name: (*local_participant_name).clone(),
+        runtime_error: (*runtime_error).clone(),
     };
 
     html! {

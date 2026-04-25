@@ -1,11 +1,16 @@
 use crate::components::{ActivityList, ActivityPlanner, ActivitySubmission, ParticipantList, SessionInfo};
-use crate::hooks::use_session;
+use crate::hooks::{HostConnectivityOptions, use_host_connectivity, use_session};
+use chrono::Utc;
 use konnekt_session_core::{DomainCommand, RunStatus};
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct SessionScreenProps {
     pub on_leave: Callback<()>,
+    #[prop_or(true)]
+    pub show_host_connectivity_warning: bool,
+    #[prop_or(5_000)]
+    pub host_disconnect_grace_ms: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -18,6 +23,14 @@ enum ViewMode {
 pub fn session_screen(props: &SessionScreenProps) -> Html {
     let session = use_session();
     let view_mode = use_state(|| ViewMode::Lobby);
+    let host_connectivity = use_host_connectivity(
+        session.is_host,
+        session.peer_count,
+        HostConnectivityOptions {
+            enabled: props.show_host_connectivity_warning,
+            unreachable_delay_ms: props.host_disconnect_grace_ms,
+        },
+    );
 
     {
         let view_mode = view_mode.clone();
@@ -76,6 +89,22 @@ pub fn session_screen(props: &SessionScreenProps) -> Html {
                 session_id={session.session_id.to_string()}
                 peer_count={session.peer_count}
                 is_host={session.is_host}
+                show_connectivity_warning={props.show_host_connectivity_warning}
+                host_unreachable={host_connectivity.host_unreachable}
+                last_host_connection={host_connectivity
+                    .last_host_connection_secs
+                    .as_ref()
+                    .map(|ts| {
+                        let now = Utc::now().timestamp() as u64;
+                        let delta = now.saturating_sub(*ts);
+                        if delta < 60 {
+                            format!("{}s ago", delta)
+                        } else if delta < 3600 {
+                            format!("{}m {}s ago", delta / 60, delta % 60)
+                        } else {
+                            format!("{}h {}m ago", delta / 3600, (delta % 3600) / 60)
+                        }
+                    })}
             />
 
             {match *view_mode {
@@ -83,6 +112,8 @@ pub fn session_screen(props: &SessionScreenProps) -> Html {
                     &session.lobby,
                     &session.active_run,
                     session.is_host,
+                    session.peer_count,
+                    session.runtime_error.clone(),
                     session.get_local_participant_id(),
                     on_toggle_participation,
                 ),
@@ -103,6 +134,8 @@ fn render_lobby_view(
     lobby: &Option<konnekt_session_core::Lobby>,
     active_run: &Option<crate::hooks::ActiveRunSnapshot>,
     is_host: bool,
+    peer_count: usize,
+    runtime_error: Option<String>,
     local_participant_id: Option<uuid::Uuid>,
     on_toggle_participation: Callback<MouseEvent>,
 ) -> Html {
@@ -151,9 +184,26 @@ fn render_lobby_view(
             </div>
         }
     } else {
+        if let Some(error) = runtime_error {
+            return html! {
+                <div class="konnekt-session-screen__loading">
+                    <p>{"Connection failed."}</p>
+                    <p>{error}</p>
+                </div>
+            };
+        }
+
         html! {
             <div class="konnekt-session-screen__loading">
-                <p>{"Syncing lobby from host..."}</p>
+                <p>
+                    {if is_host {
+                        "Creating lobby and waiting for peers..."
+                    } else if peer_count == 0 {
+                        "Connecting to host..."
+                    } else {
+                        "Syncing lobby from host..."
+                    }}
+                </p>
                 <div class="konnekt-spinner"></div>
             </div>
         }

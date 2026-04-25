@@ -48,6 +48,7 @@ pub struct SessionContext {
 
     /// Our participant name (immutable)
     pub local_participant_name: Option<String>,
+    pub runtime_error: Option<String>,
 }
 
 impl SessionContext {
@@ -112,6 +113,7 @@ impl PartialEq for SessionContext {
             && self.local_participant_id == other.local_participant_id
             && self.local_peer_id == other.local_peer_id
             && self.local_participant_name == other.local_participant_name
+            && self.runtime_error == other.runtime_error
     }
 }
 

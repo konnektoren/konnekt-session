@@ -19,4 +19,10 @@ pub enum ConnectionEvent {
 
     /// Received a message from a peer
     MessageReceived { from: PeerId, data: Vec<u8> },
+
+    /// A peer has requested a full lobby snapshot (host must respond)
+    SyncNeeded {
+        for_peer: PeerId,
+        since_sequence: u64,
+    },
 }

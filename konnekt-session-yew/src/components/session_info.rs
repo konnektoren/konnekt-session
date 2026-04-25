@@ -12,6 +12,12 @@ pub struct SessionInfoProps {
     pub peer_count: usize,
     #[prop_or_default]
     pub is_host: bool,
+    #[prop_or(true)]
+    pub show_connectivity_warning: bool,
+    #[prop_or_default]
+    pub host_unreachable: bool,
+    #[prop_or_default]
+    pub last_host_connection: Option<String>,
 }
 
 /// Displays session metadata with shareable URL
@@ -112,6 +118,22 @@ pub fn session_info(props: &SessionInfoProps) -> Html {
                     {if props.is_host { "👑 Host" } else { "👤 Guest" }}
                 </span>
             </div>
+
+            {if props.show_connectivity_warning && props.host_unreachable && !props.is_host {
+                html! {
+                    <div class="konnekt-session-info__warning">
+                        <strong>{"Host unreachable."}</strong>
+                        {" "}
+                        {if let Some(last) = &props.last_host_connection {
+                            format!("Last connection: {}", last)
+                        } else {
+                            "No successful host connection yet.".to_string()
+                        }}
+                    </div>
+                }
+            } else {
+                html! {}
+            }}
         </div>
     }
 }

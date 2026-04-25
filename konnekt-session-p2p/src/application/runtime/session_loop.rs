@@ -209,6 +209,45 @@ impl SessionLoop {
                         }
                     }
 
+                    crate::application::ConnectionEvent::SyncNeeded {
+                        for_peer,
+                        since_sequence,
+                    } => {
+                        tracing::info!(
+                            "📤 HOST: Guest {} explicitly requested full sync (since_sequence={})",
+                            for_peer,
+                            since_sequence
+                        );
+
+                        if let Some(lobby) = self.get_lobby() {
+                            let snapshot = LobbySnapshot {
+                                lobby_id: lobby.id(),
+                                name: lobby.name().to_string(),
+                                host_id: lobby.host_id(),
+                                participants: lobby.participants().values().cloned().collect(),
+                                as_of_sequence: self.p2p.current_sequence(),
+                            };
+
+                            if let Err(e) = self.p2p.send_full_sync_to_peer(*for_peer, snapshot) {
+                                tracing::error!(
+                                    "❌ HOST: Failed to send on-demand full sync to {}: {}",
+                                    for_peer,
+                                    e
+                                );
+                            } else {
+                                tracing::info!(
+                                    "✅ HOST: Sent on-demand full sync to {}",
+                                    for_peer
+                                );
+                            }
+                        } else {
+                            tracing::warn!(
+                                "⚠️  HOST: Guest {} requested sync but no lobby exists yet",
+                                for_peer
+                            );
+                        }
+                    }
+
                     _ => {}
                 }
             }
