@@ -4,12 +4,15 @@ resolver = "3"
 members = [
     "konnekt-session-core",
     "konnekt-session-tests",
-    "konnekt-session"  # Legacy - to be deprecated
-, "konnekt-session-cli", "konnekt-session-p2p", "konnekt-session-yew", "konnekt-session-bevy"]
+    "konnekt-session-cli",
+    "konnekt-session-p2p",
+    "konnekt-session-yew",
+    "konnekt-session-bevy",
+]
 
 # Shared workspace metadata
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 authors = ["Konnekt Session Contributors"]
 license = "MIT"
