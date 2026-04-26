@@ -1,8 +1,5 @@
 use crossterm::event::KeyCode;
-use konnekt_session_core::{
-    Lobby,
-    domain::ActivityId,
-};
+use konnekt_session_core::{Lobby, domain::ActivityId};
 use uuid::Uuid;
 
 /// Activity result with participant name (for display)

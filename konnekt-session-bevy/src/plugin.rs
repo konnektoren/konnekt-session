@@ -71,11 +71,12 @@ mod tests {
         app.add_plugins(SessionPlugin);
 
         let lobby_id = Uuid::new_v4();
-        app.world_mut().write_message(SessionCommand(DomainCommand::CreateLobby {
-            lobby_id: Some(lobby_id),
-            lobby_name: "Friday Session".to_string(),
-            host_name: "Alice".to_string(),
-        }));
+        app.world_mut()
+            .write_message(SessionCommand(DomainCommand::CreateLobby {
+                lobby_id: Some(lobby_id),
+                lobby_name: "Friday Session".to_string(),
+                host_name: "Alice".to_string(),
+            }));
 
         app.update();
 
@@ -101,15 +102,17 @@ mod tests {
         app.add_plugins(SessionPlugin);
 
         let lobby_id = Uuid::new_v4();
-        app.world_mut().write_message(SessionCommand(DomainCommand::CreateLobby {
-            lobby_id: Some(lobby_id),
-            lobby_name: "Stable Lobby".to_string(),
-            host_name: "Host".to_string(),
-        }));
-        app.world_mut().write_message(SessionCommand(DomainCommand::JoinLobby {
-            lobby_id,
-            guest_name: "Guest".to_string(),
-        }));
+        app.world_mut()
+            .write_message(SessionCommand(DomainCommand::CreateLobby {
+                lobby_id: Some(lobby_id),
+                lobby_name: "Stable Lobby".to_string(),
+                host_name: "Host".to_string(),
+            }));
+        app.world_mut()
+            .write_message(SessionCommand(DomainCommand::JoinLobby {
+                lobby_id,
+                guest_name: "Guest".to_string(),
+            }));
 
         app.update();
 

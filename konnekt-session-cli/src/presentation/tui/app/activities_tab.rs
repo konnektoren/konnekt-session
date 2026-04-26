@@ -1,8 +1,5 @@
 use crossterm::event::KeyCode;
-use konnekt_session_core::{
-    EchoChallenge, Lobby,
-    domain::ActivityConfig,
-};
+use konnekt_session_core::{EchoChallenge, Lobby, domain::ActivityConfig};
 
 use crate::presentation::tui::app::UserAction;
 

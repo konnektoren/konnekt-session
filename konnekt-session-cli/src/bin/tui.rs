@@ -337,10 +337,7 @@ fn handle_user_command(
             session_loop.submit_command(DomainCommand::StartNextRun { lobby_id })?;
         }
         UserCommand::CancelActivity { run_id } => {
-            session_loop.submit_command(DomainCommand::CancelRun {
-                lobby_id,
-                run_id
-            })?;
+            session_loop.submit_command(DomainCommand::CancelRun { lobby_id, run_id })?;
         }
         UserCommand::SubmitActivityResult {
             run_id,
@@ -398,7 +395,9 @@ async fn handle_user_action(
         }
         UserAction::StartActivity(activity_id) => {
             cmd_tx
-                .send(UserCommand::StartActivity { _activity_id: activity_id })
+                .send(UserCommand::StartActivity {
+                    _activity_id: activity_id,
+                })
                 .await
                 .map_err(|e| CliError::InvalidConfig(format!("Failed to send command: {}", e)))?;
         }

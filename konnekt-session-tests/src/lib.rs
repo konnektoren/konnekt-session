@@ -1,9 +1,9 @@
 use bevy_app::App;
 use cucumber::World;
+use konnekt_session_bevy::{SessionCommand, SessionDomain, SessionEventLog, SessionPlugin};
 use konnekt_session_core::{
     DomainCommand, DomainEvent, DomainEventLoop, Lobby, LobbyRole, ParticipationMode,
 };
-use konnekt_session_bevy::{SessionCommand, SessionDomain, SessionEventLog, SessionPlugin};
 use std::collections::HashMap;
 use uuid::Uuid;
 

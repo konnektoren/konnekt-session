@@ -325,7 +325,11 @@ async fn wait_for_lobby_sync(session_loop: &mut SessionLoop) -> Result<()> {
 
 /// Main event loop - PRESENTATION ONLY
 /// All business logic is in SessionLoop (P2P + Core)
-async fn run_event_loop(session_loop: SessionLoop, is_host: bool, session_id: SessionId) -> Result<()> {
+async fn run_event_loop(
+    session_loop: SessionLoop,
+    is_host: bool,
+    session_id: SessionId,
+) -> Result<()> {
     let runtime = SessionRuntime::spawn(session_loop, session_id);
     let mut interval = tokio::time::interval(Duration::from_millis(100));
     let mut last_participant_count = 0;
@@ -395,12 +399,17 @@ async fn handle_graceful_shutdown(runtime: &SessionRuntime) -> Result<()> {
     if let Some(lobby) = snapshot.lobby {
         // Find our participant ID (non-host)
         if let Some(participant) = lobby.participants().values().find(|p| !p.is_host()) {
-            runtime.submit_command(DomainCommand::LeaveLobby {
-                lobby_id: snapshot.lobby_id,
-                participant_id: participant.id(),
-            }).await.map_err(|e| {
-                konnekt_session_cli::CliError::InvalidInput(format!("Failed to send leave command: {e}"))
-            })?;
+            runtime
+                .submit_command(DomainCommand::LeaveLobby {
+                    lobby_id: snapshot.lobby_id,
+                    participant_id: participant.id(),
+                })
+                .await
+                .map_err(|e| {
+                    konnekt_session_cli::CliError::InvalidInput(format!(
+                        "Failed to send leave command: {e}"
+                    ))
+                })?;
 
             // Give it a moment to send
             tokio::time::sleep(Duration::from_millis(200)).await;

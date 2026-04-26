@@ -120,7 +120,10 @@ async fn who_am_i_reports_participation_mode(world: &mut SessionWorld, expected_
         "Spectating" => ParticipationMode::Spectating,
         other => panic!("Unsupported participation mode '{}'", other),
     };
-    let actual = world.last_who_am_i.as_ref().and_then(|i| i.participation_mode);
+    let actual = world
+        .last_who_am_i
+        .as_ref()
+        .and_then(|i| i.participation_mode);
     assert_eq!(actual, Some(expected));
 }
 

@@ -1,4 +1,6 @@
-use crate::components::{ActivityList, ActivityPlanner, ActivitySubmission, ParticipantList, SessionInfo};
+use crate::components::{
+    ActivityList, ActivityPlanner, ActivitySubmission, ParticipantList, SessionInfo,
+};
 use crate::hooks::{HostConnectivityOptions, use_host_connectivity, use_session};
 use chrono::Utc;
 use konnekt_session_core::{DomainCommand, RunStatus};
@@ -56,7 +58,8 @@ pub fn session_screen(props: &SessionScreenProps) -> Html {
         let session_clone = session.clone();
 
         Callback::from(move |_: MouseEvent| {
-            if let (Some(lobby), Some(participant_id)) = (&lobby, session_clone.get_local_participant_id())
+            if let (Some(lobby), Some(participant_id)) =
+                (&lobby, session_clone.get_local_participant_id())
             {
                 send_command(DomainCommand::ToggleParticipationMode {
                     lobby_id: lobby.id(),

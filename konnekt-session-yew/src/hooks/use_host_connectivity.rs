@@ -1,5 +1,5 @@
-use gloo_timers::future::TimeoutFuture;
 use chrono::Utc;
+use gloo_timers::future::TimeoutFuture;
 use yew::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,7 +39,12 @@ pub fn use_host_connectivity(
         let disconnect_epoch = disconnect_epoch.clone();
 
         use_effect_with(
-            (is_host, peer_count, options.enabled, options.unreachable_delay_ms),
+            (
+                is_host,
+                peer_count,
+                options.enabled,
+                options.unreachable_delay_ms,
+            ),
             move |(is_host, peer_count, enabled, unreachable_delay_ms)| {
                 if !*enabled {
                     host_unreachable.set(false);

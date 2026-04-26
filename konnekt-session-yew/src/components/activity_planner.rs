@@ -54,7 +54,9 @@ pub fn activity_planner(props: &ActivityPlannerProps) -> Html {
         Callback::from(move |_: MouseEvent| {
             if let Some(lobby) = &lobby {
                 if !lobby.activity_queue().is_empty() && !lobby.has_active_run() {
-                    send_command(DomainCommand::StartNextRun { lobby_id: lobby.id() });
+                    send_command(DomainCommand::StartNextRun {
+                        lobby_id: lobby.id(),
+                    });
                 }
             }
         })
