@@ -1,4 +1,6 @@
-use konnekt_session_p2p::{IceServer, P2PLoopBuilder};
+mod support;
+
+use support::SessionFixture;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 fn init_test_tracing() {
@@ -8,26 +10,14 @@ fn init_test_tracing() {
         .try_init();
 }
 
-#[tokio::test]
-#[ignore] // Requires network
-async fn test_host_creation_with_tracing() {
+#[test]
+fn test_host_creation_with_tracing() {
     init_test_tracing();
+    let mut fixture = SessionFixture::new(0);
+    fixture.tick(1);
 
-    let signalling_server = "wss://match.konnektoren.help";
-    let ice_servers = IceServer::default_stun_servers();
-
-    let result = P2PLoopBuilder::new()
-        .build_session_host(
-            signalling_server,
-            ice_servers,
-            "Test Lobby".to_string(),
-            "Host".to_string(),
-        )
-        .await;
-
-    assert!(result.is_ok());
-
-    let (session_loop, session_id) = result.unwrap();
-    assert!(session_loop.get_lobby().is_some());
-    tracing::info!("✅ Session created: {}", session_id);
+    let lobby = fixture.host.get_lobby().expect("Lobby should exist");
+    assert_eq!(lobby.name(), "Test Lobby");
+    assert_eq!(lobby.participants().len(), 1);
+    tracing::info!("✅ Session created: {}", fixture.lobby_id);
 }

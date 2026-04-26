@@ -3,8 +3,9 @@ use bevy_ecs::prelude::{Resource, World};
 use bevy_ecs::schedule::Schedule;
 use bevy_ecs::system::ResMut;
 use futures::StreamExt;
-use konnekt_session_core::{DomainCommand, Lobby};
-use konnekt_session_p2p::{IceServer, P2PLoopBuilder, SessionId, SessionLoop};
+use konnekt_session_core::{DomainCommand, DomainEvent, DomainLoop, Lobby};
+use konnekt_session_p2p::infrastructure::connection::MatchboxConnection;
+use konnekt_session_p2p::{IceServer, MatchboxSessionLoop, P2PTransport, SessionId};
 use std::rc::Rc;
 use uuid::Uuid;
 use yew::prelude::*;
@@ -43,15 +44,11 @@ impl SessionState {
 
 #[derive(Resource)]
 struct RuntimeState {
-    session_loop: SessionLoop,
+    session_loop: MatchboxSessionLoop,
     is_host: bool,
     lobby_id: Uuid,
     local_name: String,
-    sync_retry_ticks: u16,
     join_retry_ticks: u16,
-    /// True while we are waiting for the host to acknowledge our JoinLobby
-    /// (i.e. the GuestJoined broadcast to arrive back). Prevents sending
-    /// duplicate JoinLobby commands while the round-trip is in flight.
     join_in_flight: bool,
 }
 
@@ -64,7 +61,6 @@ struct RuntimeSnapshot {
     active_run: Option<ActiveRunSnapshot>,
     peer_count: usize,
     local_participant_id: Option<Uuid>,
-    local_peer_id: Option<String>,
 }
 
 fn drive_session_runtime(
@@ -83,65 +79,27 @@ fn drive_session_runtime(
         tracing::debug!("SessionRuntime processed {} events", processed);
     }
 
-    // Guest resiliency:
-    // 1) periodically request full sync until lobby arrives
-    // 2) periodically retry JoinLobby once at least one peer is connected
-    //    (don't wait for lobby snapshot, to avoid sync deadlocks)
     if !state.is_host {
         let has_connected_peers = !state.session_loop.connected_peers().is_empty();
-        let has_lobby = state.session_loop.get_lobby().is_some();
-
-        // ── 1. Sync retry: keep requesting full state until lobby arrives ────
-        if has_connected_peers && !has_lobby {
-            state.sync_retry_ticks = state.sync_retry_ticks.saturating_add(1);
-            if state.sync_retry_ticks >= 20 {
-                state.sync_retry_ticks = 0;
-                if let Err(e) = state.session_loop.p2p_mut().request_full_sync() {
-                    tracing::warn!("⚠️ Retry full sync request failed: {:?}", e);
+        let joined = state
+            .session_loop
+            .get_lobby()
+            .map(|lobby| {
+                if let Some(id) = snapshot.local_participant_id {
+                    lobby.participants().contains_key(&id)
                 } else {
-                    tracing::info!("🔁 Retried full sync request");
+                    lobby
+                        .participants()
+                        .values()
+                        .any(|p| p.name() == state.local_name && !p.is_host())
                 }
-            }
-        } else {
-            state.sync_retry_ticks = 0;
-        }
-
-        // ── 2. Determine whether the guest is present in the lobby ──────────
-        // Check by participant_id first (most accurate), fall back to name-match
-        // for the brief window before local_participant_id is resolved.
-        let joined = has_lobby && {
-            let by_id = snapshot.local_participant_id.and_then(|id| {
-                state
-                    .session_loop
-                    .get_lobby()
-                    .and_then(|l| l.participants().get(&id).map(|_| true))
-            });
-            by_id.unwrap_or_else(|| {
-                state
-                    .session_loop
-                    .get_lobby()
-                    .map(|l| {
-                        l.participants()
-                            .values()
-                            .any(|p| p.name() == state.local_name && !p.is_host())
-                    })
-                    .unwrap_or(false)
             })
-        };
+            .unwrap_or(false);
 
-        // Once confirmed joined, clear the in-flight flag so we don't re-send.
         if joined {
             state.join_in_flight = false;
         }
 
-        // ── 3. JoinLobby retry ───────────────────────────────────────────────
-        // Send JoinLobby whenever we have peers but are not yet in the lobby.
-        // This covers two cases:
-        //   a) No lobby yet  — keep retrying every ~1s until snapshot arrives.
-        //   b) Lobby arrived without the guest (host snapshotted before processing
-        //      the initial join) — retry until the GuestJoined ack comes back.
-        // The `join_in_flight` flag suppresses duplicate sends while the
-        // round-trip (guest → host → GuestJoined broadcast → guest) is in flight.
         if has_connected_peers && !joined && !state.join_in_flight {
             state.join_retry_ticks = state.join_retry_ticks.saturating_add(1);
             if state.join_retry_ticks >= 10 {
@@ -159,18 +117,16 @@ fn drive_session_runtime(
                 }
             }
         } else if !has_connected_peers {
-            // Reset tick counter while disconnected so we retry quickly on reconnect.
             state.join_retry_ticks = 0;
         }
     }
 
+    let lobby = state.session_loop.get_lobby().cloned();
     *snapshot = RuntimeSnapshot {
-        lobby: state.session_loop.get_lobby().cloned(),
+        lobby: lobby.clone(),
         active_run: state
             .session_loop
-            .get_lobby()
-            .and_then(|l| l.active_run_id())
-            .and_then(|run_id| state.session_loop.domain().event_loop().get_run(&run_id))
+            .get_active_run()
             .map(|run| ActiveRunSnapshot {
                 run_id: run.id(),
                 status: run.status(),
@@ -180,12 +136,19 @@ fn drive_session_runtime(
                 results: run.results().values().cloned().collect(),
             }),
         peer_count: state.session_loop.connected_peers().len(),
-        local_participant_id: state
-            .session_loop
-            .local_peer_id()
-            .and_then(|peer_id| state.session_loop.p2p().peer_registry().get_peer(&peer_id))
-            .and_then(|peer_state| peer_state.participant_id),
-        local_peer_id: state.session_loop.local_peer_id().map(|p| p.to_string()),
+        local_participant_id: lobby.as_ref().and_then(|l| {
+            if state.is_host {
+                l.participants()
+                    .values()
+                    .find(|p| p.is_host())
+                    .map(|p| p.id())
+            } else {
+                l.participants()
+                    .values()
+                    .find(|p| p.name() == state.local_name && !p.is_host())
+                    .map(|p| p.id())
+            }
+        }),
     };
 }
 
@@ -212,7 +175,6 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
     let active_run = use_state(|| None::<ActiveRunSnapshot>);
     let peer_count = use_state(|| 0usize);
     let local_participant_id = use_state(|| None::<Uuid>);
-    let local_peer_id = use_state(|| None::<String>);
     let is_host = use_state(move || starts_as_host);
     let actual_session_id = use_state(|| SessionId::new());
     let local_participant_name = use_state(|| None::<String>);
@@ -242,7 +204,6 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
         let active_run_clone = active_run.clone();
         let peer_count_clone = peer_count.clone();
         let local_participant_id_clone = local_participant_id.clone();
-        let local_peer_id_clone = local_peer_id.clone();
         let local_participant_name_clone = local_participant_name.clone();
         let runtime_error_clone = runtime_error.clone();
         let session_state_clone = session_state.clone();
@@ -269,11 +230,10 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                     };
                     tracing::info!("🔗 Joining session: {}", sid);
 
-                    let (loop_, _lobby_id) = match P2PLoopBuilder::new()
-                        .build_session_guest(&signalling_server, sid.clone(), ice_servers)
-                        .await
+                    let room_url = format!("{}/{}", signalling_server, sid.as_str());
+                    let connection = match MatchboxConnection::connect(&room_url, ice_servers).await
                     {
-                        Ok(v) => v,
+                        Ok(connection) => connection,
                         Err(e) => {
                             let msg = format!("Failed to join session {}: {:?}", sid, e);
                             tracing::error!("❌ {}", msg);
@@ -282,25 +242,24 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                         }
                     };
 
-                    // Store our name
+                    let transport = P2PTransport::new_guest(connection, 100);
+                    let domain = DomainLoop::new(10, 100);
+
                     local_participant_name_clone.set(Some(local_name.clone()));
                     is_host_clone.set(false);
 
-                    (loop_, sid)
+                    (
+                        MatchboxSessionLoop::new(domain, transport, false, sid.inner()),
+                        sid,
+                    )
                 } else {
-                    // Host creation
                     tracing::info!("👑 Creating host session as '{}'", name);
 
-                    let (loop_, sid) = match P2PLoopBuilder::new()
-                        .build_session_host(
-                            &signalling_server,
-                            ice_servers,
-                            lobby_name.clone(),
-                            local_name.clone(),
-                        )
-                        .await
+                    let sid = SessionId::new();
+                    let room_url = format!("{}/{}", signalling_server, sid.as_str());
+                    let connection = match MatchboxConnection::connect(&room_url, ice_servers).await
                     {
-                        Ok(v) => v,
+                        Ok(connection) => connection,
                         Err(e) => {
                             let msg = format!("Failed to create host session: {:?}", e);
                             tracing::error!("❌ {}", msg);
@@ -309,11 +268,39 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                         }
                     };
 
-                    // Store our name
+                    let transport = P2PTransport::new_host(connection, 100);
+                    let mut domain = DomainLoop::new(10, 100);
+                    let create_cmd = DomainCommand::CreateLobby {
+                        lobby_id: Some(sid.inner()),
+                        lobby_name,
+                        host_name: local_name.clone(),
+                    };
+
+                    if let Err(e) = domain.submit(create_cmd) {
+                        let msg = format!("Failed to submit CreateLobby: {:?}", e);
+                        tracing::error!("❌ {}", msg);
+                        runtime_error_clone.set(Some(msg));
+                        return;
+                    }
+                    domain.poll();
+                    let events = domain.drain_events();
+                    if !events
+                        .iter()
+                        .any(|e| matches!(e, DomainEvent::LobbyCreated { .. }))
+                    {
+                        let msg = "Failed to create lobby in domain loop".to_string();
+                        tracing::error!("❌ {}", msg);
+                        runtime_error_clone.set(Some(msg));
+                        return;
+                    }
+
                     local_participant_name_clone.set(Some(local_name.clone()));
                     is_host_clone.set(true);
 
-                    (loop_, sid)
+                    (
+                        MatchboxSessionLoop::new(domain, transport, true, sid.inner()),
+                        sid,
+                    )
                 };
 
                 actual_session_id_clone.set(sid);
@@ -328,8 +315,6 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                     is_host: runtime_is_host,
                     lobby_id: runtime_lobby_id,
                     local_name,
-                    // Make first retry happen quickly on startup.
-                    sync_retry_ticks: 19,
                     join_retry_ticks: 9,
                     join_in_flight: false,
                 });
@@ -370,9 +355,6 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
                     if *local_participant_id_clone != snapshot.local_participant_id {
                         local_participant_id_clone.set(snapshot.local_participant_id);
                     }
-                    if *local_peer_id_clone != snapshot.local_peer_id {
-                        local_peer_id_clone.set(snapshot.local_peer_id);
-                    }
                 }
 
                 tracing::warn!("🛑 Polling loop ended");
@@ -391,7 +373,7 @@ pub fn session_provider(props: &SessionProviderProps) -> Html {
         is_host: *is_host,
         active_run: (*active_run).clone(),
         local_participant_id: *local_participant_id,
-        local_peer_id: (*local_peer_id).clone(),
+        local_peer_id: None,
         send_command,
         local_participant_name: (*local_participant_name).clone(),
         runtime_error: (*runtime_error).clone(),

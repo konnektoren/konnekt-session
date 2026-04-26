@@ -333,7 +333,7 @@ impl Default for DomainEventLoop {
 mod tests {
     use super::*;
     use crate::application::DomainCommand;
-    use crate::domain::{ActivityConfig, ActivityResult, ParticipationMode, RunStatus};
+    use crate::domain::{ActivityConfig, ActivityResult, RunStatus};
 
     fn create_lobby(el: &mut DomainEventLoop, name: &str, host: &str) -> (Uuid, Uuid) {
         match el.handle_command(DomainCommand::CreateLobby {
@@ -419,7 +419,7 @@ mod tests {
     #[test]
     fn test_toggle_participation_mode_blocked_during_run() {
         let mut el = DomainEventLoop::new();
-        let (lobby_id, host_id) = create_lobby(&mut el, "Test", "Alice");
+        let (lobby_id, _host_id) = create_lobby(&mut el, "Test", "Alice");
         let guest_id = join_lobby(&mut el, lobby_id, "Bob");
 
         let config = ActivityConfig::new("quiz".to_string(), "Q1".to_string(), serde_json::json!({}));

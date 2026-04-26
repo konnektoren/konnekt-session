@@ -388,7 +388,7 @@ mod tests {
         let event = TransportEvent::PeerConnected(peer);
 
         match event {
-            TransportEvent::PeerConnected(_) => assert!(true),
+            TransportEvent::PeerConnected(id) => assert_eq!(id, peer),
             _ => panic!("Wrong event type"),
         }
     }

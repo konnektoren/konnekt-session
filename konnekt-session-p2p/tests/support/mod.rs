@@ -21,11 +21,11 @@ impl NetworkConnection for MockConnection {
     }
 
     fn send_to(&mut self, peer: PeerId, data: Vec<u8>) -> Result<()> {
-        MockConnection::send_to(self, peer, data).map_err(|e| P2PError::SendFailed(e))
+        MockConnection::send_to(self, peer, data).map_err(P2PError::SendFailed)
     }
 
     fn broadcast(&mut self, data: Vec<u8>) -> Result<()> {
-        MockConnection::broadcast(self, data).map_err(|e| P2PError::SendFailed(e))
+        MockConnection::broadcast(self, data).map_err(P2PError::SendFailed)
     }
 
     fn poll_events(&mut self) -> Vec<ConnectionEvent> {
@@ -114,39 +114,6 @@ impl SessionFixture {
             if i % 5 == 0 && i > 0 {
                 tracing::trace!("🔄 Tick {}/{}", i, count);
             }
-        }
-    }
-
-    /// Assert all peers have the same participant count
-    pub fn assert_consistent_state(&self, expected_count: usize) {
-        let host_count = self
-            .host
-            .get_lobby()
-            .expect("Host should have lobby")
-            .participants()
-            .len();
-
-        assert_eq!(
-            host_count, expected_count,
-            "Host should see {} participants, but sees {}",
-            expected_count, host_count
-        );
-
-        for (i, guest) in self.guests.iter().enumerate() {
-            let guest_count = guest
-                .get_lobby()
-                .unwrap_or_else(|| panic!("Guest {} should have lobby", i + 1))
-                .participants()
-                .len();
-
-            assert_eq!(
-                guest_count,
-                expected_count,
-                "Guest {} should see {} participants, but sees {}",
-                i + 1,
-                expected_count,
-                guest_count
-            );
         }
     }
 

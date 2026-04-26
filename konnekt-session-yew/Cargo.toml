@@ -16,12 +16,12 @@ crate-type = ["cdylib", "rlib"]
 
 [[bin]]
 name = "basic-lobby"
-path = "examples/basic-lobby.rs"
+path = "src/bin/basic-lobby.rs"
 required-features = ["basic-lobby"]
 
 [[bin]]
 name = "preview"
-path = "examples/preview.rs"
+path = "src/bin/preview.rs"
 required-features = ["preview"]
 
 [dependencies]

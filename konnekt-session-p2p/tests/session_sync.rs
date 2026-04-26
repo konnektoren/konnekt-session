@@ -48,7 +48,22 @@ fn test_multiple_guests() {
 
     fixture.tick(900);
 
-    fixture.assert_consistent_state(4);
+    let host_count = fixture
+        .host
+        .get_lobby()
+        .expect("Host should have lobby")
+        .participants()
+        .len();
+    assert_eq!(host_count, 4, "Host should see 4 participants");
+
+    for (index, guest) in fixture.guests.iter().enumerate() {
+        let guest_count = guest
+            .get_lobby()
+            .unwrap_or_else(|| panic!("Guest {} should have lobby", index + 1))
+            .participants()
+            .len();
+        assert_eq!(guest_count, 4, "Guest {} should see 4 participants", index + 1);
+    }
 }
 
 #[test]

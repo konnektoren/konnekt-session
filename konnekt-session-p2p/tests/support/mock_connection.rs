@@ -4,6 +4,9 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
+type Message = (PeerId, Vec<u8>);
+type Inbox = Arc<Mutex<VecDeque<Message>>>;
+
 /// Mock connection that simulates P2P networking in-memory
 #[derive(Clone)]
 pub struct MockConnection {
@@ -14,13 +17,13 @@ pub struct MockConnection {
     network: Arc<Mutex<MockNetwork>>,
 
     /// Our local message queue
-    inbox: Arc<Mutex<VecDeque<(PeerId, Vec<u8>)>>>,
+    inbox: Inbox,
 }
 
 /// Shared network bus (simulates WebRTC signalling + data channels)
 pub struct MockNetwork {
     /// All registered peers
-    pub peers: HashMap<PeerId, Arc<Mutex<VecDeque<(PeerId, Vec<u8>)>>>>,
+    pub peers: HashMap<PeerId, Inbox>,
 
     /// Connection events (peer connected/disconnected)
     pub events: VecDeque<(PeerId, ConnectionEvent)>,
@@ -250,7 +253,7 @@ mod tests {
         let events3 = peer3.poll_events();
 
         // Each peer gets 2 PeerConnected + 1 MessageReceived
-        assert!(events2.len() >= 1);
-        assert!(events3.len() >= 1);
+        assert!(!events2.is_empty());
+        assert!(!events3.is_empty());
     }
 }

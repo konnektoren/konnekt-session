@@ -43,7 +43,7 @@ pub struct SessionContext {
     pub local_participant_id: Option<Uuid>,
     pub local_peer_id: Option<String>,
 
-    /// Send commands to SessionLoop
+    /// Send commands to the session runtime
     pub send_command: Rc<dyn Fn(DomainCommand)>,
 
     /// Our participant name (immutable)
@@ -73,8 +73,8 @@ impl SessionContext {
     /// Resolve local participant from current lobby state.
     ///
     /// Resolution order:
-    /// 1. Runtime-resolved participant ID (peer registry mapping)
-    /// 2. Name + role fallback (legacy path)
+    /// 1. Runtime-resolved participant ID
+    /// 2. Name + role fallback
     pub fn who_am_i(&self) -> Option<&Participant> {
         let lobby = self.lobby.as_ref()?;
 
