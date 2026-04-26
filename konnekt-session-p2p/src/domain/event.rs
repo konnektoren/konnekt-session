@@ -9,7 +9,6 @@ use uuid::Uuid;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DomainEvent {
     // ── Lobby events ─────────────────────────────────────────────────────────
-
     LobbyCreated {
         lobby_id: Uuid,
         host_id: Uuid,
@@ -45,7 +44,6 @@ pub enum DomainEvent {
     },
 
     // ── Run events ────────────────────────────────────────────────────────────
-
     /// Host broadcasts when a run starts. Includes required_submitters so
     /// peers can independently track completion.
     RunStarted {
@@ -156,7 +154,8 @@ mod tests {
         let run_id = Uuid::new_v4();
         let p1 = Uuid::new_v4();
         let p2 = Uuid::new_v4();
-        let config = ActivityConfig::new("quiz".to_string(), "Q1".to_string(), serde_json::json!({}));
+        let config =
+            ActivityConfig::new("quiz".to_string(), "Q1".to_string(), serde_json::json!({}));
 
         let event = DomainEvent::RunStarted {
             run_id,
@@ -168,7 +167,10 @@ mod tests {
         let deserialized: DomainEvent = serde_json::from_str(&json).unwrap();
 
         match deserialized {
-            DomainEvent::RunStarted { required_submitters, .. } => {
+            DomainEvent::RunStarted {
+                required_submitters,
+                ..
+            } => {
                 assert_eq!(required_submitters.len(), 2);
             }
             _ => panic!("Expected RunStarted"),

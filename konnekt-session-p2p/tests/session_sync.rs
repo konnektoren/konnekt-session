@@ -1,6 +1,6 @@
 mod support;
 
-use konnekt_session_core::{domain::ActivityConfig, DomainCommand};
+use konnekt_session_core::{DomainCommand, domain::ActivityConfig};
 use support::SessionFixture;
 
 #[test]
@@ -62,7 +62,12 @@ fn test_multiple_guests() {
             .unwrap_or_else(|| panic!("Guest {} should have lobby", index + 1))
             .participants()
             .len();
-        assert_eq!(guest_count, 4, "Guest {} should see 4 participants", index + 1);
+        assert_eq!(
+            guest_count,
+            4,
+            "Guest {} should see 4 participants",
+            index + 1
+        );
     }
 }
 
@@ -113,7 +118,14 @@ fn test_activity_queue_and_start_run() {
 
     // Host should have active run, queue should be empty
     assert!(fixture.host.get_lobby().unwrap().has_active_run());
-    assert!(fixture.host.get_lobby().unwrap().activity_queue().is_empty());
+    assert!(
+        fixture
+            .host
+            .get_lobby()
+            .unwrap()
+            .activity_queue()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -134,11 +146,15 @@ fn test_activity_completion() {
     // IDs must come from HOST's lobby — the host assigns UUIDs.
     // Guests receive echoed JoinLobby commands and create different UUIDs locally.
     let host_lobby = fixture.host.get_lobby().unwrap();
-    let host_participant_id = host_lobby.participants().values()
+    let host_participant_id = host_lobby
+        .participants()
+        .values()
         .find(|p| p.is_host())
         .expect("Host participant")
         .id();
-    let guest_participant_id = host_lobby.participants().values()
+    let guest_participant_id = host_lobby
+        .participants()
+        .values()
         .find(|p| !p.is_host())
         .expect("Guest participant on host")
         .id();
@@ -150,42 +166,54 @@ fn test_activity_completion() {
         serde_json::json!({}),
     );
 
-    fixture.host.submit_command(DomainCommand::QueueActivity {
-        lobby_id: fixture.lobby_id,
-        config,
-    }).unwrap();
+    fixture
+        .host
+        .submit_command(DomainCommand::QueueActivity {
+            lobby_id: fixture.lobby_id,
+            config,
+        })
+        .unwrap();
 
     fixture.tick(250);
 
-    fixture.host.submit_command(DomainCommand::StartNextRun {
-        lobby_id: fixture.lobby_id,
-    }).unwrap();
+    fixture
+        .host
+        .submit_command(DomainCommand::StartNextRun {
+            lobby_id: fixture.lobby_id,
+        })
+        .unwrap();
 
     fixture.tick(250);
 
-    let run_id = fixture.host
+    let run_id = fixture
+        .host
         .get_lobby()
         .unwrap()
         .active_run_id()
         .expect("Run should be active");
 
     // Host submits result
-    fixture.host.submit_command(DomainCommand::SubmitResult {
-        lobby_id: fixture.lobby_id,
-        run_id,
-        result: konnekt_session_core::domain::ActivityResult::new(run_id, host_participant_id)
-            .with_score(100),
-    }).unwrap();
+    fixture
+        .host
+        .submit_command(DomainCommand::SubmitResult {
+            lobby_id: fixture.lobby_id,
+            run_id,
+            result: konnekt_session_core::domain::ActivityResult::new(run_id, host_participant_id)
+                .with_score(100),
+        })
+        .unwrap();
 
     fixture.tick(250);
 
     // Guest submits result
-    fixture.guests[0].submit_command(DomainCommand::SubmitResult {
-        lobby_id: fixture.lobby_id,
-        run_id,
-        result: konnekt_session_core::domain::ActivityResult::new(run_id, guest_participant_id)
-            .with_score(80),
-    }).unwrap();
+    fixture.guests[0]
+        .submit_command(DomainCommand::SubmitResult {
+            lobby_id: fixture.lobby_id,
+            run_id,
+            result: konnekt_session_core::domain::ActivityResult::new(run_id, guest_participant_id)
+                .with_score(80),
+        })
+        .unwrap();
 
     fixture.tick(400);
 

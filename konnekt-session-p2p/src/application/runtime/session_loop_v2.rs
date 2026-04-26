@@ -1,6 +1,7 @@
 use crate::infrastructure::error::Result;
 use crate::infrastructure::transport::{NetworkConnection, P2PTransport, TransportEvent};
 use konnekt_session_core::{DomainCommand, DomainEvent as CoreDomainEvent, DomainLoop, Lobby};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 /// Unified session loop (translation layer between domain and transport)
@@ -54,6 +55,7 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
     /// Main event loop
     pub fn poll(&mut self) -> usize {
         let mut processed = 0;
+        let mut host_prebroadcast_submissions: HashSet<(Uuid, Uuid)> = HashSet::new();
 
         // 1. Handle transport events
         for event in self.transport.drain_events() {
@@ -120,10 +122,21 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
 
                 // ✅ FIX: If host, ALWAYS broadcast to all guests (even if we executed it)
                 if self.is_host {
+                    if matches!(cmd, DomainCommand::JoinLobby { .. }) {
+                        tracing::debug!(
+                            "📡 HOST: Skipping direct JoinLobby rebroadcast; GuestJoined event will sync authoritative participant"
+                        );
+                        continue;
+                    }
+
                     tracing::debug!(
                         "📡 HOST: Broadcasting command to all peers: {:?}",
                         std::mem::discriminant(&cmd)
                     );
+
+                    if let DomainCommand::SubmitResult { run_id, result, .. } = &cmd {
+                        host_prebroadcast_submissions.insert((*run_id, result.participant_id));
+                    }
 
                     if let Ok(payload) = serde_json::to_value(&cmd) {
                         if let Err(e) = self.transport.send(payload) {
@@ -154,22 +167,24 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
 
                 match &event {
                     // ✅ Skip events that came from guest commands (already broadcast in step 2)
-                    CoreDomainEvent::GuestJoined { .. } => {
-                        tracing::debug!("   ↳ Skipping GuestJoined (already broadcast)");
-                        continue;
-                    }
                     CoreDomainEvent::ResultSubmitted { .. } => {
-                        tracing::debug!("   ↳ Skipping ResultSubmitted (already broadcast)");
-                        continue;
+                        if let CoreDomainEvent::ResultSubmitted { run_id, result, .. } = &event {
+                            if host_prebroadcast_submissions
+                                .contains(&(*run_id, result.participant_id))
+                            {
+                                tracing::debug!(
+                                    "   ↳ Skipping ResultSubmitted (already broadcast guest command)"
+                                );
+                                continue;
+                            }
+                        }
                     }
                     CoreDomainEvent::GuestLeft { .. } => {
                         tracing::debug!("   ↳ Skipping GuestLeft (already broadcast)");
                         continue;
                     }
                     CoreDomainEvent::RunEnded { .. } => {
-                        tracing::debug!(
-                            "   ↳ Skipping RunEnded (auto-completes on guests)"
-                        );
+                        tracing::debug!("   ↳ Skipping RunEnded (auto-completes on guests)");
                         continue;
                     }
                     _ => {}
@@ -265,7 +280,9 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
                 })
             }
             CoreDomainEvent::RunStarted { run_id, config, .. } => {
-                let required_submitters = self.domain.event_loop()
+                let required_submitters = self
+                    .domain
+                    .event_loop()
                     .get_run(&run_id)
                     .map(|r| r.required_submitters().iter().cloned().collect())
                     .unwrap_or_default();
@@ -276,12 +293,10 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
                     required_submitters,
                 })
             }
-            CoreDomainEvent::ActivityQueued { config, .. } => {
-                Some(DomainCommand::QueueActivity {
-                    lobby_id: self.lobby_id,
-                    config,
-                })
-            }
+            CoreDomainEvent::ActivityQueued { config, .. } => Some(DomainCommand::QueueActivity {
+                lobby_id: self.lobby_id,
+                config,
+            }),
             CoreDomainEvent::ResultSubmitted { run_id, result, .. } => {
                 Some(DomainCommand::SubmitResult {
                     lobby_id: self.lobby_id,
@@ -321,6 +336,10 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
     pub fn get_active_run(&self) -> Option<&konnekt_session_core::ActivityRun> {
         let run_id = self.get_lobby()?.active_run_id()?;
         self.domain.event_loop().get_run(&run_id)
+    }
+
+    pub fn get_run(&self, run_id: &Uuid) -> Option<&konnekt_session_core::ActivityRun> {
+        self.domain.event_loop().get_run(run_id)
     }
 }
 

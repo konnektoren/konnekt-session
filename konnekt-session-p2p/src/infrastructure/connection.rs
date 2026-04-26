@@ -212,12 +212,10 @@ async fn wait_for_peer_id(socket: &mut WebRtcSocket) -> Result<PeerId> {
         }
 
         if start.elapsed() > timeout {
-            return Err(P2PError::ConnectionFailed(
-                format!(
-                    "Timeout waiting for peer ID ({}ms). Set KONNEKT_PEER_ID_TIMEOUT_MS to override.",
-                    timeout_ms
-                ),
-            ));
+            return Err(P2PError::ConnectionFailed(format!(
+                "Timeout waiting for peer ID ({}ms). Set KONNEKT_PEER_ID_TIMEOUT_MS to override.",
+                timeout_ms
+            )));
         }
 
         // Platform-agnostic sleep

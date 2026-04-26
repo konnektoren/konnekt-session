@@ -37,7 +37,6 @@ pub struct P2PLoop {
 
     /// Domain commands to be processed by SessionLoop
     pending_domain_commands: VecDeque<DomainCommand>,
-
 }
 
 impl P2PLoop {

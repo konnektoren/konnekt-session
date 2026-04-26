@@ -235,10 +235,7 @@ impl SessionLoop {
                                     e
                                 );
                             } else {
-                                tracing::info!(
-                                    "✅ HOST: Sent on-demand full sync to {}",
-                                    for_peer
-                                );
+                                tracing::info!("✅ HOST: Sent on-demand full sync to {}", for_peer);
                             }
                         } else {
                             tracing::warn!(
@@ -399,9 +396,7 @@ impl SessionLoop {
                     );
                 }
                 CoreDomainEvent::RunEnded {
-                    run_id,
-                    results,
-                    ..
+                    run_id, results, ..
                 } => {
                     tracing::info!(
                         "📤 Domain event: RunEnded - {} ({} results)",
