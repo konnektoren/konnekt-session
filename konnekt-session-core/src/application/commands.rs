@@ -4,7 +4,6 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DomainCommand {
     // ── Lobby commands ────────────────────────────────────────────────────────
-
     CreateLobby {
         lobby_id: Option<Uuid>,
         lobby_name: String,
@@ -65,7 +64,6 @@ pub enum DomainCommand {
     },
 
     // ── Run commands ──────────────────────────────────────────────────────────
-
     /// Dequeue the next activity and start a run.
     StartNextRun {
         lobby_id: Uuid,

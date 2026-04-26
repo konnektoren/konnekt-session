@@ -83,15 +83,33 @@ impl Lobby {
 
     // ===== Getters =====
 
-    pub fn id(&self) -> Uuid { self.id }
-    pub fn name(&self) -> &str { &self.name }
-    pub fn host_id(&self) -> Uuid { self.host_id }
-    pub fn host(&self) -> Option<&Participant> { self.participants.get(&self.host_id) }
-    pub fn participants(&self) -> &HashMap<Uuid, Participant> { &self.participants }
-    pub fn participants_mut(&mut self) -> &mut HashMap<Uuid, Participant> { &mut self.participants }
-    pub fn activity_queue(&self) -> &[ActivityConfig] { &self.activity_queue }
-    pub fn active_run_id(&self) -> Option<ActivityRunId> { self.active_run_id }
-    pub fn has_active_run(&self) -> bool { self.active_run_id.is_some() }
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn host_id(&self) -> Uuid {
+        self.host_id
+    }
+    pub fn host(&self) -> Option<&Participant> {
+        self.participants.get(&self.host_id)
+    }
+    pub fn participants(&self) -> &HashMap<Uuid, Participant> {
+        &self.participants
+    }
+    pub fn participants_mut(&mut self) -> &mut HashMap<Uuid, Participant> {
+        &mut self.participants
+    }
+    pub fn activity_queue(&self) -> &[ActivityConfig] {
+        &self.activity_queue
+    }
+    pub fn active_run_id(&self) -> Option<ActivityRunId> {
+        self.active_run_id
+    }
+    pub fn has_active_run(&self) -> bool {
+        self.active_run_id.is_some()
+    }
 
     // ===== Participant Management =====
 
@@ -233,7 +251,10 @@ impl Lobby {
     }
 
     pub fn active_participants(&self) -> Vec<&Participant> {
-        self.participants.values().filter(|p| p.can_submit_results()).collect()
+        self.participants
+            .values()
+            .filter(|p| p.can_submit_results())
+            .collect()
     }
 
     /// Snapshot of active participant IDs — used when creating an ActivityRun.
@@ -353,12 +374,18 @@ mod tests {
         let mut lobby = Lobby::new("Test".to_string(), host).unwrap();
 
         let bob = Participant::with_timestamp(
-            "Bob".to_string(), LobbyRole::Guest, Timestamp::from_millis(100),
-        ).unwrap();
+            "Bob".to_string(),
+            LobbyRole::Guest,
+            Timestamp::from_millis(100),
+        )
+        .unwrap();
         let bob_id = bob.id();
         let carol = Participant::with_timestamp(
-            "Carol".to_string(), LobbyRole::Guest, Timestamp::from_millis(200),
-        ).unwrap();
+            "Carol".to_string(),
+            LobbyRole::Guest,
+            Timestamp::from_millis(200),
+        )
+        .unwrap();
 
         lobby.add_guest(bob).unwrap();
         lobby.add_guest(carol).unwrap();
@@ -402,7 +429,8 @@ mod tests {
     fn test_dequeue_activity() {
         let host = Participant::new_host("Alice".to_string()).unwrap();
         let mut lobby = Lobby::new("Test".to_string(), host).unwrap();
-        let config = ActivityConfig::new("quiz".to_string(), "Q1".to_string(), serde_json::json!({}));
+        let config =
+            ActivityConfig::new("quiz".to_string(), "Q1".to_string(), serde_json::json!({}));
         let config_id = config.id;
         lobby.queue_activity(config).unwrap();
 
@@ -415,11 +443,15 @@ mod tests {
     fn test_cannot_dequeue_during_active_run() {
         let host = Participant::new_host("Alice".to_string()).unwrap();
         let mut lobby = Lobby::new("Test".to_string(), host).unwrap();
-        let config = ActivityConfig::new("quiz".to_string(), "Q1".to_string(), serde_json::json!({}));
+        let config =
+            ActivityConfig::new("quiz".to_string(), "Q1".to_string(), serde_json::json!({}));
         lobby.queue_activity(config).unwrap();
         lobby.set_active_run(Uuid::new_v4()).unwrap();
 
-        assert_eq!(lobby.dequeue_next_activity(), Err(LobbyError::RunAlreadyInProgress));
+        assert_eq!(
+            lobby.dequeue_next_activity(),
+            Err(LobbyError::RunAlreadyInProgress)
+        );
     }
 
     #[test]

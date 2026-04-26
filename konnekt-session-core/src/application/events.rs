@@ -5,8 +5,9 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq)]
 pub enum DomainEvent {
     // ── Lobby events ─────────────────────────────────────────────────────────
-
-    LobbyCreated { lobby: Lobby },
+    LobbyCreated {
+        lobby: Lobby,
+    },
 
     GuestJoined {
         lobby_id: Uuid,
@@ -42,7 +43,6 @@ pub enum DomainEvent {
     },
 
     // ── Run events ────────────────────────────────────────────────────────────
-
     RunStarted {
         lobby_id: Uuid,
         run_id: ActivityRunId,
@@ -69,8 +69,10 @@ pub enum DomainEvent {
     },
 
     // ── Errors ────────────────────────────────────────────────────────────────
-
-    CommandFailed { command: String, reason: String },
+    CommandFailed {
+        command: String,
+        reason: String,
+    },
 }
 
 #[cfg(test)]

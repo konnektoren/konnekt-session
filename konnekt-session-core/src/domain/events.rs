@@ -6,7 +6,6 @@ use uuid::Uuid;
 #[serde(tag = "type")]
 pub enum DomainEvent {
     // ── Lobby events ─────────────────────────────────────────────────────────
-
     ParticipantJoined {
         lobby_id: Uuid,
         participant: crate::domain::Participant,
@@ -40,7 +39,6 @@ pub enum DomainEvent {
     },
 
     // ── Run events ────────────────────────────────────────────────────────────
-
     RunStarted {
         lobby_id: Uuid,
         run_id: ActivityRunId,

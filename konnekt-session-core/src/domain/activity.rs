@@ -86,7 +86,11 @@ mod tests {
     #[test]
     fn test_create_activity_config() {
         let config = serde_json::json!({"question_count": 10});
-        let ac = ActivityConfig::new("trivia-v1".to_string(), "Friday Quiz".to_string(), config.clone());
+        let ac = ActivityConfig::new(
+            "trivia-v1".to_string(),
+            "Friday Quiz".to_string(),
+            config.clone(),
+        );
 
         assert_eq!(ac.activity_type, "trivia-v1");
         assert_eq!(ac.name, "Friday Quiz");
