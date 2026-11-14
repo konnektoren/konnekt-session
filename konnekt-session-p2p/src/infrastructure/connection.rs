@@ -90,7 +90,7 @@ impl MatchboxConnection {
 
         // 🔧 FIX: Get mutable reference to channel
         let channel = socket.channel_mut(0);
-        channel.send(data.clone().into_boxed_slice(), peer.inner());
+        channel.send(data.clone().into(), peer.inner());
 
         tracing::debug!("Sent {} bytes to peer {}", data.len(), peer);
         Ok(())

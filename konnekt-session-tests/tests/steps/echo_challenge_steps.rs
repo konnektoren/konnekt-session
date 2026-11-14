@@ -1,8 +1,7 @@
 use cucumber::{given, then, when};
-use konnekt_session_core::domain::{ActivityMetadata, ActivityResult, ActivityStatus};
+use konnekt_session_core::domain::{ActivityConfig, ActivityResult, RunStatus};
 use konnekt_session_core::{DomainCommand, DomainEvent, EchoChallenge, EchoResult};
 use konnekt_session_tests::SessionWorld;
-use uuid::Uuid;
 
 // ===== Given Steps =====
 
@@ -11,14 +10,17 @@ async fn echo_challenge_planned(world: &mut SessionWorld, prompt: String) {
     let lobby_id = *world.lobby_ids.get("Test Lobby").expect("No lobby");
 
     let challenge = EchoChallenge::new(prompt.clone());
-    let metadata = ActivityMetadata::new(
+    let metadata = ActivityConfig::new(
         EchoChallenge::activity_type().to_string(),
         format!("Echo: {}", prompt),
         challenge.to_config(),
     );
     let activity_id = metadata.id;
 
-    let cmd = DomainCommand::PlanActivity { lobby_id, metadata };
+    let cmd = DomainCommand::QueueActivity {
+        lobby_id,
+        config: metadata,
+    };
 
     world.execute(cmd);
 
@@ -32,28 +34,22 @@ async fn echo_challenge_planned(world: &mut SessionWorld, prompt: String) {
 async fn echo_challenge_in_progress(world: &mut SessionWorld, prompt: String) {
     echo_challenge_planned(world, prompt.clone()).await;
 
-    let activity_id = *world
-        .lobby_ids
-        .get(&format!("Activity:{}", prompt))
-        .expect("No activity");
     let lobby_id = *world.lobby_ids.get("Test Lobby").expect("No lobby");
-
-    let cmd = DomainCommand::StartActivity {
-        lobby_id,
-        activity_id,
+    let run_id = match world.execute(DomainCommand::StartNextRun { lobby_id }) {
+        DomainEvent::RunStarted { run_id, .. } => *run_id,
+        event => panic!("Expected run start: {event:?}"),
     };
-
-    world.execute(cmd);
+    world.lobby_ids.insert(format!("Run:{}", prompt), run_id);
 }
 
 #[given(expr = "an Echo Challenge with prompt {string} is completed")]
 async fn echo_challenge_completed(world: &mut SessionWorld, prompt: String) {
     echo_challenge_in_progress(world, prompt.clone()).await;
 
-    let activity_id = *world
+    let run_id = *world
         .lobby_ids
-        .get(&format!("Activity:{}", prompt))
-        .expect("No activity");
+        .get(&format!("Run:{}", prompt))
+        .expect("No run");
     let lobby_id = *world.lobby_ids.get("Test Lobby").expect("No lobby");
     let host_id = *world.participant_ids.get("Host").expect("No host");
 
@@ -61,7 +57,8 @@ async fn echo_challenge_completed(world: &mut SessionWorld, prompt: String) {
     let result = EchoResult::new(prompt, 1000);
     let cmd = DomainCommand::SubmitResult {
         lobby_id,
-        result: ActivityResult::new(activity_id, host_id)
+        run_id,
+        result: ActivityResult::new(run_id, host_id)
             .with_data(result.to_json())
             .with_score(100)
             .with_time(1000),
@@ -75,14 +72,17 @@ async fn echo_challenge_with_time_limit(world: &mut SessionWorld, prompt: String
     let lobby_id = *world.lobby_ids.get("Test Lobby").expect("No lobby");
 
     let challenge = EchoChallenge::new(prompt.clone()).with_time_limit(time_limit);
-    let metadata = ActivityMetadata::new(
+    let metadata = ActivityConfig::new(
         EchoChallenge::activity_type().to_string(),
         format!("Echo: {}", prompt),
         challenge.to_config(),
     );
     let activity_id = metadata.id;
 
-    let cmd = DomainCommand::PlanActivity { lobby_id, metadata };
+    let cmd = DomainCommand::QueueActivity {
+        lobby_id,
+        config: metadata,
+    };
 
     world.execute(cmd);
     world
@@ -114,18 +114,19 @@ async fn submit_response(world: &mut SessionWorld, participant_name: String, res
         .event_loop
         .get_lobby(&lobby_id)
         .expect("Lobby not found");
-    let activity = lobby.current_activity().expect("No activity in progress");
-    let activity_id = activity.id;
+    let run_id = lobby.active_run_id().expect("No activity in progress");
+    let run = world.event_loop.get_run(&run_id).expect("No run");
 
     // Deserialize the challenge to calculate score
-    let challenge = EchoChallenge::from_config(activity.config.clone()).unwrap();
+    let challenge = EchoChallenge::from_config(run.config().config.clone()).unwrap();
     let score = challenge.calculate_score(&response);
 
     let result = EchoResult::new(response, 1000);
 
     let cmd = DomainCommand::SubmitResult {
         lobby_id,
-        result: ActivityResult::new(activity_id, participant_id)
+        run_id,
+        result: ActivityResult::new(run_id, participant_id)
             .with_data(result.to_json())
             .with_score(score)
             .with_time(1000),
@@ -158,17 +159,18 @@ async fn submit_response_with_time(
         .event_loop
         .get_lobby(&lobby_id)
         .expect("Lobby not found");
-    let activity = lobby.current_activity().expect("No activity in progress");
-    let activity_id = activity.id;
+    let run_id = lobby.active_run_id().expect("No activity in progress");
+    let run = world.event_loop.get_run(&run_id).expect("No run");
 
-    let challenge = EchoChallenge::from_config(activity.config.clone()).unwrap();
+    let challenge = EchoChallenge::from_config(run.config().config.clone()).unwrap();
     let score = challenge.calculate_score(&response);
 
     let result = EchoResult::new(response, time_ms);
 
     let cmd = DomainCommand::SubmitResult {
         lobby_id,
-        result: ActivityResult::new(activity_id, participant_id)
+        run_id,
+        result: ActivityResult::new(run_id, participant_id)
             .with_data(result.to_json())
             .with_score(score)
             .with_time(time_ms),
@@ -183,7 +185,7 @@ async fn try_submit_response(world: &mut SessionWorld, participant_name: String,
 }
 
 #[when("the activity config is serialized to JSON")]
-async fn serialize_config(world: &mut SessionWorld) {
+async fn serialize_config(_world: &mut SessionWorld) {
     // Challenge already stored in world.last_error as JSON
 }
 
@@ -200,7 +202,9 @@ async fn deserialize_config(world: &mut SessionWorld) {
 #[then(expr = "the activity type should be {string}")]
 async fn activity_type_is(world: &mut SessionWorld, expected_type: String) {
     match world.last_event() {
-        DomainEvent::ActivityPlanned { metadata, .. } => {
+        DomainEvent::ActivityQueued {
+            config: metadata, ..
+        } => {
             assert_eq!(metadata.activity_type, expected_type);
         }
         _ => panic!("Expected ActivityPlanned event"),
@@ -210,7 +214,9 @@ async fn activity_type_is(world: &mut SessionWorld, expected_type: String) {
 #[then(expr = "the activity name should be {string}")]
 async fn activity_name_is(world: &mut SessionWorld, expected_name: String) {
     match world.last_event() {
-        DomainEvent::ActivityPlanned { metadata, .. } => {
+        DomainEvent::ActivityQueued {
+            config: metadata, ..
+        } => {
             assert_eq!(metadata.name, expected_name);
         }
         _ => panic!("Expected ActivityPlanned event"),
@@ -223,14 +229,17 @@ async fn participant_receives_score(
     participant_name: String,
     expected_score: u32,
 ) {
-    match world.last_event() {
-        DomainEvent::ResultSubmitted { result, .. } => {
-            let participant_id = world.get_participant_id(&participant_name);
-            assert_eq!(result.participant_id, participant_id);
-            assert_eq!(result.score, Some(expected_score));
-        }
-        _ => panic!("Expected ResultSubmitted event"),
-    }
+    let participant_id = world.get_participant_id(&participant_name);
+    let result = match world.last_event() {
+        DomainEvent::ResultSubmitted { result, .. } => result,
+        DomainEvent::RunEnded { results, .. } => results
+            .iter()
+            .find(|r| r.participant_id == participant_id)
+            .expect("Missing participant result"),
+        event => panic!("Expected result event: {event:?}"),
+    };
+    assert_eq!(result.participant_id, participant_id);
+    assert_eq!(result.score, Some(expected_score));
 }
 
 #[then("the result should be recorded")]
@@ -238,6 +247,10 @@ async fn result_recorded(world: &mut SessionWorld) {
     assert!(matches!(
         world.last_event(),
         DomainEvent::ResultSubmitted { .. }
+            | DomainEvent::RunEnded {
+                status: RunStatus::Completed,
+                ..
+            }
     ));
 }
 
@@ -246,6 +259,10 @@ async fn result_accepted(world: &mut SessionWorld) {
     assert!(matches!(
         world.last_event(),
         DomainEvent::ResultSubmitted { .. }
+            | DomainEvent::RunEnded {
+                status: RunStatus::Completed,
+                ..
+            }
     ));
 }
 
@@ -255,24 +272,22 @@ async fn result_records_time(world: &mut SessionWorld, expected_time: u64) {
         DomainEvent::ResultSubmitted { result, .. } => {
             assert_eq!(result.time_taken_ms, Some(expected_time));
         }
+        DomainEvent::RunEnded { results, .. } => assert!(
+            results
+                .iter()
+                .any(|r| r.time_taken_ms == Some(expected_time))
+        ),
         _ => panic!("Expected ResultSubmitted event"),
     }
 }
 
 #[then(expr = r#"results from {string} should be preserved"#)]
 async fn results_preserved(world: &mut SessionWorld, activity_prompt: String) {
-    let lobby_id = *world.lobby_ids.get("Test Lobby").expect("No lobby");
-    let lobby = world
-        .event_loop
-        .get_lobby(&lobby_id)
-        .expect("Lobby not found");
-
-    let activity_id = *world
+    let run_id = *world
         .lobby_ids
-        .get(&format!("Activity:{}", activity_prompt))
-        .expect("No activity");
-
-    let results = lobby.get_results(activity_id);
+        .get(&format!("Run:{}", activity_prompt))
+        .expect("No run");
+    let results = world.event_loop.get_run(&run_id).expect("No run").results();
     assert!(
         !results.is_empty(),
         "Results from '{}' were not preserved",
@@ -284,7 +299,10 @@ async fn results_preserved(world: &mut SessionWorld, activity_prompt: String) {
 async fn new_activity_completes(world: &mut SessionWorld) {
     assert!(matches!(
         world.last_event(),
-        DomainEvent::ActivityCompleted { .. }
+        DomainEvent::RunEnded {
+            status: RunStatus::Completed,
+            ..
+        }
     ));
 }
 
@@ -299,6 +317,6 @@ async fn prompt_is(world: &mut SessionWorld, expected_prompt: String) {
 async fn activity_created(world: &mut SessionWorld) {
     assert!(matches!(
         world.last_event(),
-        DomainEvent::ActivityPlanned { .. }
+        DomainEvent::ActivityQueued { .. }
     ));
 }

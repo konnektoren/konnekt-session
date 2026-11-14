@@ -24,6 +24,10 @@ name = "preview"
 path = "src/bin/preview.rs"
 required-features = ["preview"]
 
+[[example]]
+name = "preview"
+required-features = ["preview"]
+
 [dependencies]
 # Core domain
 konnekt-session-core = { path = "../konnekt-session-core" }

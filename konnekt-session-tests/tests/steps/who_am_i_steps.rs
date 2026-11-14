@@ -76,6 +76,7 @@ async fn resolve_who_am_i_for(
         local_participant_id: Some(participant_id),
         local_peer_id: Some(peer_id),
         send_command: Rc::new(|_| {}),
+        runtime_error: None,
         local_participant_name: None, // explicit: identity should not rely on name tracking
     };
 
