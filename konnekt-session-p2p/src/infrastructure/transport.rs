@@ -247,6 +247,9 @@ impl<C: NetworkConnection> P2PTransport<C> {
                                 if !self.is_host {
                                     // Snapshot responses are authoritative from host.
                                     self.host_peer = Some(from);
+                                    // A restarted host may begin its sequence at zero again.
+                                    self.highest_received = as_of_sequence;
+                                    self.pending_messages.clear();
                                 }
                                 tracing::info!("📥 Received snapshot (seq: {})", as_of_sequence);
                                 self.pending_events.push(TransportEvent::SnapshotReceived {

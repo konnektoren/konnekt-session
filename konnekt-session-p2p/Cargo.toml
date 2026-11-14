@@ -19,7 +19,7 @@ konnekt-session-core = { path = "../konnekt-session-core" }
 matchbox_socket = { workspace = true }
 
 # Async runtime
-tokio = { workspace = true, features = ["sync", "time"], optional = true }
+tokio = { workspace = true, features = ["rt", "sync", "time"], optional = true }
 futures = { workspace = true }
 
 # Serialization

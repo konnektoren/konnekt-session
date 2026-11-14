@@ -56,6 +56,7 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
     pub fn poll(&mut self) -> usize {
         let mut processed = 0;
         let mut host_prebroadcast_submissions: HashSet<(Uuid, Uuid)> = HashSet::new();
+        let mut prebroadcast_leaves = HashSet::new();
 
         // 1. Handle transport events
         for event in self.transport.drain_events() {
@@ -134,6 +135,9 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
                         std::mem::discriminant(&cmd)
                     );
 
+                    if let DomainCommand::LeaveLobby { participant_id, .. } = &cmd {
+                        prebroadcast_leaves.insert(*participant_id);
+                    }
                     if let DomainCommand::SubmitResult { run_id, result, .. } = &cmd {
                         host_prebroadcast_submissions.insert((*run_id, result.participant_id));
                     }
@@ -167,20 +171,15 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
 
                 match &event {
                     // ✅ Skip events that came from guest commands (already broadcast in step 2)
-                    CoreDomainEvent::ResultSubmitted { .. } => {
-                        if let CoreDomainEvent::ResultSubmitted { run_id, result, .. } = &event {
-                            if host_prebroadcast_submissions
-                                .contains(&(*run_id, result.participant_id))
-                            {
-                                tracing::debug!(
-                                    "   ↳ Skipping ResultSubmitted (already broadcast guest command)"
-                                );
-                                continue;
-                            }
-                        }
+                    CoreDomainEvent::ResultSubmitted { run_id, result, .. }
+                        if host_prebroadcast_submissions
+                            .contains(&(*run_id, result.participant_id)) =>
+                    {
+                        continue;
                     }
-                    CoreDomainEvent::GuestLeft { .. } => {
-                        tracing::debug!("   ↳ Skipping GuestLeft (already broadcast)");
+                    CoreDomainEvent::GuestLeft { participant_id, .. }
+                        if prebroadcast_leaves.contains(participant_id) =>
+                    {
                         continue;
                     }
                     CoreDomainEvent::RunEnded { .. } => {
@@ -243,6 +242,14 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
                 .cloned()
                 .expect("Snapshot must have a host");
 
+            // A restarted host has a new domain; the guest must discard its stale lobby.
+            if self
+                .get_lobby()
+                .is_some_and(|lobby| lobby.host_id() != host_participant.id())
+            {
+                self.domain = DomainLoop::new(10, 100);
+            }
+
             // Create lobby with host
             let create_cmd = DomainCommand::CreateLobbyWithHost {
                 lobby_id: snapshot.lobby_id,
@@ -273,6 +280,10 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
     /// Translate domain event to command for guests
     fn event_to_command(&self, event: CoreDomainEvent) -> Option<DomainCommand> {
         match event {
+            CoreDomainEvent::GuestLeft { participant_id, .. } => Some(DomainCommand::LeaveLobby {
+                lobby_id: self.lobby_id,
+                participant_id,
+            }),
             CoreDomainEvent::GuestJoined { participant, .. } => {
                 Some(DomainCommand::AddParticipant {
                     lobby_id: self.lobby_id,
@@ -304,11 +315,7 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
                     result,
                 })
             }
-            CoreDomainEvent::RunEnded {
-                run_id: _,
-                results: _,
-                ..
-            } => {
+            CoreDomainEvent::RunEnded { .. } => {
                 // Guests auto-complete when they process all SubmitResult commands
                 None // Guest will auto-complete when they receive all results
             }

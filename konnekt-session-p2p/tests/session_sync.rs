@@ -221,3 +221,138 @@ fn test_activity_completion() {
     // After completion, active_run is cleared from lobby
     assert!(!fixture.host.get_lobby().unwrap().has_active_run());
 }
+
+#[test]
+fn host_removal_is_replicated_and_guest_can_join_again() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = SessionFixture::new(1);
+    fixture.tick(10);
+    fixture.guests[0].submit_command(DomainCommand::JoinLobby {
+        lobby_id: fixture.lobby_id,
+        guest_name: "Returning guest".into(),
+    })?;
+    fixture.tick(10);
+    let guest = fixture
+        .host
+        .get_lobby()
+        .ok_or("missing lobby")?
+        .participants()
+        .values()
+        .find(|p| !p.is_host())
+        .ok_or("missing guest")?
+        .id();
+    fixture.host.submit_command(DomainCommand::LeaveLobby {
+        lobby_id: fixture.lobby_id,
+        participant_id: guest,
+    })?;
+    fixture.tick(10);
+    assert_eq!(
+        fixture.guests[0]
+            .get_lobby()
+            .ok_or("missing guest lobby")?
+            .participants()
+            .len(),
+        1
+    );
+    fixture.guests[0].submit_command(DomainCommand::JoinLobby {
+        lobby_id: fixture.lobby_id,
+        guest_name: "Returning guest".into(),
+    })?;
+    fixture.tick(10);
+    assert_eq!(
+        fixture
+            .host
+            .get_lobby()
+            .ok_or("missing lobby")?
+            .participants(),
+        fixture.guests[0]
+            .get_lobby()
+            .ok_or("missing guest lobby")?
+            .participants()
+    );
+    Ok(())
+}
+
+#[test]
+fn guest_accepts_restarted_host_snapshot_and_new_sequence() -> Result<(), Box<dyn std::error::Error>>
+{
+    use konnekt_session_core::DomainLoop;
+    use konnekt_session_p2p::{SessionLoopV2, infrastructure::transport::P2PTransport};
+    use support::mock_connection::{MockConnection, create_mock_network};
+    let network = create_mock_network();
+    let lobby_id = uuid::Uuid::new_v4();
+    let host_connection = MockConnection::new(network.clone());
+    let old_peer = host_connection.local_peer_id().ok_or("missing host peer")?;
+    let make_host = |connection| -> Result<_, Box<dyn std::error::Error>> {
+        let mut domain = DomainLoop::new(10, 100);
+        domain.submit(DomainCommand::CreateLobby {
+            lobby_id: Some(lobby_id),
+            lobby_name: "Reload".into(),
+            host_name: "Host".into(),
+        })?;
+        domain.poll();
+        Ok(SessionLoopV2::new(
+            domain,
+            P2PTransport::new_host(connection, 100),
+            true,
+            lobby_id,
+        ))
+    };
+    let mut host = make_host(host_connection)?;
+    let mut guest = SessionLoopV2::new(
+        DomainLoop::new(10, 100),
+        P2PTransport::new_guest(MockConnection::new(network.clone()), 100),
+        false,
+        lobby_id,
+    );
+    for _ in 0..10 {
+        host.poll();
+        guest.poll();
+    }
+    guest.submit_command(DomainCommand::JoinLobby {
+        lobby_id,
+        guest_name: "Guest".into(),
+    })?;
+    for _ in 0..10 {
+        host.poll();
+        guest.poll();
+    }
+    let old_host = host.get_lobby().ok_or("missing lobby")?.host_id();
+    drop(host);
+    network
+        .lock()
+        .map_err(|_| "network lock poisoned")?
+        .peers
+        .remove(&old_peer);
+    let mut host = make_host(MockConnection::new(network.clone()))?;
+    for _ in 0..10 {
+        host.poll();
+        guest.poll();
+    }
+    assert_ne!(
+        guest.get_lobby().ok_or("missing guest lobby")?.host_id(),
+        old_host
+    );
+    guest.submit_command(DomainCommand::JoinLobby {
+        lobby_id,
+        guest_name: "Guest".into(),
+    })?;
+    for _ in 0..10 {
+        host.poll();
+        guest.poll();
+    }
+    assert_eq!(
+        host.get_lobby()
+            .ok_or("missing lobby")?
+            .participants()
+            .len(),
+        2
+    );
+    assert_eq!(
+        host.get_lobby().ok_or("missing lobby")?.participants(),
+        guest
+            .get_lobby()
+            .ok_or("missing guest lobby")?
+            .participants()
+    );
+    Ok(())
+}
