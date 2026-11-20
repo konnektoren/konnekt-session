@@ -4,6 +4,8 @@ use konnekt_session_bevy::{SessionCommand, SessionDomain, SessionEventLog, Sessi
 use konnekt_session_core::{
     DomainCommand, DomainEvent, DomainEventLoop, Lobby, LobbyRole, ParticipationMode,
 };
+use konnekt_session_rating::Placement;
+use konnekt_session_rating::prelude::{EloRating, Glicko2Rating};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -32,6 +34,45 @@ pub struct SessionWorld {
 
     /// Last who_am_i resolution (Yew identity function)
     pub last_who_am_i: Option<WhoAmIObservation>,
+
+    /// State of rating scenarios
+    pub rating: RatingWorld,
+}
+
+/// Which rating system a rating scenario uses.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RatingSystemKind {
+    #[default]
+    Glicko2,
+    Elo,
+}
+
+/// State of rating scenarios (`tests/features/rating`).
+#[derive(Debug, Default)]
+pub struct RatingWorld {
+    pub system: RatingSystemKind,
+    /// Players by name; falls back to lobby participants.
+    pub players: HashMap<String, Uuid>,
+    /// Current Glicko-2 ratings by name.
+    pub glicko2: HashMap<String, Glicko2Rating>,
+    /// Current Elo ratings by name.
+    pub elo: HashMap<String, EloRating>,
+    /// Displayed rating before the last rating, by name.
+    pub before: HashMap<String, f64>,
+    pub placement: Option<Placement>,
+    pub error: Option<String>,
+    /// Run of the rated test activity.
+    pub run_id: Option<Uuid>,
+}
+
+impl RatingWorld {
+    /// Displayed rating of a player in the current system.
+    pub fn value(&self, name: &str) -> Option<f64> {
+        match self.system {
+            RatingSystemKind::Glicko2 => self.glicko2.get(name).map(|rating| rating.rating),
+            RatingSystemKind::Elo => self.elo.get(name).map(|rating| rating.rating),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

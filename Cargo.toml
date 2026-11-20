@@ -6,6 +6,7 @@ members = [
     "konnekt-session-tests",
     "konnekt-session-cli",
     "konnekt-session-p2p",
+    "konnekt-session-rating",
     "konnekt-session-yew",
     "konnekt-session-bevy",
 ]
@@ -40,6 +41,9 @@ instant = { version = "0.1", features = ["wasm-bindgen"] }
 # Observability
 tracing-subscriber = { version = "0.3", default-features = false }
 console-subscriber = { version = "0.5" }
+
+# Rating algorithms
+skillratings = { version = "0.29", features = ["serde"] }
 
 # JSON Schema
 schemars = { version = "1.2", features = ["uuid1", "preserve_order"] }
