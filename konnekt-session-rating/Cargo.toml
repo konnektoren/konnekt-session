@@ -1,0 +1,40 @@
+[package]
+name = "konnekt-session-rating"
+description = "Game-independent skill rating for Konnekt Session"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = []
+schema = ["dep:schemars"]
+
+[dependencies]
+# Core domain
+konnekt-session-core = { path = "../konnekt-session-core" }
+
+# Serialization
+serde = { workspace = true }
+
+# Rating algorithms
+skillratings = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+thiserror = { workspace = true }
+
+# Schema (optional)
+schemars = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
