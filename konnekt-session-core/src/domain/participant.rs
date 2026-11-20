@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
 
+/// Identity of a participant in a lobby.
+pub type ParticipantId = Uuid;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LobbyRole {
     Host,
@@ -166,7 +169,7 @@ impl Participant {
         Ok(())
     }
 
-    pub fn id(&self) -> Uuid {
+    pub fn id(&self) -> ParticipantId {
         self.id
     }
 
