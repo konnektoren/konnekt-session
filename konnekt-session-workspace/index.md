@@ -26,9 +26,14 @@ Rust-based, decentralized multiplayer-lobby library. No central game server — 
 - [[concepts/p2p-signing|P2P Signing]] — Ed25519, every message signed by host
 - [[concepts/participation-modes|Participation Modes]] — Active vs Spectating (independent of role)
 
+## Protocols
+
+- [[protocols/index|Protocols]] — sans-IO state machines between players and services
+- [[protocols/rating-match|Rating Match]] — co-signed rounds and match record, forfeit, resume
+
 ## Decisions
 
-- [[adr/index|ADR Index]] — 23 architecture decision records
+- [[adr/index|ADR Index]] — 25 architecture decision records
 
 ## Links
 
