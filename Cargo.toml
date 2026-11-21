@@ -9,6 +9,7 @@ members = [
     "konnekt-session-rating",
     "konnekt-session-yew",
     "konnekt-session-bevy",
+    "konnekt-session-protocol-docs",
 ]
 
 # Shared workspace metadata

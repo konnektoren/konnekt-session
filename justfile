@@ -65,6 +65,10 @@ check: fmt-check lint test
 build:
     cargo build --workspace
 
+# Generate Mermaid diagrams from protocol state machines
+protocol-diagrams:
+    cargo run -p konnekt-session-protocol-docs
+
 # Build in release mode
 build-release:
     cargo build --workspace --release
