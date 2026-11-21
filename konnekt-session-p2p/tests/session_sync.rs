@@ -440,3 +440,105 @@ fn guest_reports_a_gap_until_missing_host_messages_arrive() -> Result<(), Box<dy
     assert_eq!(guest.synchronization_state(), Some(State::Current));
     Ok(())
 }
+
+#[test]
+fn guest_retries_missing_host_updates_and_requests_new_gaps()
+-> Result<(), Box<dyn std::error::Error>> {
+    use konnekt_session_core::DomainLoop;
+    use konnekt_session_p2p::SessionLoopV2;
+    use konnekt_session_p2p::application::ConnectionEvent;
+    use konnekt_session_p2p::infrastructure::message::{MessageKind, P2PMessage};
+    use konnekt_session_p2p::infrastructure::transport::P2PTransport;
+    use support::mock_connection::{MockConnection, create_mock_network};
+
+    let network = create_mock_network();
+    let mut host = MockConnection::new(network.clone());
+    let guest_connection = MockConnection::new(network);
+    let guest_id = guest_connection.local_peer_id().ok_or("missing guest")?;
+    let lobby_id = uuid::Uuid::new_v4();
+    let mut guest = SessionLoopV2::new(
+        DomainLoop::new(10, 100),
+        P2PTransport::new_guest(guest_connection, 10),
+        false,
+        lobby_id,
+    );
+    let participant = konnekt_session_core::Participant::new_host("Host".into())?;
+    let snapshot = P2PMessage::snapshot_response(
+        serde_json::json!({
+            "lobby_id": lobby_id, "name": "Lobby", "host_id": participant.id(), "participants": [participant],
+        }),
+        0,
+    );
+    host.send_to(guest_id, serde_json::to_vec(&snapshot)?)?;
+    guest.poll();
+    guest.poll();
+    host.poll_events();
+    let mut message = P2PMessage::application(serde_json::json!({}));
+    message.sequence = 3;
+    host.send_to(guest_id, serde_json::to_vec(&message)?)?;
+    guest.poll();
+    let requests = |events: Vec<ConnectionEvent>| -> Vec<(u64, u64)> {
+        events
+            .into_iter()
+            .filter_map(|event| {
+                let ConnectionEvent::MessageReceived { data, .. } = event else {
+                    return None;
+                };
+                let message: P2PMessage = serde_json::from_slice(&data).ok()?;
+                match message.kind {
+                    MessageKind::ResendRequest { from, to } => Some((from, to)),
+                    _ => None,
+                }
+            })
+            .collect()
+    };
+    assert_eq!(requests(host.poll_events()), vec![(1, 2)]);
+    for _ in 0..51 {
+        guest.poll();
+    }
+    assert_eq!(requests(host.poll_events()), vec![(1, 2)]);
+    message.sequence = 1;
+    host.send_to(guest_id, serde_json::to_vec(&message)?)?;
+    guest.poll();
+    assert_eq!(requests(host.poll_events()), vec![(2, 2)]);
+    Ok(())
+}
+
+#[test]
+fn guest_retries_a_lost_initial_snapshot_request() -> Result<(), Box<dyn std::error::Error>> {
+    use konnekt_session_core::DomainLoop;
+    use konnekt_session_p2p::SessionLoopV2;
+    use konnekt_session_p2p::application::ConnectionEvent;
+    use konnekt_session_p2p::infrastructure::message::{MessageKind, P2PMessage};
+    use konnekt_session_p2p::infrastructure::transport::P2PTransport;
+    use support::mock_connection::{MockConnection, create_mock_network};
+
+    let network = create_mock_network();
+    let mut host = MockConnection::new(network.clone());
+    let guest_connection = MockConnection::new(network);
+    let mut guest = SessionLoopV2::new(
+        DomainLoop::new(10, 100),
+        P2PTransport::new_guest(guest_connection, 10),
+        false,
+        uuid::Uuid::new_v4(),
+    );
+    let snapshot_requests = |events: Vec<ConnectionEvent>| {
+        events
+            .into_iter()
+            .filter(|event| {
+                let ConnectionEvent::MessageReceived { data, .. } = event else {
+                    return false;
+                };
+                serde_json::from_slice::<P2PMessage>(data)
+                    .is_ok_and(|message| matches!(message.kind, MessageKind::SnapshotRequest))
+            })
+            .count()
+    };
+    guest.poll();
+    assert_eq!(snapshot_requests(host.poll_events()), 1);
+    for _ in 0..51 {
+        guest.poll();
+    }
+    assert_eq!(snapshot_requests(host.poll_events()), 1);
+    Ok(())
+}

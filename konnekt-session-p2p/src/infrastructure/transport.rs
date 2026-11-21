@@ -80,6 +80,9 @@ pub struct P2PTransport<C: NetworkConnection> {
 
     /// Transport events (for SessionLoop)
     pending_events: Vec<TransportEvent>,
+
+    /// V2 drives resend requests from its synchronization protocol.
+    managed_recovery: bool,
 }
 
 impl<C: NetworkConnection> P2PTransport<C> {
@@ -95,6 +98,7 @@ impl<C: NetworkConnection> P2PTransport<C> {
             is_host: true,
             host_peer: None,
             pending_events: Vec::new(),
+            managed_recovery: false,
         }
     }
 
@@ -110,6 +114,7 @@ impl<C: NetworkConnection> P2PTransport<C> {
             is_host: false,
             host_peer: None,
             pending_events: Vec::new(),
+            managed_recovery: false,
         }
     }
 
@@ -327,7 +332,9 @@ impl<C: NetworkConnection> P2PTransport<C> {
             self.pending_messages.insert(sequence, (from, msg));
 
             // Request missing range
-            self.request_resend(self.highest_received + 1, sequence - 1);
+            if !self.managed_recovery {
+                self.request_resend(self.highest_received + 1, sequence - 1);
+            }
         }
         // else: duplicate/old message, ignore
     }
@@ -394,6 +401,20 @@ impl<C: NetworkConnection> P2PTransport<C> {
 
     pub(crate) fn has_sequence_gap(&self) -> bool {
         !self.pending_messages.is_empty()
+    }
+
+    pub(crate) fn use_managed_recovery(&mut self) {
+        self.managed_recovery = true;
+    }
+
+    pub(crate) fn missing_range(&self) -> Option<(u64, u64)> {
+        let first_buffered = self.pending_messages.keys().min().copied()?;
+        let from = self.highest_received.checked_add(1)?;
+        (from < first_buffered).then_some((from, first_buffered - 1))
+    }
+
+    pub(crate) fn request_missing_messages(&mut self, from: u64, to: u64) {
+        self.request_resend(from, to);
     }
 }
 

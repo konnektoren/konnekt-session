@@ -8,6 +8,8 @@ use konnekt_session_core::{DomainCommand, DomainEvent as CoreDomainEvent, Domain
 use std::collections::HashSet;
 use uuid::Uuid;
 
+const RECOVERY_RETRY_POLLS: u8 = 50;
+
 /// Unified session loop (translation layer between domain and transport)
 /// Generic over connection type to allow mocking in tests
 pub struct SessionLoopV2<C: NetworkConnection> {
@@ -27,16 +29,22 @@ pub struct SessionLoopV2<C: NetworkConnection> {
     join_connected: bool,
     join_retry_ticks: u8,
     synchronization: Option<DynamicStateSynchronization>,
+    recovery_retry_ticks: u8,
+    requested_gap: Option<(u64, u64)>,
+    snapshot_retry_ticks: u8,
 }
 
 impl<C: NetworkConnection> SessionLoopV2<C> {
     /// Create new session loop
     pub fn new(
         domain: DomainLoop,
-        transport: P2PTransport<C>,
+        mut transport: P2PTransport<C>,
         is_host: bool,
         lobby_id: Uuid,
     ) -> Self {
+        if !is_host {
+            transport.use_managed_recovery();
+        }
         Self {
             domain,
             transport,
@@ -47,6 +55,9 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             join_connected: false,
             join_retry_ticks: 0,
             synchronization: (!is_host).then(|| DynamicStateSynchronization::new(())),
+            recovery_retry_ticks: 0,
+            requested_gap: None,
+            snapshot_retry_ticks: 0,
         }
     }
 
@@ -87,6 +98,9 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         }
         self.join_connected = connected;
         self.join_retry_ticks = 0;
+        self.recovery_retry_ticks = 0;
+        self.requested_gap = None;
+        self.snapshot_retry_ticks = 0;
         let Some(join) = &mut self.join else { return };
         if connected {
             if let Some(sync) = &mut self.synchronization
@@ -124,6 +138,35 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         };
         if let Some(event) = event {
             let _ = sync.handle(event);
+        }
+        if sync.current_state() == StateSynchronizationState::Recovering {
+            let missing = self.transport.missing_range();
+            if let Some((from, to)) = missing
+                && (self.recovery_retry_ticks == 0 || missing != self.requested_gap)
+            {
+                self.transport.request_missing_messages(from, to);
+                self.requested_gap = missing;
+                self.recovery_retry_ticks = RECOVERY_RETRY_POLLS;
+            } else if self.recovery_retry_ticks > 0 {
+                self.recovery_retry_ticks -= 1;
+            }
+        } else {
+            self.recovery_retry_ticks = 0;
+            self.requested_gap = None;
+        }
+        if sync.current_state() == StateSynchronizationState::AwaitingSnapshot
+            && self.join_connected
+        {
+            if self.snapshot_retry_ticks == 0 {
+                if let Err(error) = self.transport.request_snapshot() {
+                    tracing::debug!(%error, "Unable to request synchronization snapshot");
+                }
+                self.snapshot_retry_ticks = RECOVERY_RETRY_POLLS;
+            } else {
+                self.snapshot_retry_ticks -= 1;
+            }
+        } else {
+            self.snapshot_retry_ticks = 0;
         }
     }
 
@@ -201,8 +244,7 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
                         tracing::info!("🟢 HOST: Peer {} connected - sending snapshot", peer_id);
                         self.send_snapshot_to_peer(peer_id);
                     } else {
-                        tracing::info!("🟢 GUEST: Connected to host - requesting snapshot");
-                        let _ = self.transport.request_snapshot();
+                        tracing::info!("🟢 GUEST: Connected to host");
                     }
                 }
                 TransportEvent::SnapshotRequested { from } => {

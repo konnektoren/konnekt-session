@@ -14,6 +14,13 @@ Multi-step protocols between players and services. Each protocol is a sans-IO st
 | [[rating-match\|Rating Match]] | draft | `konnekt-session-rating` | Two players co-sign every round and the match record; disconnect, forfeit, resume |
 | Matchmaking Search | planned | `konnekt-session-matchmaking` | Search, widening window, match found / no match / ghost offer, expiry |
 
+V2 requests a snapshot while awaiting initial synchronization. When it detects a
+sequence gap, it requests the missing range and retries while recovery is in
+progress. Retries are currently based on session polls, not elapsed time. If the
+host no longer has the missing messages, recovery can remain pending: snapshot
+fallback is not yet safe because snapshots do not contain complete run state.
+The synchronization machine does not authenticate host messages.
+
 ## Conventions
 
 - One file per protocol: scope, inputs, messages, state machine, states, events, flows, invariants, open questions.
