@@ -2,7 +2,7 @@ use cucumber::{World, given, then, when};
 use konnekt_session_core::{ActivityConfig, DomainCommand, DomainLoop};
 use konnekt_session_p2p::{
     ConnectionEvent, SessionLoopV2,
-    domain::PeerId,
+    domain::{MatchboxPeerId, PeerId, PeerRegistry},
     infrastructure::{
         error::{P2PError, Result},
         message::P2PMessage,
@@ -74,6 +74,8 @@ impl Fixture {
 struct SyncWorld {
     fixture: Option<Fixture>,
     request: Option<Uuid>,
+    grace: Option<(PeerRegistry, PeerId)>,
+    timed_out: Vec<PeerId>,
 }
 
 #[given("a guest has synchronized with the host")]
@@ -279,6 +281,58 @@ fn current(world: &mut SyncWorld) {
     } else {
         panic!("missing guest lobby");
     }
+}
+
+#[given("a connected peer enters the grace period")]
+fn peer_enters_grace(world: &mut SyncWorld) {
+    let peer = PeerId::new(MatchboxPeerId(Uuid::new_v4()));
+    let mut registry = PeerRegistry::with_grace_period(std::time::Duration::ZERO);
+    registry.add_peer(peer);
+    registry.mark_peer_disconnected(&peer);
+    world.grace = Some((registry, peer));
+}
+
+#[when("the peer reconnects before the grace period is checked")]
+fn peer_reconnects(world: &mut SyncWorld) {
+    let (registry, peer) = world
+        .grace
+        .as_mut()
+        .unwrap_or_else(|| panic!("missing peer"));
+    registry.add_peer(*peer);
+    world.timed_out = registry.check_grace_periods();
+}
+
+#[when("the disconnected peer's grace period expires")]
+fn peer_grace_expires(world: &mut SyncWorld) {
+    let (registry, _) = world
+        .grace
+        .as_mut()
+        .unwrap_or_else(|| panic!("missing peer"));
+    world.timed_out = registry.check_grace_periods();
+}
+
+#[then("the peer remains connected")]
+fn peer_remains_connected(world: &mut SyncWorld) {
+    let (registry, peer) = world
+        .grace
+        .as_ref()
+        .unwrap_or_else(|| panic!("missing peer"));
+    assert!(world.timed_out.is_empty());
+    assert!(
+        registry
+            .get_peer(peer)
+            .is_some_and(|p| !p.is_disconnected())
+    );
+}
+
+#[then("the peer is reported timed out once")]
+fn peer_times_out_once(world: &mut SyncWorld) {
+    let (registry, peer) = world
+        .grace
+        .as_mut()
+        .unwrap_or_else(|| panic!("missing peer"));
+    assert_eq!(world.timed_out, vec![*peer]);
+    assert!(registry.check_grace_periods().is_empty());
 }
 
 #[tokio::main]

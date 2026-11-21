@@ -12,6 +12,7 @@ Multi-step protocols between players and services. Each protocol is a sans-IO st
 |---|---|---|---|
 | [[activity-run\|Activity run]] | partial | `konnekt-session-core` | Complete or cancel started runs; queued activities remain outside the machine |
 | [[command-outcome\|Command outcome]] | partial | `konnekt-session-p2p` | Track host-local execution; guest outcomes remain planned |
+| [[peer-grace\|Peer grace period]] | partial | `konnekt-session-p2p` | Track disconnect, reconnect, and timeout in the legacy peer registry |
 | [[identity-verification\|Identity verification]] | partial | `konnekt-session-p2p` | Exchange peer-bound proofs; admission and authorization are not enforced |
 | State synchronization | partial | `konnekt-session-p2p` | Observe initial snapshot, detected gaps, recovery, and disconnects in V2 |
 | [[rating-match\|Rating Match]] | draft | `konnekt-session-rating` | Two players co-sign every round and the match record; disconnect, forfeit, resume |
@@ -93,6 +94,17 @@ stateDiagram-v2
     AwaitingProof --> Expired : timed_out
     AwaitingChallenge --> Cancelled : disconnected
     AwaitingProof --> Cancelled : disconnected
+```
+
+### Peer grace period
+
+```mermaid
+stateDiagram-v2
+    [*] --> Connected
+    TimedOut --> [*]
+    Connected --> Disconnected : disconnected
+    Disconnected --> Connected : reconnected
+    Disconnected --> TimedOut : grace_expired
 ```
 
 ### Join session

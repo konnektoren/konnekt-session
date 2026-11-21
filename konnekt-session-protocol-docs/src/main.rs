@@ -25,6 +25,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             include_str!(concat!(env!("OUT_DIR"), "/identity.mmd")),
         ),
         (
+            "Peer grace period",
+            "peer-grace",
+            include_str!(concat!(env!("OUT_DIR"), "/peer-grace.mmd")),
+        ),
+        (
             "Join session",
             "join-session",
             include_str!(concat!(env!("OUT_DIR"), "/join.mmd")),

@@ -1,4 +1,5 @@
 use crate::domain::PeerId;
+use crate::protocol::peer_grace::{DynamicPeerGrace, PeerGraceEvent};
 use instant::{Duration, Instant};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -63,20 +64,37 @@ impl PeerState {
 
     /// Mark as disconnected
     pub fn mark_disconnected(&mut self) {
-        self.status = ConnectionStatus::Disconnected {
-            since: Instant::now(),
-        };
+        if self.machine().handle(PeerGraceEvent::Disconnected).is_ok() {
+            self.status = ConnectionStatus::Disconnected {
+                since: Instant::now(),
+            };
+        }
     }
 
     /// Check if grace period has expired
     pub fn check_grace_period(&mut self, grace_period: Duration) -> bool {
         match self.status {
             ConnectionStatus::Disconnected { since } if since.elapsed() >= grace_period => {
-                self.status = ConnectionStatus::TimedOut;
-                true
+                if self.machine().handle(PeerGraceEvent::GraceExpired).is_ok() {
+                    self.status = ConnectionStatus::TimedOut;
+                    return true;
+                }
+                false
             }
             _ => false,
         }
+    }
+
+    // Reconstruct control state from the existing public connection status.
+    fn machine(&self) -> DynamicPeerGrace {
+        let mut machine = DynamicPeerGrace::new(());
+        if !matches!(self.status, ConnectionStatus::Connected) {
+            let _ = machine.handle(PeerGraceEvent::Disconnected);
+        }
+        if matches!(self.status, ConnectionStatus::TimedOut) {
+            let _ = machine.handle(PeerGraceEvent::GraceExpired);
+        }
+        machine
     }
 
     /// Check if peer is timed out
@@ -123,6 +141,13 @@ impl PeerRegistry {
 
     /// Add a new peer
     pub fn add_peer(&mut self, peer_id: PeerId) {
+        if let Some(peer) = self.peers.get_mut(&peer_id)
+            && matches!(peer.status, ConnectionStatus::Disconnected { .. })
+            && peer.machine().handle(PeerGraceEvent::Reconnected).is_ok()
+        {
+            *peer = PeerState::new();
+            return;
+        }
         self.peers.insert(peer_id, PeerState::new());
     }
 
@@ -254,6 +279,32 @@ mod tests {
             .unwrap()
             .check_grace_period(Duration::from_millis(0));
         assert_eq!(registry.peer_count(), 0); // No longer counted
+    }
+
+    #[test]
+    fn duplicate_disconnect_does_not_restart_grace_period() {
+        let mut peer = PeerState::new();
+        peer.mark_disconnected();
+        let first = peer.status;
+        peer.mark_disconnected();
+        assert_eq!(peer.status, first);
+        assert!(peer.check_grace_period(Duration::ZERO));
+        peer.mark_disconnected();
+        assert!(peer.is_timed_out());
+    }
+
+    #[test]
+    fn reconnect_during_grace_stops_timeout() {
+        let mut registry = PeerRegistry::with_grace_period(Duration::ZERO);
+        let peer = PeerId::new(matchbox_socket::PeerId(Uuid::new_v4()));
+        registry.add_peer(peer);
+        registry.mark_peer_disconnected(&peer);
+        registry.add_peer(peer);
+        assert!(registry.check_grace_periods().is_empty());
+        assert_eq!(
+            registry.get_peer(&peer).map(|p| p.status),
+            Some(ConnectionStatus::Connected)
+        );
     }
 
     #[test]
