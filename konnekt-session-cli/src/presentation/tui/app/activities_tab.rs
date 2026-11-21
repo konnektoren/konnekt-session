@@ -41,6 +41,12 @@ pub struct ActivitiesTab {
     is_host: bool,
 }
 
+impl Default for ActivitiesTab {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ActivitiesTab {
     pub fn new() -> Self {
         Self {
@@ -108,13 +114,10 @@ impl ActivitiesTab {
     fn handle_activity_input(&mut self, key: KeyCode) -> Option<UserAction> {
         match key {
             // 🔧 FIX: Check for 'x' BEFORE generic Char(c)
-            KeyCode::Char('x') if self.is_host => {
-                if let Some(activity) = &self.current_activity {
-                    Some(UserAction::CancelActivity(activity.id))
-                } else {
-                    None
-                }
-            }
+            KeyCode::Char('x') if self.is_host => self
+                .current_activity
+                .as_ref()
+                .map(|activity| UserAction::CancelActivity(activity.id)),
 
             KeyCode::Char(c) => {
                 self.activity_input.insert(self.cursor_position, c);
@@ -184,13 +187,10 @@ impl ActivitiesTab {
             }
 
             // Start activity (only when activities are planned but none running)
-            KeyCode::Char('s') if !self.planned_activities.is_empty() => {
-                if let Some(activity) = self.planned_activities.first() {
-                    Some(UserAction::StartActivity(activity.id))
-                } else {
-                    None
-                }
-            }
+            KeyCode::Char('s') if !self.planned_activities.is_empty() => self
+                .planned_activities
+                .first()
+                .map(|activity| UserAction::StartActivity(activity.id)),
 
             _ => None,
         }

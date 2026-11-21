@@ -430,7 +430,7 @@ mod tests {
 
     #[test]
     fn test_create_host_parsing() {
-        let cli = Cli::parse_from(&[
+        let cli = Cli::parse_from([
             "konnekt-cli",
             "create-host",
             "--name",
@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn test_join_parsing() {
         let session_id = "550e8400-e29b-41d4-a716-446655440000";
-        let cli = Cli::parse_from(&[
+        let cli = Cli::parse_from([
             "konnekt-cli",
             "join",
             "--session-id",
@@ -494,7 +494,7 @@ mod tests {
 
     #[test]
     fn test_create_host_with_seed_parsing() {
-        let cli = Cli::parse_from(&[
+        let cli = Cli::parse_from([
             "konnekt-cli",
             "create-host",
             "--name",

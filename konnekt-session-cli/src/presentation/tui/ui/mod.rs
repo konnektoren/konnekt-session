@@ -12,16 +12,6 @@ mod participants;
 mod results;
 mod session;
 
-use activities::render_activities;
-use events::render_events;
-use footer::render_footer;
-use header::render_header;
-use help::render_help;
-use lobby::render_lobby;
-use participants::render_participants;
-use results::render_results;
-use session::render_session;
-
 use super::app::Tab;
 use ratatui::layout::{Constraint, Direction, Layout};
 

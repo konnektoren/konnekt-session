@@ -2,6 +2,7 @@ use crossterm::event::KeyCode;
 use konnekt_session_core::Lobby;
 
 /// Lobby tab state (presentation only)
+#[derive(Default)]
 pub struct LobbyTab {
     lobby_name: Option<String>,
     participant_count: usize,

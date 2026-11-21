@@ -1,10 +1,10 @@
 use crossterm::event::KeyCode;
 use konnekt_session_core::Lobby;
-use uuid::Uuid;
 
 use crate::presentation::tui::app::UserAction;
 
 /// Participants tab state (presentation only)
+#[derive(Default)]
 pub struct ParticipantsTab {
     selected_participant: usize,
 }

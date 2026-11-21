@@ -1,4 +1,5 @@
 /// Help tab state (static content)
+#[derive(Default)]
 pub struct HelpTab;
 
 impl HelpTab {

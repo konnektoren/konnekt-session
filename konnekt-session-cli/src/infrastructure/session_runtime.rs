@@ -91,8 +91,8 @@ impl SessionRuntime {
     pub async fn submit_command(
         &self,
         cmd: DomainCommand,
-    ) -> Result<(), mpsc::error::SendError<DomainCommand>> {
-        self.cmd_tx.send(cmd).await
+    ) -> Result<(), Box<mpsc::error::SendError<DomainCommand>>> {
+        self.cmd_tx.send(cmd).await.map_err(Box::new)
     }
 
     /// Get latest state snapshot (always succeeds, never blocks)

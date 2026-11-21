@@ -8,6 +8,12 @@ pub struct EventsTab {
     max_events: usize,
 }
 
+impl Default for EventsTab {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EventsTab {
     pub fn new() -> Self {
         Self {

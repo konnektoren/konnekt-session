@@ -180,10 +180,7 @@ impl App {
         // Find our participant ID by matching role
         if self.local_participant_id.is_none() {
             for participant in lobby.participants().values() {
-                if self.is_host && participant.is_host() {
-                    self.local_participant_id = Some(participant.id());
-                    break;
-                } else if !self.is_host && !participant.is_host() {
+                if self.is_host == participant.is_host() {
                     self.local_participant_id = Some(participant.id());
                     break;
                 }

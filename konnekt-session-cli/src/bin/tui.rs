@@ -65,7 +65,7 @@ async fn main() -> Result<()> {
     #[cfg(not(feature = "console"))]
     let log_config = LogConfig::tui();
 
-    log_config.init().map_err(|e| CliError::InvalidInput(e))?;
+    log_config.init().map_err(CliError::InvalidInput)?;
 
     let cli = Cli::parse();
 
@@ -427,12 +427,12 @@ async fn handle_user_action(
             }
         }
         UserAction::Quit => {
-            if !app.is_host {
-                if let Some(participant_id) = app.get_local_participant_id() {
-                    let _ = cmd_tx
-                        .send(UserCommand::LeaveSession { participant_id })
-                        .await;
-                }
+            if !app.is_host
+                && let Some(participant_id) = app.get_local_participant_id()
+            {
+                let _ = cmd_tx
+                    .send(UserCommand::LeaveSession { participant_id })
+                    .await;
             }
         }
     }

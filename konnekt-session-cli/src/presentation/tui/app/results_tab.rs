@@ -21,6 +21,7 @@ pub struct ActivityResults {
 }
 
 /// Results tab state (presentation only)
+#[derive(Default)]
 pub struct ResultsTab {
     /// All completed activities with results
     completed_activities: Vec<ActivityResults>,
