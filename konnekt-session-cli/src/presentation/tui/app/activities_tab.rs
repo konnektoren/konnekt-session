@@ -342,7 +342,7 @@ mod tests {
         tab.update_is_host(false);
 
         let challenge = EchoChallenge::new("Test".to_string());
-        let metadata = ActivityMetadata::new(
+        let metadata = ActivityConfig::new(
             "echo-challenge-v1".to_string(),
             "Test Activity".to_string(),
             challenge.to_config(),
@@ -363,7 +363,7 @@ mod tests {
         tab.update_is_host(false);
 
         let challenge = EchoChallenge::new("Test".to_string());
-        let metadata = ActivityMetadata::new(
+        let metadata = ActivityConfig::new(
             "echo-challenge-v1".to_string(),
             "Test Activity".to_string(),
             challenge.to_config(),
@@ -382,7 +382,7 @@ mod tests {
         let mut tab = ActivitiesTab::new();
 
         let challenge = EchoChallenge::new("Test".to_string());
-        let metadata = ActivityMetadata::new(
+        let metadata = ActivityConfig::new(
             "echo-challenge-v1".to_string(),
             "Test Activity".to_string(),
             challenge.to_config(),
