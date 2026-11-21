@@ -3,7 +3,7 @@ title: Rating Match Protocol
 type: protocol
 tags: [protocol, rating, state-machine, signing, p2p]
 status: draft
-source: konnekt-session-rating (planned)
+source: konnekt-session-rating/src/protocol/rating_match.rs
 ---
 
 # Rating Match Protocol
@@ -52,36 +52,43 @@ All messages carry `match_id` and the protocol version. Every signature covers *
 
 ## State machine
 
+Generated from the `state_machine!` definition in `konnekt-session-rating/src/protocol/rating_match.rs` (`RatingMatch::schema().to_mermaid()`). The test `docs_diagram_matches_definition` fails if this block and the code differ, so edit the code, not the diagram.
+
+- `Active` is a superstate (Playing, SigningRound, SigningMatch). `opponent_left` leaves it from any substate.
+- `opponent_rejoined` re-enters `Active` with **deep history**, i.e. back into the exact substate that was left.
+- `round_signed` and `rejoin_timeout` are branching events: the first transition whose guard passes wins, the unguarded one is the fallback.
+- Guard input comes from event payloads: `RoundSigned { round }` and `RejoinTimedOut { signed_rounds }`.
+
+%% generated: RatingMatch — do not edit by hand %%
 ```mermaid
 stateDiagram-v2
-    [*] --> ExchangingSnapshots: start
-
-    ExchangingSnapshots --> Playing: snapshots_verified
-    ExchangingSnapshots --> Aborted: snapshot_timeout
-    ExchangingSnapshots --> Aborted: snapshot_rejected
-
-    Playing --> SigningRound: round_finished
-    SigningRound --> Playing: round_signed [rounds left]
-    SigningRound --> SigningMatch: round_signed [last round]
-    SigningRound --> Disagreement: round_mismatch
-
-    Playing --> WaitingForOpponent: opponent_left
-    SigningRound --> WaitingForOpponent: opponent_left / signature_timeout
-    SigningMatch --> WaitingForOpponent: opponent_left / signature_timeout
-
-    WaitingForOpponent --> Playing: opponent_rejoined
-    WaitingForOpponent --> SigningRound: opponent_rejoined [round unsigned]
-    WaitingForOpponent --> SigningMatch: opponent_rejoined [match unsigned]
-    WaitingForOpponent --> Forfeited: rejoin_timeout [has signed round]
-    WaitingForOpponent --> Aborted: rejoin_timeout [no signed round]
-
-    SigningMatch --> Rated: match_signed
-    SigningMatch --> Disagreement: match_mismatch
-
+    [*] --> ExchangingSnapshots
     Rated --> [*]
     Forfeited --> [*]
     Disagreement --> [*]
     Aborted --> [*]
+    ExchangingSnapshots --> Playing : snapshots_verified
+    ExchangingSnapshots --> Aborted : snapshot_rejected
+    ExchangingSnapshots --> Aborted : snapshot_timeout
+    Playing --> SigningRound : round_finished
+    SigningRound --> Playing : round_signed [rounds_left]
+    SigningRound --> SigningMatch : round_signed
+    SigningRound --> Disagreement : round_mismatch
+    SigningMatch --> Rated : match_signed
+    SigningMatch --> Disagreement : match_mismatch
+    Active --> WaitingForOpponent : opponent_left
+    SigningRound --> WaitingForOpponent : signature_timeout
+    SigningMatch --> WaitingForOpponent : signature_timeout
+    WaitingForOpponent --> Active : opponent_rejoined
+    WaitingForOpponent --> Forfeited : rejoin_timeout [has_signed_round]
+    WaitingForOpponent --> Aborted : rejoin_timeout
+
+    state Active {
+        [*] --> Playing
+        Playing
+        SigningRound
+        SigningMatch
+    }
 ```
 
 ### States
@@ -109,14 +116,14 @@ Context (in all states): `match_id`, `rating_key`, players, round count, co-sign
 | `snapshot_rejected` | `ExchangingSnapshots` → `Aborted` | signature invalid, wrong key, rewind/fork detected | send `Abort` |
 | `snapshot_timeout` | `ExchangingSnapshots` → `Aborted` | 30 s | send `Abort` |
 | `round_finished` | `Playing` → `SigningRound` | — | build `RoundRecord`, sign, send `RoundSignature` |
-| `round_signed` | `SigningRound` → `Playing` / `SigningMatch` | opponent hash = own hash; rounds left or not | store co-signed round; on last round build + sign + send `MatchRecord` |
+| `round_signed(RoundSigned)` | `SigningRound` → `Playing` / `SigningMatch` | opponent hash = own hash (checked by the service); `rounds_left` picks `Playing` | store co-signed round; on last round build + sign + send `MatchRecord` |
 | `round_mismatch` | `SigningRound` → `Disagreement` | opponent hash ≠ own hash | send `Abort` |
 | `match_signed` | `SigningMatch` → `Rated` | opponent hash = own hash, append succeeded | append to history (compare head), update last seen, delete pending match |
 | `match_mismatch` | `SigningMatch` → `Disagreement` | opponent hash ≠ own hash | send `Abort` |
-| `opponent_left` | `Playing` / `SigningRound` / `SigningMatch` → `WaitingForOpponent` | transport reports disconnect | start rejoin deadline |
+| `opponent_left` | `Active` (any substate) → `WaitingForOpponent` | transport reports disconnect | start rejoin deadline |
 | `signature_timeout` | `SigningRound` / `SigningMatch` → `WaitingForOpponent` | 30 s without the opponent's signature | start rejoin deadline |
-| `opponent_rejoined` | `WaitingForOpponent` → previous state | `Resume` received | send missing signatures |
-| `rejoin_timeout` | `WaitingForOpponent` → `Forfeited` / `Aborted` | 60 s; at least one co-signed round → `Forfeited` | write forfeit record, own signature only |
+| `opponent_rejoined` | `WaitingForOpponent` → `Active` (deep history: previous substate) | `Resume` received | send missing signatures |
+| `rejoin_timeout(RejoinTimedOut)` | `WaitingForOpponent` → `Forfeited` / `Aborted` | 60 s; `has_signed_round` picks `Forfeited` | write forfeit record, own signature only |
 
 Timeouts are proposals; they come from config, not constants.
 

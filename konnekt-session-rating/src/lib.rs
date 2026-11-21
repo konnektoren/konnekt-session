@@ -8,6 +8,7 @@
 pub mod domain;
 pub mod error;
 pub mod game;
+pub mod protocol;
 pub mod system;
 
 pub use domain::{Placement, RatingKey};

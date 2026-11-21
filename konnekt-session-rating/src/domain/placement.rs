@@ -152,7 +152,10 @@ mod tests {
         let (a, b) = players();
         let placement = Placement::win(a, b).unwrap();
         let json = serde_json::to_string(&placement).unwrap();
-        assert_eq!(json, serde_json::to_string(&vec![vec![a], vec![b]]).unwrap());
+        assert_eq!(
+            json,
+            serde_json::to_string(&vec![vec![a], vec![b]]).unwrap()
+        );
         assert_eq!(serde_json::from_str::<Placement>(&json).unwrap(), placement);
     }
 

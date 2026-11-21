@@ -28,6 +28,9 @@ serde = { workspace = true }
 # Rating algorithms
 skillratings = { workspace = true }
 
+# Protocol state machines (ADR-0025)
+state-machines = { workspace = true }
+
 # Utilities
 uuid = { workspace = true }
 thiserror = { workspace = true }

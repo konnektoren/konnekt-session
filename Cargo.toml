@@ -44,6 +44,7 @@ console-subscriber = { version = "0.5" }
 
 # Rating algorithms
 skillratings = { version = "0.29", features = ["serde"] }
+state-machines = { version = "0.35", default-features = false, features = ["std"] }
 
 # JSON Schema
 schemars = { version = "1.2", features = ["uuid1", "preserve_order"] }
