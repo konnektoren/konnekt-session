@@ -14,7 +14,7 @@ members = [
 
 # Shared workspace metadata
 [workspace.package]
-version = "0.6.2"
+version = "0.6.3"
 edition = "2024"
 authors = ["Konnekt Session Contributors"]
 license = "MIT"
