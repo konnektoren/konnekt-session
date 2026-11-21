@@ -25,7 +25,17 @@ impl P2PTransportBuilder {
         signalling_server: &str,
         ice_servers: Vec<IceServer>,
     ) -> Result<(P2PTransport<MatchboxConnection>, SessionId, Uuid)> {
-        let session_id = SessionId::new();
+        self.build_host_with_session_id(signalling_server, SessionId::new(), ice_servers)
+            .await
+    }
+
+    /// Build a host transport for a specified session ID.
+    pub async fn build_host_with_session_id(
+        self,
+        signalling_server: &str,
+        session_id: SessionId,
+        ice_servers: Vec<IceServer>,
+    ) -> Result<(P2PTransport<MatchboxConnection>, SessionId, Uuid)> {
         let lobby_id = session_id.inner();
 
         let room_url = format!("{}/{}", signalling_server, session_id.as_str());

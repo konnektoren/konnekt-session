@@ -45,12 +45,31 @@ impl SessionLoopV2Builder {
         lobby_name: String,
         host_name: String,
     ) -> Result<(MatchboxSessionLoop, SessionId)> {
+        self.build_host_with_session_id(
+            signalling_server,
+            SessionId::new(),
+            ice_servers,
+            lobby_name,
+            host_name,
+        )
+        .await
+    }
+
+    /// Build a host with a specified session ID.
+    pub async fn build_host_with_session_id(
+        self,
+        signalling_server: &str,
+        session_id: SessionId,
+        ice_servers: Vec<IceServer>,
+        lobby_name: String,
+        host_name: String,
+    ) -> Result<(MatchboxSessionLoop, SessionId)> {
         tracing::info!("🎯 Building SessionLoopV2 as HOST");
 
         // 1. Create P2P transport
         let (transport, session_id, lobby_id) = P2PTransportBuilder::new()
             .cache_size(self.cache_size)
-            .build_host(signalling_server, ice_servers)
+            .build_host_with_session_id(signalling_server, session_id, ice_servers)
             .await?;
 
         // 2. Create domain layer

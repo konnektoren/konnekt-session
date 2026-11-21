@@ -459,6 +459,10 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         self.transport.connected_peers()
     }
 
+    pub fn local_peer_id(&self) -> Option<crate::domain::PeerId> {
+        self.transport.local_peer_id()
+    }
+
     pub fn get_active_run(&self) -> Option<&konnekt_session_core::ActivityRun> {
         let run_id = self.get_lobby()?.active_run_id()?;
         self.domain.event_loop().get_run(&run_id)
