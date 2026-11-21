@@ -2,6 +2,7 @@
 
 mod placement_steps;
 mod rated_game_steps;
+mod rating_match_steps;
 mod rating_system_steps;
 
 use konnekt_session_tests::SessionWorld;

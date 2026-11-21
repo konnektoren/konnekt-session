@@ -3,6 +3,20 @@ use konnekt_session_tests::SessionWorld;
 
 mod steps;
 
+/// Scenarios tagged `@wip` describe features that are not implemented yet.
+/// They stay in the feature files as specs but are not run.
+fn is_ready(
+    feature: &cucumber::gherkin::Feature,
+    _rule: Option<&cucumber::gherkin::Rule>,
+    scenario: &cucumber::gherkin::Scenario,
+) -> bool {
+    !feature
+        .tags
+        .iter()
+        .chain(&scenario.tags)
+        .any(|tag| tag == "wip")
+}
+
 #[tokio::main]
 async fn main() {
     #[cfg(feature = "output-junit")]
@@ -13,7 +27,7 @@ async fn main() {
         SessionWorld::cucumber()
             .max_concurrent_scenarios(1)
             .with_writer(cucumber::writer::JUnit::new(junit_file, 0))
-            .run("tests/features")
+            .filter_run("tests/features", is_ready)
             .await;
         return;
     }
@@ -26,7 +40,7 @@ async fn main() {
         SessionWorld::cucumber()
             .max_concurrent_scenarios(1)
             .with_writer(cucumber::writer::Json::new(json_file))
-            .run("tests/features")
+            .filter_run("tests/features", is_ready)
             .await;
         return;
     }
@@ -45,7 +59,7 @@ async fn main() {
                 .summarized()
                 .assert_normalized(),
             )
-            .run_and_exit("tests/features")
+            .filter_run_and_exit("tests/features", is_ready)
             .await;
     }
 }

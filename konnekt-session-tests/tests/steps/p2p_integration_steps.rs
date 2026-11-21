@@ -142,35 +142,50 @@ async fn event_has_sequence_number(_world: &mut SessionWorld) {
     // This is tested in P2P layer unit tests
 }
 
-#[then("a JoinLobby command should be queued")]
-async fn join_lobby_command_queued(world: &mut SessionWorld) {
-    assert!(world.last_command.is_some(), "No command was translated");
-
-    match world.last_command.as_ref().unwrap() {
-        DomainCommand::JoinLobby { .. } => {}
-        other => panic!("Expected JoinLobby, got: {:?}", other),
+/// Peers add the joined participant as-is (`AddParticipant`), so every peer
+/// keeps the same participant ID. `JoinLobby` would create a new one.
+#[then("an AddParticipant command should be queued")]
+async fn add_participant_command_queued(world: &mut SessionWorld) {
+    match world.last_command.as_ref() {
+        Some(DomainCommand::AddParticipant { .. }) => {}
+        other => panic!("Expected AddParticipant, got: {:?}", other),
     }
 }
 
 #[then("the command should have the correct lobby ID")]
 async fn command_has_correct_lobby_id(world: &mut SessionWorld) {
     let expected_lobby_id = world.get_or_create_lobby_id();
-
     match world.last_command.as_ref().unwrap() {
-        DomainCommand::JoinLobby { lobby_id, .. } => {
+        DomainCommand::AddParticipant { lobby_id, .. } => {
             assert_eq!(*lobby_id, expected_lobby_id);
         }
-        _ => panic!("Expected JoinLobby command"),
+        other => panic!("Expected AddParticipant command, got: {:?}", other),
+    }
+}
+
+#[then("the command should keep the participant ID from P2P")]
+async fn command_keeps_participant_id(world: &mut SessionWorld) {
+    let json = world.last_error.as_ref().expect("No P2P event");
+    let Ok(P2PDomainEvent::GuestJoined { participant: sent }) =
+        serde_json::from_str::<P2PDomainEvent>(json)
+    else {
+        panic!("Expected GuestJoined P2P event");
+    };
+    match world.last_command.as_ref().unwrap() {
+        DomainCommand::AddParticipant { participant, .. } => {
+            assert_eq!(participant.id(), sent.id());
+        }
+        other => panic!("Expected AddParticipant command, got: {:?}", other),
     }
 }
 
 #[then(expr = "the resulting command should contain {string}")]
 async fn command_contains_name(world: &mut SessionWorld, name: String) {
     match world.last_command.as_ref().unwrap() {
-        DomainCommand::JoinLobby { guest_name, .. } => {
-            assert_eq!(guest_name, &name);
+        DomainCommand::AddParticipant { participant, .. } => {
+            assert_eq!(participant.name(), name);
         }
-        _ => panic!("Expected JoinLobby command"),
+        other => panic!("Expected AddParticipant command, got: {:?}", other),
     }
 }
 
@@ -196,9 +211,20 @@ async fn peers_receive_host_delegated(world: &mut SessionWorld) {
     }
 }
 
+/// Translates the broadcast P2P event back into the command a peer would run.
+fn peer_command(world: &mut SessionWorld) -> Option<DomainCommand> {
+    let lobby_id = world.get_or_create_lobby_id();
+    let json = world
+        .last_error
+        .as_ref()
+        .expect("No P2P event was broadcast");
+    let p2p_event: P2PDomainEvent = serde_json::from_str(json).unwrap();
+    EventTranslator::new(lobby_id).to_domain_command(&p2p_event)
+}
+
 #[then("peers should translate to DelegateHost command")]
 async fn peers_translate_to_delegate_host(world: &mut SessionWorld) {
-    match world.last_command.as_ref() {
+    match peer_command(world) {
         Some(DomainCommand::DelegateHost { .. }) => {}
         other => panic!("Expected DelegateHost command, got: {:?}", other),
     }
@@ -217,10 +243,12 @@ async fn peers_receive_participation_mode_changed(world: &mut SessionWorld) {
     }
 }
 
-#[then("peers should translate to ToggleParticipationMode command")]
-async fn peers_translate_to_toggle_participation(world: &mut SessionWorld) {
-    match world.last_command.as_ref() {
-        Some(DomainCommand::ToggleParticipationMode { .. }) => {}
-        other => panic!("Expected ToggleParticipationMode command, got: {:?}", other),
+/// Peers apply the already-validated mode (`UpdateParticipantMode`);
+/// `ToggleParticipationMode` is the local, permission-checked request.
+#[then("peers should translate to UpdateParticipantMode command")]
+async fn peers_translate_to_update_participant_mode(world: &mut SessionWorld) {
+    match peer_command(world) {
+        Some(DomainCommand::UpdateParticipantMode { .. }) => {}
+        other => panic!("Expected UpdateParticipantMode command, got: {:?}", other),
     }
 }

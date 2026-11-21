@@ -21,7 +21,7 @@ konnekt-session-p2p = { path = "../konnekt-session-p2p" }
 konnekt-session-bevy = { path = "../konnekt-session-bevy" }
 konnekt-session-yew = { path = "../konnekt-session-yew" }
 konnekt-session-rating = { path = "../konnekt-session-rating" }
-cucumber = { version = "0.22" }
+cucumber = { version = "0.23" }
 tokio = { version = "1.37", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 bevy_app = { workspace = true }

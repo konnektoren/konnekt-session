@@ -16,8 +16,9 @@ Feature: P2P and Core Domain Integration
   Scenario: P2P event is translated to domain command
     Given a GuestJoined event is received from P2P
     When the P2P loop polls
-    Then a JoinLobby command should be queued
+    Then an AddParticipant command should be queued
     And the command should have the correct lobby ID
+    And the command should keep the participant ID from P2P
 
   Scenario: Roundtrip translation preserves data
     Given a core GuestJoined event for "Alice"
@@ -39,4 +40,4 @@ Feature: P2P and Core Domain Integration
     Given a core ParticipationModeChanged event
     When the event is broadcast via P2P
     Then peers should receive ParticipationModeChanged
-    And peers should translate to ToggleParticipationMode command
+    And peers should translate to UpdateParticipantMode command

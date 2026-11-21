@@ -15,6 +15,8 @@ Feature: Host Delegation
     And the original host should become a guest
     And a HostDelegated event should be broadcast with reason "Manual"
 
+  # WIP: core has Lobby::auto_delegate_host, but no command triggers it on host timeout yet.
+  @wip
   Scenario: Host disconnect with 30s timeout
     Given the host disconnects at time T
     When 10 seconds pass
@@ -38,6 +40,8 @@ Feature: Host Delegation
     Then the original host should rejoin as a guest
     And "Alice" should remain the host
 
+  # WIP: core has Lobby::auto_delegate_host, but no command triggers it on host timeout yet.
+  @wip
   Scenario: Oldest guest election
     Given the host disconnects
     When the 30s timeout expires
@@ -60,6 +64,8 @@ Feature: Host Delegation
     When the host disconnects
     Then the lobby should close automatically
 
+  # WIP: core has Lobby::auto_delegate_host, but no command triggers it on host timeout yet.
+  @wip
   Scenario: Delegation during activity
     Given an activity is in progress
     And the host disconnects

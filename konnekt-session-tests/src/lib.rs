@@ -6,6 +6,7 @@ use konnekt_session_core::{
 };
 use konnekt_session_rating::Placement;
 use konnekt_session_rating::prelude::{EloRating, Glicko2Rating};
+use konnekt_session_rating::protocol::DynamicRatingMatch;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -63,6 +64,16 @@ pub struct RatingWorld {
     pub error: Option<String>,
     /// Run of the rated test activity.
     pub run_id: Option<Uuid>,
+    /// Rating match protocol under test (`rating_match.feature`).
+    pub protocol: Option<RatingMatchUnderTest>,
+}
+
+/// One player's rating match state machine plus the data its caller owns.
+#[derive(Debug)]
+pub struct RatingMatchUnderTest {
+    pub machine: DynamicRatingMatch,
+    /// Rounds co-signed so far; the caller owns this, the machine gets it as payload.
+    pub signed_rounds: u8,
 }
 
 impl RatingWorld {
