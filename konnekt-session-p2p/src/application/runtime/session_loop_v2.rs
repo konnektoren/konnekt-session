@@ -80,6 +80,9 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             let _ = join.handle(JoinSessionEvent::Connected);
         } else {
             let _ = join.handle(JoinSessionEvent::Disconnected);
+            if self.join_participant.is_some() {
+                self.domain = DomainLoop::new(10, 100);
+            }
         }
     }
 
@@ -94,7 +97,6 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         let Some(join) = &mut self.join else { return };
         if admitted {
             let event = match join.current_state() {
-                JoinSessionState::Joining => Some(JoinSessionEvent::Admitted),
                 JoinSessionState::AwaitingAdmission => Some(JoinSessionEvent::AdmissionConfirmed),
                 _ => None,
             };
