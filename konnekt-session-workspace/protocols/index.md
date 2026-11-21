@@ -10,6 +10,7 @@ Multi-step protocols between players and services. Each protocol is a sans-IO st
 
 | Protocol | Status | Crate | Summary |
 |---|---|---|---|
+| [[activity-run\|Activity run]] | partial | `konnekt-session-core` | Complete or cancel started runs; queued activities remain outside the machine |
 | [[command-outcome\|Command outcome]] | partial | `konnekt-session-p2p` | Track host-local execution; guest outcomes remain planned |
 | [[identity-verification\|Identity verification]] | partial | `konnekt-session-p2p` | Exchange peer-bound proofs; admission and authorization are not enforced |
 | State synchronization | partial | `konnekt-session-p2p` | Observe initial snapshot, detected gaps, recovery, and disconnects in V2 |
@@ -34,6 +35,17 @@ The synchronization machine does not authenticate host messages.
 ## Generated state machines
 
 Run `just protocol-diagrams` to update these diagrams.
+
+### Activity run
+
+```mermaid
+stateDiagram-v2
+    [*] --> InProgress
+    Completed --> [*]
+    Cancelled --> [*]
+    InProgress --> Completed : completed
+    InProgress --> Cancelled : cancelled
+```
 
 ### Command outcome
 

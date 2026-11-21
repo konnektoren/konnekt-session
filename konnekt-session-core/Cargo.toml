@@ -18,6 +18,7 @@ thiserror = { workspace = true }
 instant = { workspace = true }
 schemars = { workspace = true }
 tracing = { workspace = true }
+state-machines = { workspace = true }
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true, features = ["env-filter", "json", "fmt"] }

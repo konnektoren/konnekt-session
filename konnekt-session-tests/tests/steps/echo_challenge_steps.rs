@@ -104,6 +104,7 @@ async fn plan_echo_challenge(world: &mut SessionWorld, prompt: String) {
     echo_challenge_planned(world, prompt).await;
 }
 
+#[given(expr = r#"{string} has submitted response {string}"#)]
 #[when(expr = r#"{string} submits response {string}"#)]
 async fn submit_response(world: &mut SessionWorld, participant_name: String, response: String) {
     let lobby_id = *world.lobby_ids.get("Test Lobby").expect("No lobby");
@@ -319,4 +320,32 @@ async fn activity_created(world: &mut SessionWorld) {
         world.last_event(),
         DomainEvent::ActivityQueued { .. }
     ));
+}
+
+#[when("the host cancels the current Echo Challenge")]
+async fn cancel_echo_challenge(world: &mut SessionWorld) {
+    let lobby_id = *world.lobby_ids.get("Test Lobby").expect("No lobby");
+    let run_id = world
+        .event_loop
+        .get_lobby(&lobby_id)
+        .expect("No lobby")
+        .active_run_id()
+        .expect("No active run");
+    world.execute(DomainCommand::CancelRun { lobby_id, run_id });
+}
+
+#[then("the Echo Challenge is cancelled with Alice's result")]
+async fn echo_cancelled_with_result(world: &mut SessionWorld) {
+    let alice = world.get_participant_id("Alice");
+    match world.last_event() {
+        DomainEvent::RunEnded {
+            status: RunStatus::Cancelled,
+            results,
+            ..
+        } => {
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].participant_id, alice);
+        }
+        event => panic!("Expected cancelled run: {event:?}"),
+    }
 }

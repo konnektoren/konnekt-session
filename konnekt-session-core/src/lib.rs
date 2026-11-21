@@ -1,6 +1,7 @@
 pub mod activities;
 pub mod application;
 pub mod domain;
+pub mod protocol;
 
 pub use activities::{EchoChallenge, EchoResult};
 

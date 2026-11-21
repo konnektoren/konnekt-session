@@ -1,4 +1,7 @@
 use crate::domain::{ActivityConfig, ActivityResult};
+use crate::protocol::activity_run::{
+    ActivityRunLifecycleEvent, ActivityRunLifecycleState, DynamicActivityRunLifecycle,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -102,7 +105,7 @@ impl ActivityRun {
         self.results.insert(participant_id, result);
 
         if self.all_submitted() {
-            self.status = RunStatus::Completed;
+            self.transition(ActivityRunLifecycleEvent::Completed)?;
             return Ok(true);
         }
 
@@ -119,12 +122,12 @@ impl ActivityRun {
         self.required_submitters.remove(&participant_id);
 
         if self.required_submitters.is_empty() {
-            self.status = RunStatus::Cancelled;
+            self.transition(ActivityRunLifecycleEvent::Cancelled)?;
             return Ok(true);
         }
 
         if self.all_submitted() {
-            self.status = RunStatus::Completed;
+            self.transition(ActivityRunLifecycleEvent::Completed)?;
             return Ok(true);
         }
 
@@ -135,7 +138,29 @@ impl ActivityRun {
         if self.status != RunStatus::InProgress {
             return Err(ActivityRunError::NotInProgress);
         }
-        self.status = RunStatus::Cancelled;
+        self.transition(ActivityRunLifecycleEvent::Cancelled)
+    }
+
+    // Reconstruct from the serialized status to keep the existing wire format.
+    fn transition(&mut self, event: ActivityRunLifecycleEvent) -> Result<(), ActivityRunError> {
+        let mut machine = DynamicActivityRunLifecycle::new(());
+        match self.status {
+            RunStatus::InProgress => {}
+            RunStatus::Completed => {
+                let _ = machine.handle(ActivityRunLifecycleEvent::Completed);
+            }
+            RunStatus::Cancelled => {
+                let _ = machine.handle(ActivityRunLifecycleEvent::Cancelled);
+            }
+        }
+        machine
+            .handle(event)
+            .map_err(|_| ActivityRunError::NotInProgress)?;
+        self.status = match machine.current_state() {
+            ActivityRunLifecycleState::InProgress => RunStatus::InProgress,
+            ActivityRunLifecycleState::Completed => RunStatus::Completed,
+            ActivityRunLifecycleState::Cancelled => RunStatus::Cancelled,
+        };
         Ok(())
     }
 
@@ -163,6 +188,21 @@ mod tests {
             config,
             participants.into_iter().collect(),
         )
+    }
+
+    #[test]
+    fn serialized_terminal_run_remains_closed() {
+        let participant = Uuid::new_v4();
+        let mut run = make_run(vec![participant]);
+        run.cancel().unwrap();
+        let json = serde_json::to_value(&run).unwrap();
+        assert_eq!(json["status"], "Cancelled");
+        let mut restored: ActivityRun = serde_json::from_value(json).unwrap();
+        assert_eq!(restored.cancel(), Err(ActivityRunError::NotInProgress));
+        assert_eq!(
+            restored.submit_result(ActivityResult::new(Uuid::new_v4(), participant)),
+            Err(ActivityRunError::NotInProgress)
+        );
     }
 
     #[test]
