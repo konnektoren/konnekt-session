@@ -19,6 +19,20 @@ Acceptance confirms host-side execution, not delivery or application by peers.
 The existing `submit_command` API only queues or sends a command; a successful
 return is not acceptance.
 
+The music adapter waits for queue acceptance before submitting a tracked
+`StartNextRunIf` command. That command checks the expected activity ID at
+execution time, so it rejects rather than starting an unrelated queued activity.
+
+V2 holds received guest commands until the host's domain processes them. It
+broadcasts accepted commands and does not broadcast rejected ones. This does
+not send an outcome back to the requesting guest or authenticate the sender.
+
+The standalone `RequestLedger` reserves request IDs per participant, rejects
+conflicting command reuse, and retains pending or completed results until the
+ledger is dropped. It refuses new entries at capacity. It is not wired into V2,
+does not authenticate participants, and does not survive a host restart; a retry
+after restart cannot be assumed safe.
+
 Before exposing real outcomes:
 
 - Assign one request ID per guest command and retain it across retries.

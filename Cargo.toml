@@ -14,7 +14,7 @@ members = [
 
 # Shared workspace metadata
 [workspace.package]
-version = "0.6.1"
+version = "0.6.2"
 edition = "2024"
 authors = ["Konnekt Session Contributors"]
 license = "MIT"
@@ -38,6 +38,7 @@ uuid = { version = "1.19", features = ["v4", "v5", "serde"] }
 thiserror = "2.0"
 tracing = "0.1"
 instant = { version = "0.1", features = ["wasm-bindgen"] }
+ed25519-dalek = "2.2"
 
 # Observability
 tracing-subscriber = { version = "0.3", default-features = false }

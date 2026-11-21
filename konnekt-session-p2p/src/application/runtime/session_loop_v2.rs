@@ -3,12 +3,14 @@ use crate::infrastructure::transport::{NetworkConnection, P2PTransport, Transpor
 use crate::protocol::command_outcome::{
     CommandOutcomeEvent, CommandOutcomeState, DynamicCommandOutcome,
 };
+use crate::protocol::identity::VerifiedIdentity;
+use crate::protocol::identity_exchange::{IdentityExchange, IdentityMessage};
 use crate::protocol::join::{DynamicJoinSession, JoinSessionEvent, JoinSessionState};
 use crate::protocol::synchronization::{
     DynamicStateSynchronization, StateSynchronizationEvent, StateSynchronizationState,
 };
 use konnekt_session_core::{DomainCommand, DomainEvent as CoreDomainEvent, DomainLoop, Lobby};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 const RECOVERY_RETRY_POLLS: u8 = 50;
@@ -36,6 +38,8 @@ pub struct SessionLoopV2<C: NetworkConnection> {
     requested_gap: Option<(u64, u64)>,
     snapshot_retry_ticks: u8,
     command_outcomes: HashMap<Uuid, TrackedCommand>,
+    pending_guest_commands: HashMap<Uuid, DomainCommand>,
+    identity_exchange: Option<IdentityExchange>,
 }
 
 struct TrackedCommand {
@@ -68,6 +72,8 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             requested_gap: None,
             snapshot_retry_ticks: 0,
             command_outcomes: HashMap::new(),
+            pending_guest_commands: HashMap::new(),
+            identity_exchange: None,
         }
     }
 
@@ -279,14 +285,33 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         self.command_outcomes.remove(&id).is_some()
     }
 
+    /// Enable peer key-possession exchange with an application-owned Ed25519 secret.
+    ///
+    /// This does not authenticate a host, authorize commands, or gate admission.
+    /// Callers must retain their own key if they need identity across reconnects.
+    pub fn enable_identity_exchange(&mut self, secret: [u8; 32]) {
+        self.identity_exchange = Some(IdentityExchange::new(secret));
+    }
+
+    /// A key proven by this connected peer, if the exchange has succeeded.
+    pub fn verified_peer_identity(&self, peer: crate::domain::PeerId) -> Option<&VerifiedIdentity> {
+        self.identity_exchange.as_ref()?.verified(peer)
+    }
+
+    fn send_identity_message(&mut self, peer: crate::domain::PeerId, message: IdentityMessage) {
+        if let Ok(payload) = serde_json::to_value(message)
+            && let Err(error) = self.transport.send_control_to(peer, payload)
+        {
+            tracing::debug!(%error, "Unable to send identity message");
+        }
+    }
+
     /// Main event loop
     pub fn poll(&mut self) -> usize {
         if !self.is_host {
             self.update_join_connection();
         }
         let mut processed = 0;
-        let mut host_prebroadcast_submissions: HashSet<(Uuid, Uuid)> = HashSet::new();
-        let mut prebroadcast_leaves = HashSet::new();
 
         // 1. Handle transport events
         for event in self.transport.drain_events() {
@@ -340,6 +365,14 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             self.update_join_connection();
         }
 
+        let peers = self.transport.connected_peers();
+        if let Some(exchange) = &mut self.identity_exchange {
+            let outgoing = exchange.advance(self.lobby_id, &peers, instant::Instant::now());
+            for (peer, message) in outgoing {
+                self.send_identity_message(peer, message);
+            }
+        }
+
         if !messages.is_empty() {
             tracing::debug!("📥 Received {} messages from transport", messages.len());
         }
@@ -347,6 +380,23 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         for (sender, payload) in messages {
             processed += 1;
             tracing::trace!(%sender, "Received application message");
+
+            if let Ok(message) = serde_json::from_value::<IdentityMessage>(payload.clone()) {
+                if peers.contains(&sender)
+                    && let Some(local) = self.transport.local_peer_id()
+                    && let Some(exchange) = &mut self.identity_exchange
+                    && let Some(reply) = exchange.receive(
+                        self.lobby_id,
+                        local,
+                        sender,
+                        message,
+                        instant::Instant::now(),
+                    )
+                {
+                    self.send_identity_message(sender, reply);
+                }
+                continue;
+            }
 
             if let Ok(cmd) = serde_json::from_value::<DomainCommand>(payload.clone()) {
                 tracing::debug!("📥 Processing command: {:?}", std::mem::discriminant(&cmd));
@@ -366,43 +416,20 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
                     _ => {}
                 }
 
-                // ✅ FIX: Execute in domain FIRST
-                if let Err(e) = self.domain.submit(cmd.clone()) {
-                    tracing::warn!("❌ Failed to submit command to domain: {:?}", e);
-                    continue; // Skip broadcast if command failed
-                }
-
-                // ✅ FIX: If host, ALWAYS broadcast to all guests (even if we executed it)
-                if self.is_host {
-                    if matches!(
-                        cmd,
-                        DomainCommand::JoinLobby { .. } | DomainCommand::AddParticipant { .. }
-                    ) {
-                        tracing::debug!(
-                            "📡 HOST: Skipping direct JoinLobby rebroadcast; GuestJoined event will sync authoritative participant"
-                        );
-                        continue;
-                    }
-
-                    tracing::debug!(
-                        "📡 HOST: Broadcasting command to all peers: {:?}",
-                        std::mem::discriminant(&cmd)
-                    );
-
-                    if let DomainCommand::LeaveLobby { participant_id, .. } = &cmd {
-                        prebroadcast_leaves.insert(*participant_id);
-                    }
-                    if let DomainCommand::SubmitResult { run_id, result, .. } = &cmd {
-                        host_prebroadcast_submissions.insert((*run_id, result.participant_id));
-                    }
-
-                    if let Ok(payload) = serde_json::to_value(&cmd) {
-                        if let Err(e) = self.transport.send(payload) {
-                            tracing::warn!("❌ Failed to broadcast: {:?}", e);
-                        } else {
-                            tracing::debug!("✅ Broadcast successful");
+                let submitted = if self.is_host {
+                    let id = Uuid::new_v4();
+                    match self.domain.submit_tracked(id, cmd.clone()) {
+                        Ok(()) => {
+                            self.pending_guest_commands.insert(id, cmd);
+                            Ok(())
                         }
+                        Err(error) => Err(error),
                     }
+                } else {
+                    self.domain.submit(cmd)
+                };
+                if let Err(e) = submitted {
+                    tracing::warn!("❌ Failed to submit command to domain: {:?}", e);
                 }
             }
         }
@@ -428,30 +455,29 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
                     };
                     let _ = tracked.machine.handle(outcome);
                 }
+                if let Some(command) =
+                    request_id.and_then(|id| self.pending_guest_commands.remove(&id))
+                {
+                    if matches!(event, CoreDomainEvent::CommandFailed { .. }) {
+                        tracing::debug!("Guest command rejected by domain");
+                        continue;
+                    }
+                    if !matches!(
+                        command,
+                        DomainCommand::JoinLobby { .. } | DomainCommand::AddParticipant { .. }
+                    ) {
+                        if let Ok(payload) = serde_json::to_value(&command)
+                            && let Err(error) = self.transport.send(payload)
+                        {
+                            tracing::warn!(%error, "Failed to broadcast accepted guest command");
+                        }
+                        continue;
+                    }
+                }
                 tracing::debug!(
                     "📤 HOST: Processing domain event: {:?}",
                     std::mem::discriminant(&event)
                 );
-
-                match &event {
-                    // ✅ Skip events that came from guest commands (already broadcast in step 2)
-                    CoreDomainEvent::ResultSubmitted { run_id, result, .. }
-                        if host_prebroadcast_submissions
-                            .contains(&(*run_id, result.participant_id)) =>
-                    {
-                        continue;
-                    }
-                    CoreDomainEvent::GuestLeft { participant_id, .. }
-                        if prebroadcast_leaves.contains(participant_id) =>
-                    {
-                        continue;
-                    }
-                    CoreDomainEvent::RunEnded { .. } => {
-                        tracing::debug!("   ↳ Skipping RunEnded (auto-completes on guests)");
-                        continue;
-                    }
-                    _ => {}
-                }
 
                 // Translate HOST-initiated events → commands for guests
                 if let Some(cmd) = self.event_to_command(event) {
@@ -589,6 +615,14 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
                     result,
                 })
             }
+            CoreDomainEvent::RunEnded {
+                run_id,
+                status: konnekt_session_core::RunStatus::Cancelled,
+                ..
+            } => Some(DomainCommand::CancelRun {
+                lobby_id: self.lobby_id,
+                run_id,
+            }),
             CoreDomainEvent::RunEnded { .. } => {
                 // Guests auto-complete when they process all SubmitResult commands
                 None // Guest will auto-complete when they receive all results

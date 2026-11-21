@@ -180,6 +180,17 @@ impl<C: NetworkConnection> P2PTransport<C> {
         Ok(())
     }
 
+    /// Send an unsequenced control payload to one peer.
+    pub(crate) fn send_control_to(
+        &mut self,
+        peer: PeerId,
+        payload: serde_json::Value,
+    ) -> Result<()> {
+        let data = serde_json::to_vec(&P2PMessage::application(payload))
+            .map_err(P2PError::Serialization)?;
+        self.connection.send_to(peer, data)
+    }
+
     /// Send a snapshot to a specific peer (host only)
     pub fn send_snapshot(&mut self, peer: PeerId, snapshot: serde_json::Value) -> Result<()> {
         if !self.is_host {

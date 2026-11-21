@@ -32,6 +32,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 instant = { workspace = true }
 state-machines = { workspace = true }
+ed25519-dalek = { workspace = true }
 
 # Observability (optional)
 console-subscriber = { workspace = true, optional = true }

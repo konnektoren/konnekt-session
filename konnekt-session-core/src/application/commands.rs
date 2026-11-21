@@ -69,6 +69,12 @@ pub enum DomainCommand {
         lobby_id: Uuid,
     },
 
+    /// Start only if the specified activity is still at the front of the queue.
+    StartNextRunIf {
+        lobby_id: Uuid,
+        activity_id: Uuid,
+    },
+
     SubmitResult {
         lobby_id: Uuid,
         run_id: crate::domain::ActivityRunId,

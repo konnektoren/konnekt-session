@@ -76,6 +76,25 @@ impl DomainEventLoop {
 
             DomainCommand::StartNextRun { lobby_id } => self.handle_start_next_run(lobby_id),
 
+            DomainCommand::StartNextRunIf {
+                lobby_id,
+                activity_id,
+            } => {
+                if self
+                    .lobbies
+                    .get(&lobby_id)
+                    .and_then(|lobby| lobby.activity_queue().first())
+                    .is_some_and(|activity| activity.id == activity_id)
+                {
+                    self.handle_start_next_run(lobby_id)
+                } else {
+                    DomainEvent::CommandFailed {
+                        command: "StartNextRunIf".into(),
+                        reason: "The requested activity is not next in the queue".into(),
+                    }
+                }
+            }
+
             DomainCommand::SubmitResult {
                 lobby_id,
                 run_id,
@@ -583,6 +602,34 @@ impl Default for DomainEventLoop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conditional_start_does_not_start_a_different_queued_activity() {
+        let mut event_loop = DomainEventLoop::new();
+        let (lobby_id, _) = create_lobby(&mut event_loop, "Room", "Host");
+        let first = ActivityConfig::new("test".into(), "First".into(), serde_json::Value::Null);
+        let second = ActivityConfig::new("test".into(), "Second".into(), serde_json::Value::Null);
+        let first_id = first.id;
+        let second_id = second.id;
+        event_loop.handle_command(DomainCommand::QueueActivity {
+            lobby_id,
+            config: first,
+        });
+        event_loop.handle_command(DomainCommand::QueueActivity {
+            lobby_id,
+            config: second,
+        });
+        assert!(matches!(
+            event_loop.handle_command(DomainCommand::StartNextRunIf {
+                lobby_id,
+                activity_id: second_id
+            }),
+            DomainEvent::CommandFailed { .. }
+        ));
+        assert!(
+            matches!(event_loop.handle_command(DomainCommand::StartNextRunIf { lobby_id, activity_id: first_id }), DomainEvent::RunStarted { config, .. } if config.id == first_id)
+        );
+    }
     use crate::application::DomainCommand;
     use crate::domain::{ActivityConfig, ActivityResult, RunStatus};
 

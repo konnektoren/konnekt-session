@@ -590,3 +590,123 @@ fn host_tracks_actual_command_acceptance_and_rejection() -> Result<(), Box<dyn s
     );
     Ok(())
 }
+
+#[test]
+fn host_broadcasts_only_executed_guest_commands_across_batches()
+-> Result<(), Box<dyn std::error::Error>> {
+    use konnekt_session_core::{ActivityConfig, DomainLoop};
+    use konnekt_session_p2p::SessionLoopV2;
+    use konnekt_session_p2p::application::ConnectionEvent;
+    use konnekt_session_p2p::infrastructure::message::{MessageKind, P2PMessage};
+    use konnekt_session_p2p::infrastructure::transport::P2PTransport;
+    use support::mock_connection::{MockConnection, create_mock_network};
+
+    let network = create_mock_network();
+    let host_connection = MockConnection::new(network.clone());
+    let guest_connection = MockConnection::new(network);
+    let mut observer = guest_connection.clone();
+    let lobby_id = uuid::Uuid::new_v4();
+    let mut domain = DomainLoop::new(1, 10);
+    domain.submit(DomainCommand::CreateLobby {
+        lobby_id: Some(lobby_id),
+        lobby_name: "Room".into(),
+        host_name: "Host".into(),
+    })?;
+    domain.poll();
+    domain.drain_events();
+    let mut host = SessionLoopV2::new(
+        domain,
+        P2PTransport::new_host(host_connection, 10),
+        true,
+        lobby_id,
+    );
+    let mut guest = P2PTransport::new_guest(guest_connection, 10);
+    host.poll();
+    host.poll();
+    observer.poll_events();
+
+    let applications = |events: Vec<ConnectionEvent>| -> Vec<DomainCommand> {
+        events
+            .into_iter()
+            .filter_map(|event| {
+                let ConnectionEvent::MessageReceived { data, .. } = event else {
+                    return None;
+                };
+                let message: P2PMessage = serde_json::from_slice(&data).ok()?;
+                let MessageKind::Application { payload } = message.kind else {
+                    return None;
+                };
+                serde_json::from_value(payload).ok()
+            })
+            .collect()
+    };
+    host.submit_command(DomainCommand::StartNextRun { lobby_id })?;
+    let queued = DomainCommand::QueueActivity {
+        lobby_id,
+        config: ActivityConfig::new("test".into(), "First".into(), serde_json::Value::Null),
+    };
+    guest.send_to_host(serde_json::to_value(&queued)?)?;
+    host.poll();
+    assert!(applications(observer.poll_events()).is_empty());
+    host.poll();
+    assert_eq!(applications(observer.poll_events()), vec![queued]);
+
+    let rejected = DomainCommand::StartNextRun {
+        lobby_id: uuid::Uuid::new_v4(),
+    };
+    guest.send_to_host(serde_json::to_value(rejected)?)?;
+    host.poll();
+    assert!(applications(observer.poll_events()).is_empty());
+    Ok(())
+}
+
+#[test]
+fn peers_exchange_key_proofs_and_forget_disconnected_identities()
+-> Result<(), Box<dyn std::error::Error>> {
+    use konnekt_session_core::DomainLoop;
+    use konnekt_session_p2p::{SessionLoopV2, infrastructure::transport::P2PTransport};
+    use support::mock_connection::{MockConnection, create_mock_network};
+
+    let network = create_mock_network();
+    let host_connection = MockConnection::new(network.clone());
+    let guest_connection = MockConnection::new(network.clone());
+    let host_id = host_connection.local_peer_id().ok_or("missing host")?;
+    let guest_id = guest_connection.local_peer_id().ok_or("missing guest")?;
+    let lobby_id = uuid::Uuid::new_v4();
+    let mut host = SessionLoopV2::new(
+        DomainLoop::new(10, 100),
+        P2PTransport::new_host(host_connection, 10),
+        true,
+        lobby_id,
+    );
+    let mut guest = SessionLoopV2::new(
+        DomainLoop::new(10, 100),
+        P2PTransport::new_guest(guest_connection, 10),
+        false,
+        lobby_id,
+    );
+    host.enable_identity_exchange([1; 32]);
+    guest.enable_identity_exchange([2; 32]);
+    for _ in 0..8 {
+        host.poll();
+        guest.poll();
+    }
+    let host_view = host
+        .verified_peer_identity(guest_id)
+        .ok_or("guest not verified")?;
+    let guest_view = guest
+        .verified_peer_identity(host_id)
+        .ok_or("host not verified")?;
+    assert_eq!(host_view.peer(), guest_id);
+    assert_eq!(guest_view.peer(), host_id);
+    assert_ne!(host_view.public_key(), guest_view.public_key());
+
+    network
+        .lock()
+        .map_err(|_| "network lock poisoned")?
+        .peers
+        .remove(&guest_id);
+    host.poll();
+    assert!(host.verified_peer_identity(guest_id).is_none());
+    Ok(())
+}
