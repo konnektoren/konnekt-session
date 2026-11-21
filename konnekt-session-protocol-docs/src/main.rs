@@ -5,6 +5,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../konnekt-session-workspace/protocols");
     let diagrams = [
         (
+            "Command outcome",
+            "command-outcome",
+            include_str!(concat!(env!("OUT_DIR"), "/command-outcome.mmd")),
+        ),
+        (
             "Identity verification",
             "identity-verification",
             include_str!(concat!(env!("OUT_DIR"), "/identity.mmd")),

@@ -113,7 +113,7 @@ impl LogConfig {
                 eprintln!("📊 Chrome trace enabled");
                 eprintln!("   Trace file: trace-<timestamp>.json");
                 eprintln!("   View at: https://ui.perfetto.dev/");
-                eprintln!("");
+                eprintln!();
             }
 
             // Also add fmt layer for terminal output (if enabled)
