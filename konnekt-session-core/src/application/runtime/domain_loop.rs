@@ -1,5 +1,7 @@
 use crate::application::runtime::CommandQueue;
 use crate::application::{DomainCommand, DomainEvent, DomainEventLoop};
+use std::collections::VecDeque;
+use uuid::Uuid;
 
 /// Domain event loop - processes commands in batches
 pub struct DomainLoop {
@@ -10,7 +12,10 @@ pub struct DomainLoop {
     inbound: CommandQueue,
 
     /// Outbound event queue (caller drains this)
-    outbound: Vec<DomainEvent>,
+    outbound: Vec<(Option<Uuid>, DomainEvent)>,
+
+    /// Correlation IDs stay aligned with successfully queued commands.
+    inbound_ids: VecDeque<Option<Uuid>>,
 
     /// Max commands to process per poll
     batch_size: usize,
@@ -27,6 +32,7 @@ impl DomainLoop {
             event_loop: DomainEventLoop::new(),
             inbound: CommandQueue::new(max_queue_size),
             outbound: Vec::new(),
+            inbound_ids: VecDeque::new(),
             batch_size,
         }
     }
@@ -38,7 +44,26 @@ impl DomainLoop {
         &mut self,
         cmd: DomainCommand,
     ) -> Result<(), crate::application::runtime::QueueError> {
-        self.inbound.push(cmd)
+        self.enqueue(cmd, None)
+    }
+
+    /// Queue a command with an ID returned alongside its execution event.
+    pub fn submit_tracked(
+        &mut self,
+        id: Uuid,
+        cmd: DomainCommand,
+    ) -> Result<(), crate::application::runtime::QueueError> {
+        self.enqueue(cmd, Some(id))
+    }
+
+    fn enqueue(
+        &mut self,
+        cmd: DomainCommand,
+        id: Option<Uuid>,
+    ) -> Result<(), crate::application::runtime::QueueError> {
+        self.inbound.push(cmd)?;
+        self.inbound_ids.push_back(id);
+        Ok(())
     }
 
     /// Process up to `batch_size` commands
@@ -51,7 +76,8 @@ impl DomainLoop {
             match self.inbound.pop() {
                 Some(cmd) => {
                     let event = self.event_loop.handle_command(cmd);
-                    self.outbound.push(event);
+                    self.outbound
+                        .push((self.inbound_ids.pop_front().flatten(), event));
                     processed += 1;
                 }
                 None => break,
@@ -63,6 +89,14 @@ impl DomainLoop {
 
     /// Drain all emitted events (caller's responsibility to handle)
     pub fn drain_events(&mut self) -> Vec<DomainEvent> {
+        self.drain_events_with_ids()
+            .into_iter()
+            .map(|(_, event)| event)
+            .collect()
+    }
+
+    /// Drain execution events with the correlation IDs supplied at submission.
+    pub fn drain_events_with_ids(&mut self) -> Vec<(Option<Uuid>, DomainEvent)> {
         std::mem::take(&mut self.outbound)
     }
 
@@ -96,6 +130,28 @@ impl Default for DomainLoop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tracked_ids_follow_commands_across_batches_and_queue_failure() {
+        let mut domain = DomainLoop::new(1, 2);
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let command = || DomainCommand::StartNextRun {
+            lobby_id: Uuid::new_v4(),
+        };
+        assert!(domain.submit_tracked(first, command()).is_ok());
+        assert!(domain.submit(command()).is_ok());
+        assert!(domain.submit_tracked(second, command()).is_err());
+        assert_eq!(domain.poll(), 1);
+        let events = domain.drain_events_with_ids();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, Some(first));
+        assert!(domain.submit_tracked(second, command()).is_ok());
+        domain.poll();
+        assert_eq!(domain.drain_events_with_ids()[0].0, None);
+        domain.poll();
+        assert_eq!(domain.drain_events_with_ids()[0].0, Some(second));
+    }
 
     #[test]
     fn test_submit_and_poll() {

@@ -542,3 +542,51 @@ fn guest_retries_a_lost_initial_snapshot_request() -> Result<(), Box<dyn std::er
     assert_eq!(snapshot_requests(host.poll_events()), 1);
     Ok(())
 }
+
+#[test]
+fn host_tracks_actual_command_acceptance_and_rejection() -> Result<(), Box<dyn std::error::Error>> {
+    use konnekt_session_core::ActivityConfig;
+    use konnekt_session_p2p::protocol::command_outcome::CommandOutcomeState as State;
+
+    let mut fixture = SessionFixture::new(1);
+    let rejected = fixture
+        .host
+        .submit_tracked_command(DomainCommand::StartNextRun {
+            lobby_id: fixture.lobby_id,
+        })?;
+    let accepted = fixture
+        .host
+        .submit_tracked_command(DomainCommand::QueueActivity {
+            lobby_id: fixture.lobby_id,
+            config: ActivityConfig::new("test".into(), "First".into(), serde_json::Value::Null),
+        })?;
+    assert_eq!(
+        fixture.host.command_outcome(rejected),
+        Some((State::Pending, None))
+    );
+    assert_eq!(
+        fixture.host.command_outcome(accepted),
+        Some((State::Pending, None))
+    );
+    fixture.host.poll();
+    let (state, reason) = fixture
+        .host
+        .command_outcome(rejected)
+        .ok_or("missing rejection")?;
+    assert_eq!(state, State::Rejected);
+    assert!(reason.is_some());
+    assert_eq!(
+        fixture.host.command_outcome(accepted),
+        Some((State::Accepted, None))
+    );
+    assert!(fixture.host.forget_command_outcome(accepted));
+    assert_eq!(fixture.host.command_outcome(accepted), None);
+    assert!(
+        fixture.guests[0]
+            .submit_tracked_command(DomainCommand::StartNextRun {
+                lobby_id: fixture.lobby_id
+            })
+            .is_err()
+    );
+    Ok(())
+}

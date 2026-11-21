@@ -10,7 +10,7 @@ Multi-step protocols between players and services. Each protocol is a sans-IO st
 
 | Protocol | Status | Crate | Summary |
 |---|---|---|---|
-| Command outcome | state machine only | `konnekt-session-p2p` | Track pending, unknown, accepted and rejected command outcomes |
+| [[command-outcome\|Command outcome]] | partial | `konnekt-session-p2p` | Track host-local execution; guest outcomes remain planned |
 | State synchronization | partial | `konnekt-session-p2p` | Observe initial snapshot, detected gaps, recovery, and disconnects in V2 |
 | [[rating-match\|Rating Match]] | draft | `konnekt-session-rating` | Two players co-sign every round and the match record; disconnect, forfeit, resume |
 | Matchmaking Search | planned | `konnekt-session-matchmaking` | Search, widening window, match found / no match / ghost offer, expiry |

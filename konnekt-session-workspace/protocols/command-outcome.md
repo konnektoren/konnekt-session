@@ -11,13 +11,17 @@ the host must process it before an accepted or rejected outcome is reported.
 If a reply is lost, `OutcomeUnknown` allows a late reply or retry. `Abandoned`
 means the caller stopped tracking the request; it does not cancel execution.
 
-The machine is implemented but is not wired to `SessionLoopV2`. In the current
-runtime, `DomainLoop::submit` only queues a command, and domain events do not
-carry request IDs. A successful send or queue submission is not acceptance.
+`SessionLoopV2::submit_tracked_command` tracks host-local commands through
+domain execution. `command_outcome` reports pending, accepted or rejected and
+includes the rejection reason; `forget_command_outcome` releases retained
+results without cancelling execution. Guest tracked commands are not supported.
+Acceptance confirms host-side execution, not delivery or application by peers.
+The existing `submit_command` API only queues or sends a command; a successful
+return is not acceptance.
 
 Before exposing real outcomes:
 
-- Assign one request ID per command and retain it across retries.
+- Assign one request ID per guest command and retain it across retries.
 - Correlate host execution results with that ID and return accepted or rejected
   outcomes only after domain processing. Queue failures are separate errors.
 - Deduplicate retries at the host and return the recorded result without

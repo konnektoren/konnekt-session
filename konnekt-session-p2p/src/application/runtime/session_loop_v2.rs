@@ -1,11 +1,14 @@
 use crate::infrastructure::error::Result;
 use crate::infrastructure::transport::{NetworkConnection, P2PTransport, TransportEvent};
+use crate::protocol::command_outcome::{
+    CommandOutcomeEvent, CommandOutcomeState, DynamicCommandOutcome,
+};
 use crate::protocol::join::{DynamicJoinSession, JoinSessionEvent, JoinSessionState};
 use crate::protocol::synchronization::{
     DynamicStateSynchronization, StateSynchronizationEvent, StateSynchronizationState,
 };
 use konnekt_session_core::{DomainCommand, DomainEvent as CoreDomainEvent, DomainLoop, Lobby};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 const RECOVERY_RETRY_POLLS: u8 = 50;
@@ -32,6 +35,12 @@ pub struct SessionLoopV2<C: NetworkConnection> {
     recovery_retry_ticks: u8,
     requested_gap: Option<(u64, u64)>,
     snapshot_retry_ticks: u8,
+    command_outcomes: HashMap<Uuid, TrackedCommand>,
+}
+
+struct TrackedCommand {
+    machine: DynamicCommandOutcome,
+    rejection: Option<String>,
 }
 
 impl<C: NetworkConnection> SessionLoopV2<C> {
@@ -58,6 +67,7 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             recovery_retry_ticks: 0,
             requested_gap: None,
             snapshot_retry_ticks: 0,
+            command_outcomes: HashMap::new(),
         }
     }
 
@@ -227,6 +237,48 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         Ok(())
     }
 
+    /// Submit a host-local command and track its actual domain outcome.
+    ///
+    /// Guest requests are not yet supported: they require authenticated,
+    /// correlated replies and host-side deduplication.
+    pub fn submit_tracked_command(&mut self, cmd: DomainCommand) -> Result<Uuid> {
+        if !self.is_host {
+            return Err(crate::infrastructure::error::P2PError::SendFailed(
+                "Tracked guest commands are not supported yet".into(),
+            ));
+        }
+        let id = Uuid::new_v4();
+        self.domain.submit_tracked(id, cmd).map_err(|error| {
+            crate::infrastructure::error::P2PError::SendFailed(error.to_string())
+        })?;
+        let mut machine = DynamicCommandOutcome::new(());
+        let _ = machine.handle(CommandOutcomeEvent::Sent);
+        self.command_outcomes.insert(
+            id,
+            TrackedCommand {
+                machine,
+                rejection: None,
+            },
+        );
+        Ok(id)
+    }
+
+    /// Read a tracked command's state and, for rejection, its domain reason.
+    /// Acceptance means the host applied the command, not that peers received it.
+    pub fn command_outcome(&self, id: Uuid) -> Option<(CommandOutcomeState, Option<&str>)> {
+        self.command_outcomes.get(&id).map(|tracked| {
+            (
+                tracked.machine.current_state(),
+                tracked.rejection.as_deref(),
+            )
+        })
+    }
+
+    /// Stop retaining a tracked outcome. This does not cancel the command.
+    pub fn forget_command_outcome(&mut self, id: Uuid) -> bool {
+        self.command_outcomes.remove(&id).is_some()
+    }
+
     /// Main event loop
     pub fn poll(&mut self) -> usize {
         if !self.is_host {
@@ -365,7 +417,17 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
 
         // 4. Broadcast HOST-INITIATED events (not guest commands)
         if self.is_host {
-            for event in self.domain.drain_events() {
+            for (request_id, event) in self.domain.drain_events_with_ids() {
+                if let Some(tracked) = request_id.and_then(|id| self.command_outcomes.get_mut(&id))
+                {
+                    let outcome = if let CoreDomainEvent::CommandFailed { reason, .. } = &event {
+                        tracked.rejection = Some(reason.clone());
+                        CommandOutcomeEvent::Rejected
+                    } else {
+                        CommandOutcomeEvent::Accepted
+                    };
+                    let _ = tracked.machine.handle(outcome);
+                }
                 tracing::debug!(
                     "📤 HOST: Processing domain event: {:?}",
                     std::mem::discriminant(&event)
