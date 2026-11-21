@@ -701,6 +701,24 @@ fn peers_exchange_key_proofs_and_forget_disconnected_identities()
     assert_eq!(guest_view.peer(), host_id);
     assert_ne!(host_view.public_key(), guest_view.public_key());
 
+    // A disconnect must invalidate the proof even if the same peer is already
+    // present again by the time the session polls its connection.
+    network
+        .lock()
+        .map_err(|_| "network lock poisoned")?
+        .events
+        .push_back((
+            host_id,
+            konnekt_session_p2p::ConnectionEvent::PeerDisconnected(guest_id),
+        ));
+    host.poll();
+    assert!(host.verified_peer_identity(guest_id).is_none());
+    for _ in 0..8 {
+        host.poll();
+        guest.poll();
+    }
+    assert!(host.verified_peer_identity(guest_id).is_some());
+
     network
         .lock()
         .map_err(|_| "network lock poisoned")?

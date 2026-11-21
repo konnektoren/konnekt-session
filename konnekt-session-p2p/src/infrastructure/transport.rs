@@ -80,6 +80,7 @@ pub struct P2PTransport<C: NetworkConnection> {
 
     /// Transport events (for SessionLoop)
     pending_events: Vec<TransportEvent>,
+    disconnected_peers: Vec<PeerId>,
 
     /// V2 drives resend requests from its synchronization protocol.
     managed_recovery: bool,
@@ -98,6 +99,7 @@ impl<C: NetworkConnection> P2PTransport<C> {
             is_host: true,
             host_peer: None,
             pending_events: Vec::new(),
+            disconnected_peers: Vec::new(),
             managed_recovery: false,
         }
     }
@@ -114,6 +116,7 @@ impl<C: NetworkConnection> P2PTransport<C> {
             is_host: false,
             host_peer: None,
             pending_events: Vec::new(),
+            disconnected_peers: Vec::new(),
             managed_recovery: false,
         }
     }
@@ -243,6 +246,7 @@ impl<C: NetworkConnection> P2PTransport<C> {
     /// who originally authored a message or authenticate its contents.
     pub fn poll_with_sender(&mut self) -> Vec<(PeerId, serde_json::Value)> {
         let mut delivered = Vec::new();
+        self.disconnected_peers.clear();
 
         // Get raw network events
         for event in self.connection.poll_events() {
@@ -251,6 +255,9 @@ impl<C: NetworkConnection> P2PTransport<C> {
                     tracing::info!("🟢 Peer connected: {}", peer_id);
                     self.pending_events
                         .push(TransportEvent::PeerConnected(peer_id));
+                }
+                ConnectionEvent::PeerDisconnected(peer_id) => {
+                    self.disconnected_peers.push(peer_id);
                 }
                 ConnectionEvent::MessageReceived { from, data } => {
                     if let Ok(msg) = serde_json::from_slice::<P2PMessage>(&data) {
@@ -304,6 +311,10 @@ impl<C: NetworkConnection> P2PTransport<C> {
     /// Drain transport events (for SessionLoop)
     pub fn drain_events(&mut self) -> Vec<TransportEvent> {
         std::mem::take(&mut self.pending_events)
+    }
+
+    pub(crate) fn drain_disconnected_peers(&mut self) -> Vec<PeerId> {
+        std::mem::take(&mut self.disconnected_peers)
     }
 
     /// Handle application message with ordering

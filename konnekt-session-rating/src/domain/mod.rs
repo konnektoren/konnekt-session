@@ -3,3 +3,6 @@ pub mod rating_key;
 
 pub use placement::Placement;
 pub use rating_key::RatingKey;
+
+mod match_protocol;
+pub use match_protocol::{MatchConfig, RejoinTimedOut, RoundSigned};

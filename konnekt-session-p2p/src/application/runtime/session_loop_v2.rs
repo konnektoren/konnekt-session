@@ -1,10 +1,10 @@
+use crate::application::identity_exchange::{IdentityExchange, IdentityMessage};
+use crate::domain::VerifiedIdentity;
 use crate::infrastructure::error::Result;
 use crate::infrastructure::transport::{NetworkConnection, P2PTransport, TransportEvent};
 use crate::protocol::command_outcome::{
     CommandOutcomeEvent, CommandOutcomeState, DynamicCommandOutcome,
 };
-use crate::protocol::identity::VerifiedIdentity;
-use crate::protocol::identity_exchange::{IdentityExchange, IdentityMessage};
 use crate::protocol::join::{DynamicJoinSession, JoinSessionEvent, JoinSessionState};
 use crate::protocol::synchronization::{
     DynamicStateSynchronization, StateSynchronizationEvent, StateSynchronizationState,
@@ -361,6 +361,12 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
 
         // 2. Poll transport for messages
         let messages = self.transport.poll_with_sender();
+        let disconnected = self.transport.drain_disconnected_peers();
+        if let Some(exchange) = &mut self.identity_exchange {
+            for peer in disconnected {
+                exchange.disconnected(peer);
+            }
+        }
         if !self.is_host {
             self.update_join_connection();
         }

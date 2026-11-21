@@ -6,24 +6,7 @@
 
 use state_machines::state_machine;
 
-/// Fixed configuration of one match.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MatchConfig {
-    /// Number of rounds in the match (Freestyle Duel: 3).
-    pub rounds: u8,
-}
-
-/// Payload of `round_signed`: the round that is now co-signed (1-based).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RoundSigned {
-    pub round: u8,
-}
-
-/// Payload of `rejoin_timeout`: how many rounds are co-signed so far.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RejoinTimedOut {
-    pub signed_rounds: u8,
-}
+pub use crate::domain::{MatchConfig, RejoinTimedOut, RoundSigned};
 
 state_machine! {
     name: RatingMatch,
@@ -95,12 +78,12 @@ state_machine! {
 impl<S> RatingMatch<S> {
     /// More rounds follow after the one just co-signed.
     fn rounds_left(&self, ctx: &MatchConfig, signed: &RoundSigned) -> bool {
-        signed.round < ctx.rounds
+        ctx.has_rounds_after(signed.round)
     }
 
     /// A forfeit needs at least one co-signed round as evidence.
     fn has_signed_round(&self, _ctx: &MatchConfig, timed_out: &RejoinTimedOut) -> bool {
-        timed_out.signed_rounds > 0
+        timed_out.has_signed_round()
     }
 }
 

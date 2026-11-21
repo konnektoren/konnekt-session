@@ -1,7 +1,9 @@
 //! Peer-bound challenge exchange. It proves key possession, not authority.
 
+use crate::application::IdentityChallengeVerifier;
 use crate::domain::PeerId;
-use crate::protocol::identity::{IdentityChallenge, IdentityChallengeVerifier, VerifiedIdentity};
+use crate::domain::{IdentityChallenge, VerifiedIdentity};
+use crate::protocol::identity::IdentityVerificationState;
 use ed25519_dalek::{Signer, SigningKey};
 use instant::Instant;
 use std::collections::{HashMap, HashSet};
@@ -24,14 +26,13 @@ pub(crate) enum IdentityMessage {
 
 struct Pending {
     verifier: IdentityChallengeVerifier,
-    issued: Instant,
     last_sent: Instant,
+    identity: Option<VerifiedIdentity>,
 }
 
 pub(crate) struct IdentityExchange {
     signing_key: SigningKey,
     pending: HashMap<PeerId, Pending>,
-    verified: HashMap<PeerId, VerifiedIdentity>,
 }
 
 impl IdentityExchange {
@@ -41,12 +42,20 @@ impl IdentityExchange {
         Self {
             signing_key,
             pending: HashMap::new(),
-            verified: HashMap::new(),
         }
     }
 
     pub(crate) fn verified(&self, peer: PeerId) -> Option<&VerifiedIdentity> {
-        self.verified.get(&peer)
+        let pending = self.pending.get(&peer)?;
+        (pending.verifier.state() == IdentityVerificationState::Verified)
+            .then_some(pending.identity.as_ref())
+            .flatten()
+    }
+
+    pub(crate) fn disconnected(&mut self, peer: PeerId) {
+        if let Some(mut pending) = self.pending.remove(&peer) {
+            pending.verifier.disconnect();
+        }
     }
 
     pub(crate) fn advance(
@@ -56,17 +65,25 @@ impl IdentityExchange {
         now: Instant,
     ) -> Vec<(PeerId, IdentityMessage)> {
         let connected: HashSet<_> = peers.iter().copied().collect();
-        self.pending.retain(|peer, _| connected.contains(peer));
-        self.verified.retain(|peer, _| connected.contains(peer));
+        self.pending.retain(|peer, pending| {
+            if !connected.contains(peer) {
+                pending.verifier.disconnect();
+                return false;
+            }
+            true
+        });
         let mut outgoing = Vec::new();
         for &peer in peers {
-            if self.verified.contains_key(&peer) {
-                continue;
-            }
-            let replace = self
-                .pending
-                .get(&peer)
-                .is_none_or(|p| now.duration_since(p.issued) >= VALIDITY);
+            let replace = self.pending.get_mut(&peer).is_none_or(|pending| {
+                pending.verifier.expire_if_due(now);
+                match pending.verifier.state() {
+                    IdentityVerificationState::Expired | IdentityVerificationState::Cancelled => {
+                        true
+                    }
+                    IdentityVerificationState::Rejected => pending.verifier.deadline_elapsed(now),
+                    _ => false,
+                }
+            });
             if replace {
                 let verifier = IdentityChallengeVerifier::issue(lobby, peer, now, VALIDITY);
                 outgoing.push((
@@ -77,12 +94,15 @@ impl IdentityExchange {
                     peer,
                     Pending {
                         verifier,
-                        issued: now,
                         last_sent: now,
+                        identity: None,
                     },
                 );
             } else if let Some(pending) = self.pending.get_mut(&peer)
-                && now.duration_since(pending.last_sent) >= RETRY
+                && pending.verifier.state() == IdentityVerificationState::AwaitingProof
+                && now
+                    .checked_duration_since(pending.last_sent)
+                    .is_some_and(|elapsed| elapsed >= RETRY)
             {
                 pending.last_sent = now;
                 outgoing.push((
@@ -127,8 +147,7 @@ impl IdentityExchange {
                     return None;
                 }
                 if let Ok(identity) = pending.verifier.verify(sender, public_key, signature, now) {
-                    self.verified.insert(sender, identity);
-                    self.pending.remove(&sender);
+                    pending.identity = Some(identity);
                 }
                 None
             }
@@ -141,6 +160,51 @@ impl IdentityExchange {
 mod tests {
     use super::*;
     use crate::domain::MatchboxPeerId;
+
+    #[test]
+    fn rejected_challenge_is_not_retried_and_a_fresh_one_can_succeed() {
+        let now = Instant::now();
+        let host = PeerId::new(MatchboxPeerId(Uuid::new_v4()));
+        let guest = PeerId::new(MatchboxPeerId(Uuid::new_v4()));
+        let lobby = Uuid::new_v4();
+        let mut a = IdentityExchange::new([1; 32]);
+        let mut b = IdentityExchange::new([2; 32]);
+        let mut initial = a.advance(lobby, &[guest], now);
+        let challenge = initial.remove(0).1;
+        let IdentityMessage::Challenge(ref value) = challenge else {
+            panic!("expected challenge")
+        };
+        a.receive(
+            lobby,
+            host,
+            guest,
+            IdentityMessage::Proof {
+                nonce: value.nonce,
+                public_key: [0; 32],
+                signature: vec![0; 64],
+            },
+            now,
+        );
+        assert_eq!(
+            a.pending[&guest].verifier.state(),
+            IdentityVerificationState::Rejected
+        );
+        assert!(a.advance(lobby, &[guest], now + RETRY).is_empty());
+        let later = now + VALIDITY;
+        let mut fresh = a.advance(lobby, &[guest], later);
+        let proof = b
+            .receive(lobby, guest, host, fresh.remove(0).1, later)
+            .unwrap();
+        a.receive(lobby, host, guest, proof, later);
+        assert_eq!(
+            a.pending[&guest].verifier.state(),
+            IdentityVerificationState::Verified
+        );
+        assert!(a.verified(guest).is_some());
+        assert!(a.advance(lobby, &[guest], later + VALIDITY).is_empty());
+        a.disconnected(guest);
+        assert!(a.verified(guest).is_none());
+    }
 
     #[test]
     fn stale_proof_cannot_consume_a_new_challenge() {

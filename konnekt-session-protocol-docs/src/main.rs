@@ -10,6 +10,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             include_str!(concat!(env!("OUT_DIR"), "/command-outcome.mmd")),
         ),
         (
+            "Request execution",
+            "request-execution",
+            include_str!(concat!(env!("OUT_DIR"), "/request-execution.mmd")),
+        ),
+        (
             "Identity verification",
             "identity-verification",
             include_str!(concat!(env!("OUT_DIR"), "/identity.mmd")),

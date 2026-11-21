@@ -55,6 +55,17 @@ stateDiagram-v2
     OutcomeUnknown --> Abandoned : abandoned
 ```
 
+### Request execution
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending
+    Accepted --> [*]
+    Rejected --> [*]
+    Pending --> Accepted : accepted
+    Pending --> Rejected : rejected
+```
+
 ### Identity verification
 
 ```mermaid
