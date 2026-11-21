@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use konnekt_session_cli::{LogConfig, Result, SessionRuntime}; // 🆕 Import LogConfig
 use konnekt_session_core::DomainCommand;
-use konnekt_session_p2p::{IceServer, P2PLoopBuilder, SessionId, SessionLoop};
+use konnekt_session_p2p::{IceServer, MatchboxSessionLoop, SessionId, SessionLoopV2Builder};
 use std::time::Duration;
 use tracing::{debug, info};
 use uuid::Uuid;
@@ -165,7 +165,7 @@ async fn create_host(
 ) -> Result<()> {
     info!("Creating new session as host '{}'", host_name);
 
-    let builder = P2PLoopBuilder::new();
+    let builder = SessionLoopV2Builder::new();
     let (mut session_loop, session_id) = if let Some(seed) = seed {
         let deterministic_id = session_id_from_seed(&seed);
         info!(
@@ -173,7 +173,7 @@ async fn create_host(
             seed, deterministic_id
         );
         builder
-            .build_session_host_with_session_id(
+            .build_host_with_session_id(
                 server,
                 deterministic_id,
                 ice_servers.clone(),
@@ -183,7 +183,7 @@ async fn create_host(
             .await?
     } else {
         builder
-            .build_session_host(
+            .build_host(
                 server,
                 ice_servers.clone(),
                 lobby_name.to_string(),
@@ -211,7 +211,7 @@ async fn create_host(
     // Wait for peer ID to be assigned
     wait_for_peer_id(&mut session_loop).await?;
 
-    run_event_loop(session_loop, true, session_id).await
+    run_event_loop(session_loop, true, session_id, None).await
 }
 
 fn session_id_from_seed(seed: &str) -> SessionId {
@@ -230,8 +230,8 @@ async fn join_session(
     let session_id = SessionId::parse(session_id_str)?;
 
     // Build session using SessionLoop
-    let (mut session_loop, lobby_id) = P2PLoopBuilder::new()
-        .build_session_guest(server, session_id.clone(), ice_servers.clone())
+    let (mut session_loop, lobby_id) = SessionLoopV2Builder::new()
+        .build_guest(server, session_id.clone(), ice_servers.clone())
         .await?;
 
     info!("✅ Connected to P2P network");
@@ -242,26 +242,23 @@ async fn join_session(
 
     // Wait for lobby to sync from host
     info!("⏳ Waiting for lobby sync...");
+    let participant_id = session_loop.join(guest_name.to_string())?;
     wait_for_lobby_sync(&mut session_loop).await?;
 
     info!("✅ Lobby synced!");
 
     // Submit join command
-    session_loop.submit_command(DomainCommand::JoinLobby {
-        lobby_id,
-        guest_name: guest_name.to_string(),
-    })?;
 
     info!("");
     info!("=== Session Active ===");
     info!("  Press Ctrl+C to quit");
     info!("");
 
-    run_event_loop(session_loop, false, session_id).await
+    run_event_loop(session_loop, false, session_id, Some(participant_id)).await
 }
 
 /// Wait for peer ID to be assigned by Matchbox
-async fn wait_for_peer_id(session_loop: &mut SessionLoop) -> Result<()> {
+async fn wait_for_peer_id(session_loop: &mut MatchboxSessionLoop) -> Result<()> {
     let timeout = Duration::from_secs(5);
     let start = std::time::Instant::now();
 
@@ -282,7 +279,7 @@ async fn wait_for_peer_id(session_loop: &mut SessionLoop) -> Result<()> {
 }
 
 /// Wait for lobby to sync from host via P2P
-async fn wait_for_lobby_sync(session_loop: &mut SessionLoop) -> Result<()> {
+async fn wait_for_lobby_sync(session_loop: &mut MatchboxSessionLoop) -> Result<()> {
     let timeout = Duration::from_secs(10);
     let start = std::time::Instant::now();
 
@@ -300,7 +297,10 @@ async fn wait_for_lobby_sync(session_loop: &mut SessionLoop) -> Result<()> {
         }
 
         // Check if we received lobby via P2P sync
-        if let Some(lobby) = session_loop.get_lobby() {
+        if session_loop.join_state()
+            == Some(konnekt_session_p2p::protocol::join::JoinSessionState::Ready)
+            && let Some(lobby) = session_loop.get_lobby()
+        {
             info!("✅ Lobby '{}' synced!", lobby.name());
             info!("   Host: {:?}", lobby.host_id());
             info!("   Participants: {}", lobby.participants().len());
@@ -326,9 +326,10 @@ async fn wait_for_lobby_sync(session_loop: &mut SessionLoop) -> Result<()> {
 /// Main event loop - PRESENTATION ONLY
 /// All business logic is in SessionLoop (P2P + Core)
 async fn run_event_loop(
-    session_loop: SessionLoop,
+    session_loop: MatchboxSessionLoop,
     is_host: bool,
     session_id: SessionId,
+    local_participant_id: Option<Uuid>,
 ) -> Result<()> {
     let runtime = SessionRuntime::spawn(session_loop, session_id);
     let mut interval = tokio::time::interval(Duration::from_millis(100));
@@ -352,7 +353,7 @@ async fn run_event_loop(
 
                 // Leave lobby gracefully if we're a guest
                 if !is_host {
-                    handle_graceful_shutdown(&runtime).await?;
+                    handle_graceful_shutdown(&runtime, local_participant_id).await?;
                 }
 
                 break;
@@ -394,11 +395,15 @@ fn display_lobby_changes(lobby: Option<&konnekt_session_core::Lobby>, last_count
 }
 
 /// Handle graceful shutdown for guests
-async fn handle_graceful_shutdown(runtime: &SessionRuntime) -> Result<()> {
+async fn handle_graceful_shutdown(
+    runtime: &SessionRuntime,
+    local_participant_id: Option<Uuid>,
+) -> Result<()> {
     let snapshot = runtime.snapshot();
     if let Some(lobby) = snapshot.lobby {
         // Find our participant ID (non-host)
-        if let Some(participant) = lobby.participants().values().find(|p| !p.is_host()) {
+        if let Some(participant) = local_participant_id.and_then(|id| lobby.participants().get(&id))
+        {
             runtime
                 .submit_command(DomainCommand::LeaveLobby {
                     lobby_id: snapshot.lobby_id,

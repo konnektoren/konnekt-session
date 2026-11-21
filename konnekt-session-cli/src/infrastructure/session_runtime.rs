@@ -2,7 +2,7 @@ use bevy_ecs::prelude::{Resource, World};
 use bevy_ecs::schedule::Schedule;
 use bevy_ecs::system::ResMut;
 use konnekt_session_core::{DomainCommand, Lobby};
-use konnekt_session_p2p::{SessionId, SessionLoop};
+use konnekt_session_p2p::{MatchboxSessionLoop, SessionId};
 use tokio::sync::{mpsc, watch};
 use uuid::Uuid;
 
@@ -42,7 +42,7 @@ pub struct SessionRuntime {
 
 impl SessionRuntime {
     /// Spawn a new runtime with existing SessionLoop
-    pub fn spawn(session_loop: SessionLoop, session_id: SessionId) -> Self {
+    pub fn spawn(session_loop: MatchboxSessionLoop, session_id: SessionId) -> Self {
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<DomainCommand>(100);
         let (state_tx, state_rx) = watch::channel(SessionSnapshot::default());
 
@@ -114,7 +114,7 @@ impl SessionRuntime {
 
 #[derive(Resource)]
 struct RuntimeState {
-    session_loop: SessionLoop,
+    session_loop: MatchboxSessionLoop,
     state_tx: watch::Sender<SessionSnapshot>,
     lobby_id: Uuid,
     is_host: bool,
@@ -151,13 +151,13 @@ fn drive_session_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use konnekt_session_p2p::{IceServer, P2PLoopBuilder};
+    use konnekt_session_p2p::{IceServer, SessionLoopV2Builder};
 
     #[tokio::test]
     #[ignore] // Requires network
     async fn test_runtime_spawns_and_publishes_snapshots() {
-        let (session_loop, session_id) = P2PLoopBuilder::new()
-            .build_session_host(
+        let (session_loop, session_id) = SessionLoopV2Builder::new()
+            .build_host(
                 "wss://match.konnektoren.help",
                 IceServer::default_stun_servers(),
                 "Test Lobby".to_string(),
@@ -183,8 +183,8 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_runtime_processes_commands() {
-        let (session_loop, session_id) = P2PLoopBuilder::new()
-            .build_session_host(
+        let (session_loop, session_id) = SessionLoopV2Builder::new()
+            .build_host(
                 "wss://match.konnektoren.help",
                 IceServer::default_stun_servers(),
                 "Test Lobby".to_string(),

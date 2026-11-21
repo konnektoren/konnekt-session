@@ -4,7 +4,7 @@ use konnekt_session_cli::presentation::tui::{self, App, AppEvent, UserAction};
 use konnekt_session_cli::{CliError, Result};
 use konnekt_session_core::DomainCommand;
 use konnekt_session_core::domain::{ActivityConfig, ActivityResult};
-use konnekt_session_p2p::{IceServer, P2PLoopBuilder, SessionId, SessionLoop};
+use konnekt_session_p2p::{IceServer, MatchboxSessionLoop, SessionId, SessionLoopV2Builder};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{info, instrument};
@@ -120,8 +120,8 @@ fn build_ice_servers(
 }
 
 async fn create_host(server: &str, name: &str, ice_servers: Vec<IceServer>) -> Result<()> {
-    let (session_loop, session_id) = P2PLoopBuilder::new()
-        .build_session_host(
+    let (session_loop, session_id) = SessionLoopV2Builder::new()
+        .build_host(
             server,
             ice_servers,
             "TUI Lobby".to_string(),
@@ -129,7 +129,7 @@ async fn create_host(server: &str, name: &str, ice_servers: Vec<IceServer>) -> R
         )
         .await?;
 
-    run_tui(session_loop, session_id).await
+    run_tui(session_loop, session_id, None).await
 }
 
 async fn join_session(
@@ -140,20 +140,16 @@ async fn join_session(
 ) -> Result<()> {
     let session_id = SessionId::parse(session_id_str)?;
 
-    let (mut session_loop, lobby_id) = P2PLoopBuilder::new()
-        .build_session_guest(server, session_id.clone(), ice_servers)
+    let (mut session_loop, _lobby_id) = SessionLoopV2Builder::new()
+        .build_guest(server, session_id.clone(), ice_servers)
         .await?;
 
     // Wait for lobby to sync from host
+    let participant_id = session_loop.join(name.to_string())?;
     wait_for_lobby_sync(&mut session_loop).await?;
 
     // Submit join command
-    session_loop.submit_command(DomainCommand::JoinLobby {
-        lobby_id,
-        guest_name: name.to_string(),
-    })?;
-
-    run_tui(session_loop, session_id).await
+    run_tui(session_loop, session_id, Some(participant_id)).await
 }
 
 /// Commands from TUI to SessionLoop
@@ -196,11 +192,17 @@ enum UiUpdate {
 }
 
 #[instrument(skip(session_loop), fields(session_id = %session_id))]
-async fn run_tui(mut session_loop: SessionLoop, session_id: SessionId) -> Result<()> {
+async fn run_tui(
+    mut session_loop: MatchboxSessionLoop,
+    session_id: SessionId,
+    local_participant_id: Option<Uuid>,
+) -> Result<()> {
     info!("Starting TUI");
 
     let mut terminal = tui::setup_terminal()?;
     let mut app = App::new(session_id.to_string());
+    app.local_participant_id =
+        local_participant_id.or_else(|| session_loop.get_lobby().map(|lobby| lobby.host_id()));
 
     let (ui_tx, mut ui_rx) = mpsc::channel(10);
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<UserCommand>(10);
@@ -300,7 +302,7 @@ async fn run_app_loop(
 
 /// Handle user commands (business logic)
 fn handle_user_command(
-    session_loop: &mut SessionLoop,
+    session_loop: &mut MatchboxSessionLoop,
     lobby_id: Uuid,
     command: UserCommand,
 ) -> Result<()> {
@@ -437,14 +439,16 @@ async fn handle_user_action(
     Ok(())
 }
 
-async fn wait_for_lobby_sync(session_loop: &mut SessionLoop) -> Result<()> {
+async fn wait_for_lobby_sync(session_loop: &mut MatchboxSessionLoop) -> Result<()> {
     let timeout = Duration::from_secs(10);
     let start = std::time::Instant::now();
 
     while start.elapsed() < timeout {
         session_loop.poll();
 
-        if session_loop.get_lobby().is_some() {
+        if session_loop.join_state()
+            == Some(konnekt_session_p2p::protocol::join::JoinSessionState::Ready)
+        {
             return Ok(());
         }
 
