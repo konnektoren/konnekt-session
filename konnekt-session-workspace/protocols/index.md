@@ -10,6 +10,7 @@ Multi-step protocols between players and services. Each protocol is a sans-IO st
 
 | Protocol | Status | Crate | Summary |
 |---|---|---|---|
+| State synchronization | partial | `konnekt-session-p2p` | Observe initial snapshot, detected gaps, recovery, and disconnects in V2 |
 | [[rating-match\|Rating Match]] | draft | `konnekt-session-rating` | Two players co-sign every round and the match record; disconnect, forfeit, resume |
 | Matchmaking Search | planned | `konnekt-session-matchmaking` | Search, widening window, match found / no match / ghost offer, expiry |
 
@@ -62,6 +63,22 @@ stateDiagram-v2
     Ready --> Disconnected : disconnected
     Failed --> Connecting : retry
     Disconnected --> Connecting : retry
+```
+
+### State synchronization
+
+```mermaid
+stateDiagram-v2
+    [*] --> AwaitingSnapshot
+    AwaitingSnapshot --> Current : snapshot_applied
+    Recovering --> Current : snapshot_applied
+    Current --> Recovering : gap_detected
+    Recovering --> Current : gap_recovered
+    Recovering --> AwaitingSnapshot : snapshot_required
+    AwaitingSnapshot --> Disconnected : disconnected
+    Current --> Disconnected : disconnected
+    Recovering --> Disconnected : disconnected
+    Disconnected --> AwaitingSnapshot : reconnected
 ```
 
 ### Rating match

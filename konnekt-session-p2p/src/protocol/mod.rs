@@ -2,3 +2,4 @@
 
 pub mod identity;
 pub mod join;
+pub mod synchronization;

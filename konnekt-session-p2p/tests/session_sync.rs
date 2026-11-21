@@ -389,3 +389,54 @@ fn transport_reports_the_peer_that_sent_a_guest_command() {
     guest.send_to_host(payload.clone()).unwrap();
     assert_eq!(host.poll_with_sender(), vec![(guest_id, payload)]);
 }
+
+#[test]
+fn guest_reports_a_gap_until_missing_host_messages_arrive() -> Result<(), Box<dyn std::error::Error>>
+{
+    use konnekt_session_core::DomainLoop;
+    use konnekt_session_p2p::SessionLoopV2;
+    use konnekt_session_p2p::infrastructure::message::P2PMessage;
+    use konnekt_session_p2p::infrastructure::transport::P2PTransport;
+    use konnekt_session_p2p::protocol::synchronization::StateSynchronizationState as State;
+    use support::mock_connection::{MockConnection, create_mock_network};
+
+    let network = create_mock_network();
+    let mut host_connection = MockConnection::new(network.clone());
+    let guest_connection = MockConnection::new(network);
+    let guest_id = guest_connection
+        .local_peer_id()
+        .ok_or("missing guest peer")?;
+    let lobby_id = uuid::Uuid::new_v4();
+    let mut guest = SessionLoopV2::new(
+        DomainLoop::new(10, 100),
+        P2PTransport::new_guest(guest_connection, 10),
+        false,
+        lobby_id,
+    );
+    let host = konnekt_session_core::Participant::new_host("Host".into())?;
+    let snapshot = P2PMessage::snapshot_response(
+        serde_json::json!({
+            "lobby_id": lobby_id,
+            "name": "Lobby",
+            "host_id": host.id(),
+            "participants": [host],
+        }),
+        0,
+    );
+    host_connection.send_to(guest_id, serde_json::to_vec(&snapshot)?)?;
+    guest.poll();
+    guest.poll();
+    assert_eq!(guest.synchronization_state(), Some(State::Current));
+
+    let mut message = P2PMessage::application(serde_json::json!({}));
+    message.sequence = 2;
+    host_connection.send_to(guest_id, serde_json::to_vec(&message)?)?;
+    guest.poll();
+    assert_eq!(guest.synchronization_state(), Some(State::Recovering));
+
+    message.sequence = 1;
+    host_connection.send_to(guest_id, serde_json::to_vec(&message)?)?;
+    guest.poll();
+    assert_eq!(guest.synchronization_state(), Some(State::Current));
+    Ok(())
+}

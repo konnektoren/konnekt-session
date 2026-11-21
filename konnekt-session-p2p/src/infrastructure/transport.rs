@@ -391,6 +391,10 @@ impl<C: NetworkConnection> P2PTransport<C> {
     pub fn connected_peers(&self) -> Vec<PeerId> {
         self.connection.connected_peers()
     }
+
+    pub(crate) fn has_sequence_gap(&self) -> bool {
+        !self.pending_messages.is_empty()
+    }
 }
 
 // Type alias for production use (with MatchboxConnection)

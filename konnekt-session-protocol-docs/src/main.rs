@@ -15,6 +15,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             include_str!(concat!(env!("OUT_DIR"), "/join.mmd")),
         ),
         (
+            "State synchronization",
+            "state-synchronization",
+            include_str!(concat!(env!("OUT_DIR"), "/synchronization.mmd")),
+        ),
+        (
             "Rating match",
             "rating-match",
             include_str!(concat!(env!("OUT_DIR"), "/rating-match.mmd")),

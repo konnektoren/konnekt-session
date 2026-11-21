@@ -1,6 +1,9 @@
 use crate::infrastructure::error::Result;
 use crate::infrastructure::transport::{NetworkConnection, P2PTransport, TransportEvent};
 use crate::protocol::join::{DynamicJoinSession, JoinSessionEvent, JoinSessionState};
+use crate::protocol::synchronization::{
+    DynamicStateSynchronization, StateSynchronizationEvent, StateSynchronizationState,
+};
 use konnekt_session_core::{DomainCommand, DomainEvent as CoreDomainEvent, DomainLoop, Lobby};
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -23,6 +26,7 @@ pub struct SessionLoopV2<C: NetworkConnection> {
     join_participant: Option<konnekt_session_core::Participant>,
     join_connected: bool,
     join_retry_ticks: u8,
+    synchronization: Option<DynamicStateSynchronization>,
 }
 
 impl<C: NetworkConnection> SessionLoopV2<C> {
@@ -42,6 +46,7 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             join_participant: None,
             join_connected: false,
             join_retry_ticks: 0,
+            synchronization: (!is_host).then(|| DynamicStateSynchronization::new(())),
         }
     }
 
@@ -65,6 +70,16 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         self.join.as_ref().map(DynamicJoinSession::current_state)
     }
 
+    /// Guest synchronization state. Hosts do not synchronize from another peer.
+    ///
+    /// `Current` means a snapshot was applied and no sequence gap is known;
+    /// it does not prove that all host messages have arrived or authenticate them.
+    pub fn synchronization_state(&self) -> Option<StateSynchronizationState> {
+        self.synchronization
+            .as_ref()
+            .map(DynamicStateSynchronization::current_state)
+    }
+
     fn update_join_connection(&mut self) {
         let connected = !self.transport.connected_peers().is_empty();
         if connected == self.join_connected {
@@ -74,15 +89,41 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         self.join_retry_ticks = 0;
         let Some(join) = &mut self.join else { return };
         if connected {
+            if let Some(sync) = &mut self.synchronization
+                && sync.current_state() == StateSynchronizationState::Disconnected
+            {
+                let _ = sync.handle(StateSynchronizationEvent::Reconnected);
+            }
             if join.current_state() == JoinSessionState::Disconnected {
                 let _ = join.handle(JoinSessionEvent::Retry);
             }
             let _ = join.handle(JoinSessionEvent::Connected);
         } else {
+            if let Some(sync) = &mut self.synchronization {
+                let _ = sync.handle(StateSynchronizationEvent::Disconnected);
+            }
             let _ = join.handle(JoinSessionEvent::Disconnected);
             if self.join_participant.is_some() {
                 self.domain = DomainLoop::new(10, 100);
             }
+        }
+    }
+
+    fn update_synchronization_gap(&mut self) {
+        let Some(sync) = &mut self.synchronization else {
+            return;
+        };
+        let event = match (sync.current_state(), self.transport.has_sequence_gap()) {
+            (StateSynchronizationState::Current, true) => {
+                Some(StateSynchronizationEvent::GapDetected)
+            }
+            (StateSynchronizationState::Recovering, false) => {
+                Some(StateSynchronizationEvent::GapRecovered)
+            }
+            _ => None,
+        };
+        if let Some(event) = event {
+            let _ = sync.handle(event);
         }
     }
 
@@ -175,17 +216,23 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
                     as_of_sequence,
                 } => {
                     tracing::info!("📥 GUEST: Received snapshot (seq: {})", as_of_sequence);
-                    if !self.is_host
-                        && self.apply_snapshot(snapshot)
-                        && let Some(join) = &mut self.join
-                    {
-                        let event = match join.current_state() {
-                            JoinSessionState::Joining => Some(JoinSessionEvent::SnapshotApplied),
-                            JoinSessionState::Synchronizing => Some(JoinSessionEvent::Synchronized),
-                            _ => None,
-                        };
-                        if let Some(event) = event {
-                            let _ = join.handle(event);
+                    if !self.is_host && self.apply_snapshot(snapshot) {
+                        if let Some(sync) = &mut self.synchronization {
+                            let _ = sync.handle(StateSynchronizationEvent::SnapshotApplied);
+                        }
+                        if let Some(join) = &mut self.join {
+                            let event = match join.current_state() {
+                                JoinSessionState::Joining => {
+                                    Some(JoinSessionEvent::SnapshotApplied)
+                                }
+                                JoinSessionState::Synchronizing => {
+                                    Some(JoinSessionEvent::Synchronized)
+                                }
+                                _ => None,
+                            };
+                            if let Some(event) = event {
+                                let _ = join.handle(event);
+                            }
                         }
                     }
                 }
@@ -319,6 +366,7 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             self.domain.drain_events();
             self.update_join_admission();
             self.send_join_request();
+            self.update_synchronization_gap();
         }
 
         processed

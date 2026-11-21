@@ -32,6 +32,8 @@ serde_json = { workspace=true }
 
 [dev-dependencies]
 tokio = { version = "1.37", features = ["macros", "rt-multi-thread"] }
+matchbox_socket = { workspace = true }
+tracing = { workspace = true }
 
 [[test]]
 name = "bdd_tests"
@@ -43,4 +45,8 @@ harness = false
 
 [[test]]
 name = "bdd_who_am_i"
+harness = false
+
+[[test]]
+name = "bdd_synchronization"
 harness = false
