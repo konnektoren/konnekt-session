@@ -4,6 +4,23 @@ use konnekt_session_core::{DomainCommand, domain::ActivityConfig};
 use support::SessionFixture;
 
 #[test]
+fn joining_guests_with_the_same_name_keep_distinct_ids() {
+    use konnekt_session_p2p::protocol::join::JoinSessionState;
+
+    let mut fixture = SessionFixture::new(2);
+    let first = fixture.guests[0].join("Player".into()).unwrap();
+    let second = fixture.guests[1].join("Player".into()).unwrap();
+    assert_ne!(first, second);
+    fixture.tick(50);
+    for guest in &fixture.guests {
+        assert_eq!(guest.join_state(), Some(JoinSessionState::Ready));
+        let lobby = guest.get_lobby().unwrap();
+        assert!(lobby.participants().contains_key(&first));
+        assert!(lobby.participants().contains_key(&second));
+    }
+}
+
+#[test]
 fn test_guest_joins_and_syncs_lobby() {
     let mut fixture = SessionFixture::new(1);
 

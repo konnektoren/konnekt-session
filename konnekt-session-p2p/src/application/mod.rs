@@ -7,5 +7,6 @@ mod sync_manager;
 pub use config::SessionConfig;
 pub use event_translator::EventTranslator;
 pub use events::ConnectionEvent;
+#[allow(deprecated)]
 pub use runtime::{MessageQueue, P2PLoop, P2PLoopBuilder, QueueError, SessionLoop};
 pub use sync_manager::{EventSyncManager, LobbySnapshot, SyncError, SyncMessage, SyncResponse};

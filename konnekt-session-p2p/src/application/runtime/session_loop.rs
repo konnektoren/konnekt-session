@@ -8,6 +8,10 @@ use uuid::Uuid;
 /// Unified session loop that coordinates P2P ↔ Core
 ///
 /// This is the single integration point between networking and business logic.
+#[deprecated(
+    since = "0.5.0",
+    note = "Use SessionLoopV2; migrate carefully as peer tracking and host promotion differ"
+)]
 pub struct SessionLoop {
     /// P2P networking layer
     p2p: P2PLoop,
@@ -22,6 +26,7 @@ pub struct SessionLoop {
     is_host: bool,
 }
 
+#[allow(deprecated)]
 impl SessionLoop {
     /// Create a new session loop for HOST
     pub fn new_host(p2p: P2PLoop, domain: DomainLoop, lobby_id: Uuid) -> Self {

@@ -31,6 +31,7 @@ uuid = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 instant = { workspace = true }
+state-machines = { workspace = true }
 
 # Observability (optional)
 console-subscriber = { workspace = true, optional = true }

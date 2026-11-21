@@ -3,11 +3,13 @@ pub mod domain;
 
 // Application layer (use cases)
 pub mod application;
+pub mod protocol;
 
 // Infrastructure layer (adapters)
 pub mod infrastructure;
 
 // Re-exports for convenience
+#[allow(deprecated)]
 pub use application::runtime::{
     MatchboxSessionLoop, MessageQueue, P2PLoop, P2PLoopBuilder, QueueError, SessionLoop,
     SessionLoopV2, SessionLoopV2Builder,
