@@ -64,7 +64,7 @@ pub struct P2PTransport<C: NetworkConnection> {
     highest_received: u64,
 
     /// Out-of-order messages waiting for gaps
-    pending_messages: HashMap<u64, P2PMessage>,
+    pending_messages: HashMap<u64, (PeerId, P2PMessage)>,
 
     /// Delivered messages (for resend requests)
     message_cache: VecDeque<P2PMessage>,
@@ -215,6 +215,17 @@ impl<C: NetworkConnection> P2PTransport<C> {
 
     /// Poll for application messages (handles ordering + gap detection)
     pub fn poll(&mut self) -> Vec<serde_json::Value> {
+        self.poll_with_sender()
+            .into_iter()
+            .map(|(_, payload)| payload)
+            .collect()
+    }
+
+    /// Poll application messages with the peer that delivered them.
+    ///
+    /// For a resend response this is the responding peer; it does not prove
+    /// who originally authored a message or authenticate its contents.
+    pub fn poll_with_sender(&mut self) -> Vec<(PeerId, serde_json::Value)> {
         let mut delivered = Vec::new();
 
         // Get raw network events
@@ -230,6 +241,7 @@ impl<C: NetworkConnection> P2PTransport<C> {
                         match msg.kind {
                             MessageKind::Application { payload } => {
                                 self.handle_application_message(
+                                    from,
                                     msg.sequence,
                                     payload.clone(),
                                     &mut delivered,
@@ -261,7 +273,7 @@ impl<C: NetworkConnection> P2PTransport<C> {
                                 self.handle_resend_request(seq_from, to, from);
                             }
                             MessageKind::ResendResponse { messages } => {
-                                self.handle_resend_response(messages, &mut delivered);
+                                self.handle_resend_response(from, messages, &mut delivered);
                             }
                         }
                     }
@@ -281,25 +293,28 @@ impl<C: NetworkConnection> P2PTransport<C> {
     /// Handle application message with ordering
     fn handle_application_message(
         &mut self,
+        from: PeerId,
         sequence: u64,
         payload: serde_json::Value,
-        delivered: &mut Vec<serde_json::Value>,
+        delivered: &mut Vec<(PeerId, serde_json::Value)>,
     ) {
         if sequence == 0 {
             // Unsequenced message (from guest) - deliver immediately
-            delivered.push(payload);
+            delivered.push((from, payload));
             return;
         }
 
         if sequence == self.highest_received + 1 {
             // In order - deliver immediately
-            delivered.push(payload);
+            delivered.push((from, payload));
             self.highest_received = sequence;
 
             // Check if we can deliver pending messages
-            while let Some(pending) = self.pending_messages.remove(&(self.highest_received + 1)) {
+            while let Some((from, pending)) =
+                self.pending_messages.remove(&(self.highest_received + 1))
+            {
                 if let MessageKind::Application { payload } = pending.kind {
-                    delivered.push(payload);
+                    delivered.push((from, payload));
                     self.highest_received = pending.sequence;
                 }
             }
@@ -309,7 +324,7 @@ impl<C: NetworkConnection> P2PTransport<C> {
                 sequence,
                 kind: MessageKind::Application { payload },
             };
-            self.pending_messages.insert(sequence, msg);
+            self.pending_messages.insert(sequence, (from, msg));
 
             // Request missing range
             self.request_resend(self.highest_received + 1, sequence - 1);
@@ -345,14 +360,15 @@ impl<C: NetworkConnection> P2PTransport<C> {
     /// Handle resend response (guest only)
     fn handle_resend_response(
         &mut self,
+        from: PeerId,
         messages: Vec<P2PMessage>,
-        delivered: &mut Vec<serde_json::Value>,
+        delivered: &mut Vec<(PeerId, serde_json::Value)>,
     ) {
         for msg in messages {
             // Extract sequence first, then handle payload
             let sequence = msg.sequence;
             if let MessageKind::Application { payload } = msg.kind {
-                self.handle_application_message(sequence, payload, delivered);
+                self.handle_application_message(from, sequence, payload, delivered);
             }
         }
     }
@@ -383,6 +399,55 @@ pub type MatchboxP2PTransport = P2PTransport<crate::infrastructure::connection::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct EmptyConnection;
+
+    impl NetworkConnection for EmptyConnection {
+        fn local_peer_id(&self) -> Option<PeerId> {
+            None
+        }
+        fn connected_peers(&self) -> Vec<PeerId> {
+            Vec::new()
+        }
+        fn send_to(&mut self, _: PeerId, _: Vec<u8>) -> Result<()> {
+            Ok(())
+        }
+        fn broadcast(&mut self, _: Vec<u8>) -> Result<()> {
+            Ok(())
+        }
+        fn poll_events(&mut self) -> Vec<ConnectionEvent> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn preserves_sender_when_buffered_messages_are_delivered() {
+        let mut transport = P2PTransport::new_guest(EmptyConnection, 10);
+        let first = PeerId::new(matchbox_socket::PeerId(uuid::Uuid::new_v4()));
+        let second = PeerId::new(matchbox_socket::PeerId(uuid::Uuid::new_v4()));
+        let mut delivered = Vec::new();
+        transport.handle_application_message(second, 2, serde_json::json!(2), &mut delivered);
+        assert!(delivered.is_empty());
+        transport.handle_application_message(first, 1, serde_json::json!(1), &mut delivered);
+        assert_eq!(
+            delivered,
+            vec![
+                (first, serde_json::json!(1)),
+                (second, serde_json::json!(2))
+            ]
+        );
+    }
+
+    #[test]
+    fn resend_response_records_the_sending_peer() {
+        let mut transport = P2PTransport::new_guest(EmptyConnection, 10);
+        let peer = PeerId::new(matchbox_socket::PeerId(uuid::Uuid::new_v4()));
+        let mut message = P2PMessage::application(serde_json::json!("resent"));
+        message.sequence = 1;
+        let mut delivered = Vec::new();
+        transport.handle_resend_response(peer, vec![message], &mut delivered);
+        assert_eq!(delivered, vec![(peer, serde_json::json!("resent"))]);
+    }
 
     #[test]
     fn test_transport_event_types() {

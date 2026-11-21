@@ -373,3 +373,19 @@ fn guest_accepts_restarted_host_snapshot_and_new_sequence() -> Result<(), Box<dy
     );
     Ok(())
 }
+#[test]
+fn transport_reports_the_peer_that_sent_a_guest_command() {
+    use konnekt_session_p2p::infrastructure::transport::P2PTransport;
+    use support::mock_connection::{MockConnection, create_mock_network};
+
+    let network = create_mock_network();
+    let host_connection = MockConnection::new(network.clone());
+    let guest_connection = MockConnection::new(network);
+    let guest_id = guest_connection.local_peer_id().unwrap();
+    let mut host = P2PTransport::new_host(host_connection, 10);
+    let mut guest = P2PTransport::new_guest(guest_connection, 10);
+    let payload = serde_json::json!({"request": "join"});
+
+    guest.send_to_host(payload.clone()).unwrap();
+    assert_eq!(host.poll_with_sender(), vec![(guest_id, payload)]);
+}

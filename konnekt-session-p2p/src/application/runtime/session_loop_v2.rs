@@ -194,7 +194,7 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         }
 
         // 2. Poll transport for messages
-        let messages = self.transport.poll();
+        let messages = self.transport.poll_with_sender();
         if !self.is_host {
             self.update_join_connection();
         }
@@ -203,8 +203,9 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             tracing::debug!("📥 Received {} messages from transport", messages.len());
         }
 
-        for payload in messages {
+        for (sender, payload) in messages {
             processed += 1;
+            tracing::trace!(%sender, "Received application message");
 
             if let Ok(cmd) = serde_json::from_value::<DomainCommand>(payload.clone()) {
                 tracing::debug!("📥 Processing command: {:?}", std::mem::discriminant(&cmd));
