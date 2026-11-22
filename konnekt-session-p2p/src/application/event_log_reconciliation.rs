@@ -4,7 +4,7 @@
 //! using these methods. V2 does not yet provide those guarantees. This
 //! component never selects or applies a divergent history.
 
-use crate::domain::{EventLog, LobbyEvent, PeerId};
+use crate::domain::{EventLog, LobbyEvent, PeerId, SignedHistoryBatch};
 use crate::protocol::event_log_reconciliation::{
     DynamicEventLogReconciliation, EventLogReconciliationEvent as Event,
     EventLogReconciliationState as State,
@@ -25,6 +25,15 @@ pub(crate) enum HistoryMessage {
         lobby_id: Uuid,
         request_id: Uuid,
         events: Vec<LobbyEvent>,
+    },
+    SignedRequest {
+        lobby_id: Uuid,
+        request_id: Uuid,
+    },
+    SignedResponse {
+        lobby_id: Uuid,
+        request_id: Uuid,
+        history: SignedHistoryBatch,
     },
 }
 
@@ -61,6 +70,18 @@ impl SignedHistory {
 
 pub(crate) fn valid_history(lobby_id: Uuid, events: &[LobbyEvent]) -> bool {
     events.len() <= MAX_HISTORY_EVENTS && events.iter().all(|event| event.lobby_id == lobby_id)
+}
+
+pub(crate) fn valid_signed_history(lobby_id: Uuid, history: &SignedHistoryBatch) -> bool {
+    !history.events.is_empty()
+        && history.events.len() <= MAX_HISTORY_EVENTS
+        && history
+            .anchor
+            .is_none_or(|anchor| anchor.lobby_id == lobby_id)
+        && history
+            .events
+            .iter()
+            .all(|event| event.lobby_id == lobby_id)
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]

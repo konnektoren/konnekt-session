@@ -7,6 +7,7 @@ mod identity;
 pub(crate) mod identity_exchange;
 mod request_ledger;
 pub mod runtime;
+pub mod signed_history;
 mod sync_manager;
 
 pub use config::SessionConfig;

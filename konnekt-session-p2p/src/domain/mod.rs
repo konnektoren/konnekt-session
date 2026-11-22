@@ -7,6 +7,7 @@ mod peer_participant_map;
 mod peer_state;
 mod request;
 mod session;
+mod signed_event;
 
 pub use event::{DelegationReason, DomainEvent, LobbyEvent};
 pub use event_log::EventLog;
@@ -18,3 +19,4 @@ pub use session::SessionId;
 
 pub use identity::{IdentityChallenge, IdentityProofError, VerifiedIdentity};
 pub use request::{RequestDisposition, RequestLedgerError, RequestResult};
+pub use signed_event::{EventHash, HistoryAnchor, SignedEvent, SignedHistoryBatch};

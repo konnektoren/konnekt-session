@@ -11,6 +11,7 @@ pub struct SessionLoopV2Builder {
     batch_size: usize,
     queue_size: usize,
     cache_size: usize,
+    signed_history: Option<(ed25519_dalek::SigningKey, usize)>,
 }
 
 impl SessionLoopV2Builder {
@@ -19,6 +20,7 @@ impl SessionLoopV2Builder {
             batch_size: 10,
             queue_size: 100,
             cache_size: 100,
+            signed_history: None,
         }
     }
 
@@ -34,6 +36,12 @@ impl SessionLoopV2Builder {
 
     pub fn cache_size(mut self, size: usize) -> Self {
         self.cache_size = size;
+        self
+    }
+
+    /// Record host events from lobby creation with the provided key and limit.
+    pub fn signed_history(mut self, key: ed25519_dalek::SigningKey, capacity: usize) -> Self {
+        self.signed_history = Some((key, capacity));
         self
     }
 
@@ -81,6 +89,27 @@ impl SessionLoopV2Builder {
             lobby_name,
             host_name,
         };
+
+        if let Some((key, capacity)) = self.signed_history {
+            let mut session = MatchboxSessionLoop::new(domain, transport, true, lobby_id);
+            session
+                .enable_signed_history(key, capacity)
+                .map_err(|error| {
+                    crate::infrastructure::error::P2PError::ConnectionFailed(error.to_string())
+                })?;
+            session.submit_command(create_cmd)?;
+            session.poll();
+            if session.get_lobby().is_none()
+                || session
+                    .signed_history()
+                    .is_none_or(|history| history.failed() || history.tip().is_none())
+            {
+                return Err(crate::infrastructure::error::P2PError::ConnectionFailed(
+                    "Failed to create lobby with signed history".into(),
+                ));
+            }
+            return Ok((session, session_id));
+        }
 
         domain
             .submit(create_cmd)

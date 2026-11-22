@@ -77,6 +77,7 @@ impl EventTranslator {
             // State snapshots — applied via snapshot sync, not commands
             P2PDomainEvent::LobbyCreated { .. } => None,
             P2PDomainEvent::RunStarted { .. } => None,
+            P2PDomainEvent::SubmitterRemoved { .. } => None,
             P2PDomainEvent::RunEnded { .. } => None,
         }
     }
@@ -143,7 +144,14 @@ impl EventTranslator {
                 Some(P2PDomainEvent::ResultSubmitted { run_id, result })
             }
 
-            CoreDomainEvent::SubmitterRemoved { .. } => None,
+            CoreDomainEvent::SubmitterRemoved {
+                run_id,
+                participant_id,
+                ..
+            } => Some(P2PDomainEvent::SubmitterRemoved {
+                run_id,
+                participant_id,
+            }),
 
             CoreDomainEvent::RunEnded {
                 run_id,

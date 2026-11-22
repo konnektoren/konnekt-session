@@ -1,9 +1,10 @@
 use crate::application::event_log_reconciliation::{
     HistoryMessage, MAX_HISTORY_BYTES, ReconciliationAttempt, ReconciliationError, SignedHistory,
-    valid_history,
+    valid_history, valid_signed_history,
 };
 use crate::application::host_failover::{DEFAULT_GRACE, HostObservation};
 use crate::application::identity_exchange::{IdentityExchange, IdentityMessage};
+use crate::application::signed_history::{SignedHistoryError, SignedHistoryRecorder};
 use crate::domain::VerifiedIdentity;
 use crate::infrastructure::error::Result;
 use crate::infrastructure::transport::{NetworkConnection, P2PTransport, TransportEvent};
@@ -51,6 +52,8 @@ pub struct SessionLoopV2<C: NetworkConnection> {
     host_grace: std::time::Duration,
     reconciliation: Option<PeerReconciliation>,
     history_offer: Option<HistoryOffer>,
+    signed_history_offer: Option<SignedHistoryOffer>,
+    signed_history: Option<SignedHistoryRecorder>,
 }
 
 struct PeerReconciliation {
@@ -59,12 +62,20 @@ struct PeerReconciliation {
     request_id: Option<Uuid>,
     expected_key: Option<[u8; 32]>,
     received_history: Option<Vec<crate::domain::LobbyEvent>>,
+    requested_signed: bool,
+    received_signed_history: Option<crate::domain::SignedHistoryBatch>,
 }
 
 struct HistoryOffer {
     peer: crate::domain::PeerId,
     expected_key: [u8; 32],
     events: Vec<crate::domain::LobbyEvent>,
+}
+
+struct SignedHistoryOffer {
+    peer: crate::domain::PeerId,
+    expected_key: [u8; 32],
+    history: crate::domain::SignedHistoryBatch,
 }
 
 struct TrackedCommand {
@@ -103,6 +114,8 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             host_grace: DEFAULT_GRACE,
             reconciliation: None,
             history_offer: None,
+            signed_history_offer: None,
+            signed_history: None,
         }
     }
 
@@ -143,6 +156,78 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         self.host_observation.as_ref().map(HostObservation::state)
     }
 
+    /// Enable bounded host event recording before creating this lobby. The
+    /// caller owns the key and must persist retained events and checkpoints.
+    /// Recorded history is not yet used to restore or synchronize a session.
+    pub fn enable_signed_history(
+        &mut self,
+        key: ed25519_dalek::SigningKey,
+        capacity: usize,
+    ) -> std::result::Result<(), SignedHistoryError> {
+        if !self.is_host || self.signed_history.is_some() || self.get_lobby().is_some() {
+            return Err(SignedHistoryError::RecordingUnavailable);
+        }
+        self.signed_history = Some(SignedHistoryRecorder::new(self.lobby_id, key, capacity)?);
+        Ok(())
+    }
+
+    /// The retained local chain and its checkpoint, if recording was enabled.
+    pub fn signed_history(&self) -> Option<&SignedHistoryRecorder> {
+        self.signed_history.as_ref()
+    }
+
+    fn record_signed_event(&mut self, event: &CoreDomainEvent) {
+        if self.signed_history.is_none() || matches!(event, CoreDomainEvent::CommandFailed { .. }) {
+            return;
+        }
+        let event_lobby = match event {
+            CoreDomainEvent::LobbyCreated { lobby } => lobby.id(),
+            CoreDomainEvent::GuestJoined { lobby_id, .. }
+            | CoreDomainEvent::GuestLeft { lobby_id, .. }
+            | CoreDomainEvent::GuestKicked { lobby_id, .. }
+            | CoreDomainEvent::ParticipationModeChanged { lobby_id, .. }
+            | CoreDomainEvent::HostDelegated { lobby_id, .. }
+            | CoreDomainEvent::ActivityQueued { lobby_id, .. }
+            | CoreDomainEvent::RunStarted { lobby_id, .. }
+            | CoreDomainEvent::ResultSubmitted { lobby_id, .. }
+            | CoreDomainEvent::SubmitterRemoved { lobby_id, .. }
+            | CoreDomainEvent::RunEnded { lobby_id, .. } => *lobby_id,
+            CoreDomainEvent::CommandFailed { .. } => return,
+        };
+        if event_lobby != self.lobby_id {
+            return;
+        }
+        let mut translated =
+            crate::application::EventTranslator::new(self.lobby_id).to_p2p_event(event.clone());
+        if let CoreDomainEvent::RunStarted { run_id, .. } = event {
+            if let (
+                Some(crate::domain::DomainEvent::RunStarted {
+                    required_submitters,
+                    ..
+                }),
+                Some(run),
+            ) = (&mut translated, self.domain.event_loop().get_run(run_id))
+            {
+                *required_submitters = run.required_submitters().iter().copied().collect();
+                required_submitters.sort_unstable();
+            } else {
+                if let Some(recorder) = &mut self.signed_history {
+                    recorder.stop();
+                }
+                return;
+            }
+        }
+        if let Some(recorder) = &mut self.signed_history {
+            if let Some(event) = translated {
+                if let Err(error) = recorder.append(event) {
+                    tracing::warn!(%error, "Signed history recording stopped");
+                }
+            } else {
+                recorder.stop();
+            }
+        }
+    }
+
     /// Start a local reconciliation attempt for one currently connected peer.
     /// This does not exchange histories or authenticate the peer.
     pub fn begin_reconciliation(
@@ -169,6 +254,8 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             request_id: None,
             expected_key: None,
             received_history: None,
+            requested_signed: false,
+            received_signed_history: None,
         });
         Ok(())
     }
@@ -214,6 +301,7 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         entry.attempt.cancel()?;
         entry.request_id = None;
         entry.received_history = None;
+        entry.received_signed_history = None;
         Ok(())
     }
 
@@ -264,6 +352,58 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
     /// Remove the current history offer.
     pub fn clear_reconciliation_history_offer(&mut self) {
         self.history_offer = None;
+        self.signed_history_offer = None;
+    }
+
+    /// Offer the current locally recorded signed segment to a pinned peer.
+    /// Its checkpoint must be trusted independently by the recipient.
+    pub fn offer_recorded_signed_history(
+        &mut self,
+        peer: crate::domain::PeerId,
+        expected_key: [u8; 32],
+    ) -> Result<()> {
+        use crate::infrastructure::error::P2PError;
+        if !self.transport.connected_peers().contains(&peer)
+            || !self
+                .verified_peer_identity(peer)
+                .is_some_and(|identity| identity.public_key() == &expected_key)
+        {
+            return Err(P2PError::SendFailed(
+                "History peer is disconnected or its key is not verified".into(),
+            ));
+        }
+        let recorder = self
+            .signed_history
+            .as_ref()
+            .filter(|history| !history.failed())
+            .ok_or_else(|| {
+                P2PError::SendFailed("No complete signed recording is available".into())
+            })?;
+        let history = crate::domain::SignedHistoryBatch {
+            anchor: recorder.anchor(),
+            events: recorder.events().iter().cloned().collect(),
+        };
+        let sample = HistoryMessage::SignedResponse {
+            lobby_id: self.lobby_id,
+            request_id: Uuid::nil(),
+            history: history.clone(),
+        };
+        if !valid_signed_history(self.lobby_id, &history)
+            || serde_json::to_vec(&sample)
+                .map_err(P2PError::Serialization)?
+                .len()
+                > MAX_HISTORY_BYTES
+        {
+            return Err(P2PError::SendFailed(
+                "Signed history exceeds transfer limits".into(),
+            ));
+        }
+        self.signed_history_offer = Some(SignedHistoryOffer {
+            peer,
+            expected_key,
+            history,
+        });
+        Ok(())
     }
 
     /// Request the selected peer's offered history after the caller reports a
@@ -301,7 +441,61 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         entry.request_id = Some(request_id);
         entry.expected_key = Some(expected_key);
         entry.received_history = None;
+        entry.requested_signed = false;
+        entry.received_signed_history = None;
         Ok(request_id)
+    }
+
+    /// Request a recorded signed segment. This supersedes any previous request.
+    pub fn request_signed_reconciliation_history(
+        &mut self,
+        expected_key: [u8; 32],
+    ) -> Result<Uuid> {
+        use crate::infrastructure::error::P2PError;
+        let entry = self
+            .reconciliation
+            .as_ref()
+            .ok_or_else(|| P2PError::SendFailed("No reconciliation attempt".into()))?;
+        if entry.attempt.state() != EventLogReconciliationState::ComparingHistories {
+            return Err(P2PError::SendFailed(
+                "Reconciliation is not awaiting history".into(),
+            ));
+        }
+        let peer = entry.peer;
+        if !self
+            .verified_peer_identity(peer)
+            .is_some_and(|identity| identity.public_key() == &expected_key)
+        {
+            return Err(P2PError::SendFailed(
+                "History peer key is not verified or does not match".into(),
+            ));
+        }
+        let request_id = Uuid::new_v4();
+        self.send_signed_history(
+            peer,
+            HistoryMessage::SignedRequest {
+                lobby_id: self.lobby_id,
+                request_id,
+            },
+        )?;
+        if let Some(entry) = &mut self.reconciliation {
+            entry.request_id = Some(request_id);
+            entry.expected_key = Some(expected_key);
+            entry.requested_signed = true;
+            entry.received_history = None;
+            entry.received_signed_history = None;
+        }
+        Ok(request_id)
+    }
+
+    /// Take the authenticated message's signed events. Verify their signatures
+    /// and chain against independently trusted authors and checkpoint.
+    pub fn take_signed_reconciliation_history(
+        &mut self,
+    ) -> Option<crate::domain::SignedHistoryBatch> {
+        let entry = self.reconciliation.as_mut()?;
+        (entry.attempt.state() == EventLogReconciliationState::ComparingHistories)
+            .then(|| entry.received_signed_history.take())?
     }
 
     fn send_signed_history(
@@ -346,6 +540,54 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
 
     fn receive_history_message(&mut self, sender: crate::domain::PeerId, message: HistoryMessage) {
         match message {
+            HistoryMessage::SignedRequest {
+                lobby_id,
+                request_id,
+            } if lobby_id == self.lobby_id => {
+                let Some(offer) = self.signed_history_offer.as_ref().filter(|offer| {
+                    offer.peer == sender
+                        && self
+                            .verified_peer_identity(sender)
+                            .is_some_and(|identity| identity.public_key() == &offer.expected_key)
+                }) else {
+                    return;
+                };
+                if !self
+                    .identity_exchange
+                    .as_mut()
+                    .is_some_and(|exchange| exchange.accept_history_request(sender, request_id))
+                {
+                    return;
+                }
+                let response = HistoryMessage::SignedResponse {
+                    lobby_id,
+                    request_id,
+                    history: offer.history.clone(),
+                };
+                if let Err(error) = self.send_signed_history(sender, response) {
+                    tracing::debug!(%error, "Unable to send signed reconciliation history");
+                }
+            }
+            HistoryMessage::SignedResponse {
+                lobby_id,
+                request_id,
+                history,
+            } if lobby_id == self.lobby_id && valid_signed_history(lobby_id, &history) => {
+                if let Some(entry) = &mut self.reconciliation
+                    && entry.peer == sender
+                    && entry.requested_signed
+                    && entry.request_id == Some(request_id)
+                    && self
+                        .identity_exchange
+                        .as_ref()
+                        .and_then(|exchange| exchange.verified(sender))
+                        .is_some_and(|identity| Some(*identity.public_key()) == entry.expected_key)
+                    && entry.attempt.state() == EventLogReconciliationState::ComparingHistories
+                {
+                    entry.request_id = None;
+                    entry.received_signed_history = Some(history);
+                }
+            }
             HistoryMessage::Request {
                 lobby_id,
                 request_id,
@@ -381,6 +623,7 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             } if lobby_id == self.lobby_id && valid_history(lobby_id, &events) => {
                 if let Some(entry) = &mut self.reconciliation
                     && entry.peer == sender
+                    && !entry.requested_signed
                     && entry.request_id == Some(request_id)
                     && self
                         .identity_exchange
@@ -591,11 +834,13 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
     /// Callers must retain their own key if they need identity across reconnects.
     pub fn enable_identity_exchange(&mut self, secret: [u8; 32]) {
         self.history_offer = None;
+        self.signed_history_offer = None;
         if let Some(entry) = &mut self.reconciliation {
             let _ = entry.attempt.cancel();
             entry.request_id = None;
             entry.expected_key = None;
             entry.received_history = None;
+            entry.received_signed_history = None;
         }
         self.identity_exchange = Some(IdentityExchange::new(secret));
     }
@@ -681,6 +926,7 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             let _ = entry.attempt.cancel();
             entry.request_id = None;
             entry.received_history = None;
+            entry.received_signed_history = None;
         }
         if self
             .history_offer
@@ -688,6 +934,13 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             .is_some_and(|offer| disconnected.contains(&offer.peer))
         {
             self.history_offer = None;
+        }
+        if self
+            .signed_history_offer
+            .as_ref()
+            .is_some_and(|offer| disconnected.contains(&offer.peer))
+        {
+            self.signed_history_offer = None;
         }
         let now = instant::Instant::now();
         if let Some(observation) = &mut self.host_observation {
@@ -805,6 +1058,7 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         // 4. Broadcast HOST-INITIATED events (not guest commands)
         if self.is_host {
             for (request_id, event) in self.domain.drain_events_with_ids() {
+                self.record_signed_event(&event);
                 if let Some(tracked) = request_id.and_then(|id| self.command_outcomes.get_mut(&id))
                 {
                     let outcome = if let CoreDomainEvent::CommandFailed { reason, .. } = &event {

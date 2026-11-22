@@ -81,6 +81,328 @@ struct SyncWorld {
     timed_out: Vec<PeerId>,
     asset: Option<AssetFixture>,
     offered_history: Vec<konnekt_session_p2p::domain::LobbyEvent>,
+    signed_history: Option<SignedHistoryFixture>,
+    recording: Option<RecordingFixture>,
+    expected_signed_anchor: Option<konnekt_session_p2p::domain::HistoryAnchor>,
+    expected_signed_author: Option<[u8; 32]>,
+}
+
+#[given("a host and guest connect while the host records signed history")]
+fn signed_history_session(world: &mut SyncWorld) {
+    use ed25519_dalek::SigningKey;
+    let network = create_mock_network();
+    let host = MockConnection::new(network.clone());
+    let host_sender = host.clone();
+    let guest = MockConnection::new(network.clone());
+    let guest_id = guest
+        .local_peer_id()
+        .unwrap_or_else(|| panic!("missing guest"));
+    let lobby_id = Uuid::new_v4();
+    let key = SigningKey::from_bytes(&[8; 32]);
+    world.expected_signed_author = Some(key.verifying_key().to_bytes());
+    let mut host_loop = SessionLoopV2::new(
+        DomainLoop::new(10, 100),
+        P2PTransport::new_host(host, 100),
+        true,
+        lobby_id,
+    );
+    assert!(host_loop.enable_signed_history(key, 2).is_ok());
+    assert!(
+        host_loop
+            .submit_command(DomainCommand::CreateLobby {
+                lobby_id: Some(lobby_id),
+                lobby_name: "Room".into(),
+                host_name: "Host".into()
+            })
+            .is_ok()
+    );
+    host_loop.poll();
+    for name in ["First", "Second"] {
+        assert!(
+            host_loop
+                .submit_command(DomainCommand::QueueActivity {
+                    lobby_id,
+                    config: ActivityConfig::new(
+                        "test".into(),
+                        name.into(),
+                        serde_json::Value::Null
+                    )
+                })
+                .is_ok()
+        );
+        host_loop.poll();
+    }
+    world.expected_signed_anchor = host_loop
+        .signed_history()
+        .and_then(|history| history.anchor());
+    let mut guest_loop = SessionLoopV2::new(
+        DomainLoop::new(10, 100),
+        P2PTransport::new_guest(guest, 100),
+        false,
+        lobby_id,
+    );
+    for _ in 0..5 {
+        host_loop.poll();
+        guest_loop.poll();
+    }
+    world.fixture = Some(Fixture {
+        host: host_sender,
+        host_loop,
+        guest: guest_loop,
+        guest_id,
+        lobby_id,
+        network,
+        disconnected_host: None,
+    });
+    begin_reconciliation(world);
+}
+
+#[when("the host shares its retained signed history")]
+fn exchange_signed_history(world: &mut SyncWorld) {
+    let Some(fixture) = &mut world.fixture else {
+        panic!("missing session")
+    };
+    let (host_key, guest_key) = history_keys(fixture);
+    assert!(
+        fixture
+            .host_loop
+            .offer_recorded_signed_history(fixture.guest_id, guest_key)
+            .is_ok()
+    );
+    assert!(fixture.guest.reconciliation_authority_checked(true).is_ok());
+    assert!(
+        fixture
+            .guest
+            .request_signed_reconciliation_history(host_key)
+            .is_ok()
+    );
+    for _ in 0..3 {
+        fixture.host_loop.poll();
+        fixture.guest.poll();
+    }
+}
+
+#[then("the guest verifies the signed history using its trusted checkpoint")]
+fn verify_exchanged_signed_history(world: &mut SyncWorld) {
+    use konnekt_session_p2p::application::signed_history::{SignedHistoryError, verify_history};
+    let Some(fixture) = &mut world.fixture else {
+        panic!("missing session")
+    };
+    let Some(batch) = fixture.guest.take_signed_reconciliation_history() else {
+        panic!("missing signed history")
+    };
+    let author = world
+        .expected_signed_author
+        .unwrap_or_else(|| panic!("missing trusted author"));
+    assert_eq!(batch.anchor, world.expected_signed_anchor);
+    assert_eq!(
+        verify_history(fixture.lobby_id, &batch.events, &[author], None),
+        Err(SignedHistoryError::MissingAncestry)
+    );
+    assert!(
+        verify_history(
+            fixture.lobby_id,
+            &batch.events,
+            &[author],
+            world.expected_signed_anchor
+        )
+        .is_ok()
+    );
+}
+
+struct RecordingFixture {
+    session: SessionLoopV2<MockConnection>,
+    lobby: Uuid,
+    author: [u8; 32],
+}
+
+impl fmt::Debug for RecordingFixture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RecordingFixture").finish_non_exhaustive()
+    }
+}
+
+#[given("a host records signed history with room for two events")]
+fn recording_host(world: &mut SyncWorld) {
+    let network = create_mock_network();
+    let connection = MockConnection::new(network);
+    let lobby = Uuid::new_v4();
+    let key = ed25519_dalek::SigningKey::from_bytes(&[8; 32]);
+    let author = key.verifying_key().to_bytes();
+    let mut session = SessionLoopV2::new(
+        DomainLoop::new(10, 100),
+        P2PTransport::new_host(connection, 100),
+        true,
+        lobby,
+    );
+    assert!(session.enable_signed_history(key, 2).is_ok());
+    assert!(
+        session
+            .submit_command(DomainCommand::CreateLobby {
+                lobby_id: Some(lobby),
+                lobby_name: "Room".into(),
+                host_name: "Host".into()
+            })
+            .is_ok()
+    );
+    session.poll();
+    world.recording = Some(RecordingFixture {
+        session,
+        lobby,
+        author,
+    });
+}
+
+#[when("the host queues two activities")]
+fn recording_host_queues_activities(world: &mut SyncWorld) {
+    let Some(recording) = &mut world.recording else {
+        panic!("missing recording")
+    };
+    for name in ["First", "Second"] {
+        let command = DomainCommand::QueueActivity {
+            lobby_id: recording.lobby,
+            config: ActivityConfig::new("test".into(), name.into(), serde_json::Value::Null),
+        };
+        assert!(recording.session.submit_command(command).is_ok());
+        recording.session.poll();
+    }
+}
+
+#[then("the retained signed events verify using the evicted checkpoint")]
+fn recording_checkpoint_valid(world: &mut SyncWorld) {
+    use konnekt_session_p2p::application::signed_history::verify_history;
+    let Some(recording) = &world.recording else {
+        panic!("missing recording")
+    };
+    let Some(history) = recording.session.signed_history() else {
+        panic!("missing history")
+    };
+    assert!(!history.failed());
+    assert_eq!(history.anchor().map(|anchor| anchor.sequence), Some(1));
+    let events: Vec<_> = history.events().iter().cloned().collect();
+    assert_eq!(events.len(), 2);
+    assert_eq!(
+        verify_history(
+            recording.lobby,
+            &events,
+            &[recording.author],
+            history.anchor()
+        ),
+        Ok(history.tip().unwrap_or_else(|| panic!("missing tip")))
+    );
+}
+
+#[derive(Debug)]
+struct SignedHistoryFixture {
+    lobby: Uuid,
+    author: [u8; 32],
+    events: Vec<konnekt_session_p2p::domain::SignedEvent>,
+    result: Option<
+        std::result::Result<
+            konnekt_session_p2p::domain::HistoryAnchor,
+            konnekt_session_p2p::application::signed_history::SignedHistoryError,
+        >,
+    >,
+}
+
+#[given("a session has a signed event history")]
+fn signed_history(world: &mut SyncWorld) {
+    use ed25519_dalek::SigningKey;
+    use konnekt_session_p2p::application::signed_history::{event_hash, sign_event};
+    use konnekt_session_p2p::domain::{DomainEvent, LobbyEvent};
+    let lobby = Uuid::new_v4();
+    let key = SigningKey::from_bytes(&[3; 32]);
+    let first = LobbyEvent::new(
+        1,
+        lobby,
+        DomainEvent::GuestLeft {
+            participant_id: Uuid::new_v4(),
+        },
+    );
+    let first = sign_event(&first, None, &key).unwrap_or_else(|error| panic!("{error}"));
+    let second = LobbyEvent::new(
+        2,
+        lobby,
+        DomainEvent::GuestLeft {
+            participant_id: Uuid::new_v4(),
+        },
+    );
+    let second = sign_event(&second, Some(event_hash(&first)), &key)
+        .unwrap_or_else(|error| panic!("{error}"));
+    world.signed_history = Some(SignedHistoryFixture {
+        lobby,
+        author: key.verifying_key().to_bytes(),
+        events: vec![first, second],
+        result: None,
+    });
+}
+
+fn verify_signed(world: &mut SyncWorld, authors: &[[u8; 32]]) {
+    use konnekt_session_p2p::application::signed_history::verify_history;
+    let Some(history) = &mut world.signed_history else {
+        panic!("missing history")
+    };
+    history.result = Some(verify_history(
+        history.lobby,
+        &history.events,
+        authors,
+        None,
+    ));
+}
+
+#[when("the signed history is verified against the trusted author")]
+fn verify_trusted_history(world: &mut SyncWorld) {
+    let Some(history) = &world.signed_history else {
+        panic!("missing history")
+    };
+    verify_signed(world, &[history.author]);
+}
+
+#[when("a signed event is changed before verification")]
+fn verify_tampered_history(world: &mut SyncWorld) {
+    let Some(history) = &mut world.signed_history else {
+        panic!("missing history")
+    };
+    history.events[0].payload.push(b' ');
+    verify_trusted_history(world);
+}
+
+#[when("the signed history is checked without trusting its author")]
+fn verify_unknown_author(world: &mut SyncWorld) {
+    verify_signed(world, &[]);
+}
+
+#[when("only the later event is available without a checkpoint")]
+fn verify_truncated_history(world: &mut SyncWorld) {
+    let Some(history) = &mut world.signed_history else {
+        panic!("missing history")
+    };
+    history.events.remove(0);
+    verify_trusted_history(world);
+}
+
+#[then("the history is verified through event 2")]
+fn signed_history_valid(world: &mut SyncWorld) {
+    let Some(history) = &world.signed_history else {
+        panic!("missing history")
+    };
+    assert!(matches!(&history.result, Some(Ok(anchor)) if anchor.sequence == 2));
+}
+
+#[then(expr = "verification fails with {string}")]
+fn signed_history_rejected(world: &mut SyncWorld, reason: String) {
+    let Some(history) = &world.signed_history else {
+        panic!("missing history")
+    };
+    assert_eq!(
+        history
+            .result
+            .as_ref()
+            .and_then(|result| result.as_ref().err())
+            .map(ToString::to_string)
+            .as_deref(),
+        Some(reason.as_str())
+    );
 }
 
 struct AssetFixture {

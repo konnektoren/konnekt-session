@@ -57,6 +57,11 @@ pub enum DomainEvent {
         result: ActivityResult,
     },
 
+    SubmitterRemoved {
+        run_id: ActivityRunId,
+        participant_id: Uuid,
+    },
+
     RunEnded {
         run_id: ActivityRunId,
         status: RunStatus,
