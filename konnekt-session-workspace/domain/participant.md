@@ -28,11 +28,14 @@ graph TD
     PM -->|participation| Play[Can submit results]
 ```
 
-> A host can be Spectating. A guest can be Active. These are orthogonal.
+> A host can be Spectating. A guest can be Active. The two are independent,
+> with one exception: the host role is only *given* to an Active participant.
+> A host who later switches to Spectating stays host.
 
 ## Rules
 
-- `LobbyRole::Host` → single; transfers via [[../concepts/host-delegation|Host Delegation]].
+- `LobbyRole::Host` → single; transfers via [[../concepts/host-delegation|Host Delegation]], only to `Active` participants.
+- `ParticipationMode` → chosen on join (`Participant::with_participation_mode`); default `Active`.
 - `ParticipationMode` → cannot change during an active activity.
 - Only `Active` participants may submit `ActivityResult`.
 

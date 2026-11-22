@@ -11,7 +11,7 @@ Multi-step protocols between players and services. Each protocol is a sans-IO st
 | Protocol | Status | Crate | Summary |
 |---|---|---|---|
 | [[event-log-reconciliation\|Event log reconciliation]] | partial | `konnekt-session-p2p` | Compare caller-verified complete histories; verification, merge and runtime integration remain open |
-| [[host-failover\|Host failover]] | partial | `konnekt-session-p2p` | Observe host loss and grace; authority transfer and reclaim remain open |
+| [[host-failover\|Host failover]] | partial | `konnekt-session-p2p` | Observe host loss and grace; candidates are active guests only; authority transfer and reclaim remain open |
 | [[asset-transfer\|Asset transfer]] | partial | `konnekt-session-core` | Track transfer and provide bounded in-memory sender and receiver |
 | [[synchronized-start\|Synchronized start]] | partial | `konnekt-session-core` | Music retries and acknowledges count-in announcements; shared scheduling remains open |
 | [[clock-probe\|Clock probe]] | partial | `konnekt-session-core` | Music live link matches and validates one outstanding probe |
@@ -19,9 +19,11 @@ Multi-step protocols between players and services. Each protocol is a sans-IO st
 | [[activity-run\|Activity run]] | partial | `konnekt-session-core` | Complete or cancel started runs; queued activities remain outside the machine |
 | [[command-outcome\|Command outcome]] | partial | `konnekt-session-p2p` | Track host-local execution; guest outcomes remain planned |
 | [[peer-grace\|Peer grace period]] | partial | `konnekt-session-p2p` | Track disconnect, reconnect, and timeout in the legacy peer registry |
+| [[join-session\|Join session]] | partial | `konnekt-session-p2p` | Admission with a stable participant ID; guests join as player or spectator; seat limits remain open |
 | [[identity-verification\|Identity verification]] | partial | `konnekt-session-p2p` | Exchange peer-bound proofs; admission and authorization are not enforced |
 | State synchronization | partial | `konnekt-session-p2p` | Observe initial snapshot, detected gaps, recovery, and disconnects in V2 |
 | [[rating-match\|Rating Match]] | draft | `konnekt-session-rating` | Two players co-sign every round and the match record; disconnect, forfeit, resume |
+| Live matches | planned | `konnekt-session-rating` | Announce running rated matches per rating band and let observers find one at or above a minimum rating; next to matchmaking, not part of it |
 | Matchmaking Search | planned | `konnekt-session-matchmaking` | Search, widening window, match found / no match / ghost offer, expiry |
 
 V2 requests a snapshot while awaiting initial synchronization. When it detects a

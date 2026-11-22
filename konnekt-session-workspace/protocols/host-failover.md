@@ -18,6 +18,18 @@ elect a candidate, grant authority or establish agreement with other peers.
 The caller must establish these conditions before reporting events. Candidate
 loss during synchronization returns to waiting for an election.
 
+## Candidates
+
+`failover_candidates(lobby)` gives the deterministic order: every **active**
+guest of the lost host, oldest join first, ties broken by participant ID. The
+candidate at rank `k` takes over after `grace + k * turn` unless a new host
+appeared earlier. Spectators are never candidates, so an observer can't take
+over a lobby; if only spectators remain, nobody takes over. The domain applies
+the same rule: `Lobby::auto_delegate_host` skips spectators and `delegate_host`
+rejects them.
+
+## Observation
+
 V2 guests track the peer that supplied their first applied snapshot. A
 disconnect starts a grace period (30 seconds by default, configurable before
 the first snapshot); expiry enters waiting for a
@@ -29,7 +41,8 @@ polling the session loop.
 
 ## Remaining work
 
-- [ ] Specify deterministic eligibility, tie-breaking and split-brain handling.
+- [x] Specify deterministic eligibility and tie-breaking (active guests only, join time, then ID).
+- [ ] Specify split-brain handling.
 - [ ] Verify participant identity and define reclaim authorization and policy.
 - [ ] Transfer authority and synchronize complete state and history in V2.
 - [ ] Define the treatment of active runs and reconnecting hosts during synchronization.

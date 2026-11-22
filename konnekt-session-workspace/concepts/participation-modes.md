@@ -7,7 +7,7 @@ source: docs/02-discover.adoc
 
 # Participation Modes
 
-Guests can be **Active** or **Spectating**. This is independent of [[lobby-role|Lobby Role]].
+Guests can be **Active** or **Spectating**. This is independent of [[lobby-role|Lobby Role]], except that the host role is only given to active participants (see below).
 
 ## Modes
 
@@ -21,24 +21,35 @@ Guests can be **Active** or **Spectating**. This is independent of [[lobby-role|
 ```mermaid
 stateDiagram-v2
     [*] --> Active: join lobby
+    [*] --> Spectating: join as spectator
     Active --> Spectating: toggle (only between activities)
     Spectating --> Active: toggle (only between activities)
     note right of Active: Cannot change during InProgress activity
 ```
+
+A guest chooses its mode when it joins: `SessionLoopV2::join` joins as
+`Active`, `join_as(name, ParticipationMode::Spectating)` joins as an observer.
+See [[../protocols/join-session|Join session]].
 
 ## Interaction with Activity Completion
 
 - Activity completes when **all Active participants** submit results.
 - Spectating guests do not block completion.
 
-## Independent from LobbyRole
+## LobbyRole and ParticipationMode
 
 ```
 Host   + Active      → can play AND manage
 Host   + Spectating  → manages but doesn't play
-Guest  + Active      → plays normally
-Guest  + Spectating  → watches only
+Guest  + Active      → plays normally, can become host
+Guest  + Spectating  → watches only, never becomes host
 ```
+
+The host role is **only given to active participants**: manual delegation to a
+spectator is rejected (`CannotDelegateToSpectator`), and automatic election and
+failover skip spectators. A host who switches itself to Spectating stays host.
+This keeps observers, who may be strangers watching a match, from ever gaining
+authority over the lobby.
 
 ## See Also
 
