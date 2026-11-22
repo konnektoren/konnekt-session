@@ -6,4 +6,5 @@ mod lobby_management_steps;
 mod p2p_integration_steps;
 mod peer_participant_mapping_steps;
 mod rating;
+mod spectator_steps;
 mod who_am_i_steps;

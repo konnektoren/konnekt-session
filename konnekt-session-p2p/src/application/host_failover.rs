@@ -7,16 +7,18 @@ pub(crate) const DEFAULT_GRACE: Duration = Duration::from_secs(30);
 /// Delay between successive candidates' turns to take over.
 pub(crate) const DEFAULT_CANDIDATE_TURN: Duration = Duration::from_secs(10);
 
-/// Deterministic failover order: every guest of the lost host, oldest join
+/// Deterministic failover order: every active guest of the lost host, oldest join
 /// first, ties broken by participant ID. All peers holding the same lobby
 /// replica compute the same order without a vote. The candidate at rank `k`
 /// takes over after `grace + k * turn` unless a new host appeared earlier, so
-/// absent candidates are skipped.
+/// absent candidates are skipped. Spectators never take over.
 pub fn failover_candidates(lobby: &konnekt_session_core::Lobby) -> Vec<uuid::Uuid> {
     let mut guests: Vec<_> = lobby
         .participants()
         .values()
-        .filter(|participant| participant.id() != lobby.host_id())
+        .filter(|participant| {
+            participant.id() != lobby.host_id() && participant.can_submit_results()
+        })
         .map(|participant| (participant.joined_at(), participant.id()))
         .collect();
     guests.sort_unstable();
@@ -217,5 +219,20 @@ mod tests {
         let order = failover_candidates(&lobby);
         assert_eq!(order, vec![early_id, late_id]);
         assert!(!order.contains(&host_id));
+    }
+
+    #[test]
+    fn spectators_are_not_failover_candidates() {
+        use konnekt_session_core::{Lobby, Participant, ParticipationMode};
+        let host = Participant::new_host("Host".into()).unwrap_or_else(|e| panic!("{e}"));
+        let mut lobby = Lobby::new("Room".into(), host).unwrap_or_else(|e| panic!("{e}"));
+        let observer = Participant::new_guest("Observer".into())
+            .unwrap_or_else(|e| panic!("{e}"))
+            .with_participation_mode(ParticipationMode::Spectating);
+        let player = Participant::new_guest("Player".into()).unwrap_or_else(|e| panic!("{e}"));
+        let player_id = player.id();
+        lobby.add_guest(observer).unwrap_or_else(|e| panic!("{e}"));
+        lobby.add_guest(player).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(failover_candidates(&lobby), vec![player_id]);
     }
 }

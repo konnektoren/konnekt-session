@@ -19,7 +19,6 @@ edition = "2024"
 authors = ["Konnekt Session Contributors"]
 license = "MIT"
 repository = "https://github.com/konnektoren/konnekt-session"
-homepage = "https://github.com/konnektoren/konnekt-session"
 readme = "README.adoc"
 keywords = ["p2p", "lobby", "multiplayer", "webrtc", "wasm"]
 categories = ["game-development", "network-programming", "wasm", "web-programming"]

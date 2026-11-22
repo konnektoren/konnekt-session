@@ -38,6 +38,9 @@ pub struct SessionWorld {
 
     /// State of rating scenarios
     pub rating: RatingWorld,
+
+    /// Outcome of the last automatic host election (spectator scenarios)
+    pub elected_host: Option<Result<Uuid, String>>,
 }
 
 /// Which rating system a rating scenario uses.

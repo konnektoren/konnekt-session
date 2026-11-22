@@ -27,6 +27,9 @@ pub enum LobbyError {
     #[error("Cannot delegate to non-guest participant")]
     CannotDelegateToNonGuest,
 
+    #[error("Cannot delegate host to a spectator")]
+    CannotDelegateToSpectator,
+
     #[error("Lobby is empty, cannot delegate host")]
     EmptyLobby,
 
@@ -208,6 +211,9 @@ impl Lobby {
         if new_host.is_host() {
             return Err(LobbyError::CannotDelegateToNonGuest);
         }
+        if !new_host.can_submit_results() {
+            return Err(LobbyError::CannotDelegateToSpectator);
+        }
         new_host.promote_to_host();
         if let Some(old_host) = self.participants.get_mut(&self.host_id)
             && old_host.id() != new_host_id
@@ -222,7 +228,7 @@ impl Lobby {
         let oldest_guest = self
             .participants
             .values()
-            .filter(|p| !p.is_host() && p.id() != self.host_id)
+            .filter(|p| !p.is_host() && p.id() != self.host_id && p.can_submit_results())
             .min_by_key(|p| p.joined_at());
         match oldest_guest {
             Some(guest) => {
@@ -423,6 +429,43 @@ mod tests {
 
         let new_host_id = lobby.auto_delegate_host().unwrap();
         assert_eq!(new_host_id, bob_id);
+    }
+
+    #[test]
+    fn test_spectators_never_become_host() {
+        let host = Participant::new_host("Alice".to_string()).unwrap();
+        let mut lobby = Lobby::new("Test".to_string(), host).unwrap();
+        let observer = Participant::with_timestamp(
+            "Observer".to_string(),
+            LobbyRole::Guest,
+            Timestamp::from_millis(100),
+        )
+        .unwrap()
+        .with_participation_mode(ParticipationMode::Spectating);
+        let observer_id = observer.id();
+        let player = Participant::with_timestamp(
+            "Bob".to_string(),
+            LobbyRole::Guest,
+            Timestamp::from_millis(200),
+        )
+        .unwrap();
+        let player_id = player.id();
+        lobby.add_guest(observer).unwrap();
+        assert_eq!(
+            lobby.participants()[&observer_id].participation_mode(),
+            ParticipationMode::Spectating
+        );
+        assert!(matches!(
+            lobby.auto_delegate_host(),
+            Err(LobbyError::EmptyLobby)
+        ));
+        assert!(matches!(
+            lobby.delegate_host(observer_id),
+            Err(LobbyError::CannotDelegateToSpectator)
+        ));
+        lobby.add_guest(player).unwrap();
+        assert_eq!(lobby.auto_delegate_host().unwrap(), player_id);
+        assert!(!lobby.active_participant_ids().contains(&observer_id));
     }
 
     #[test]

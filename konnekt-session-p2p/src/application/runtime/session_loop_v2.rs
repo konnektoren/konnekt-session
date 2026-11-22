@@ -211,6 +211,17 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
 
     /// Request admission using an ID that remains stable for retries in this session.
     pub fn join(&mut self, name: String) -> Result<Uuid> {
+        self.join_as(name, konnekt_session_core::ParticipationMode::Active)
+    }
+
+    /// Like [`join`](Self::join), but in the given participation mode. A
+    /// `Spectating` participant follows the lobby and its runs, is never a
+    /// required submitter and never becomes host.
+    pub fn join_as(
+        &mut self,
+        name: String,
+        mode: konnekt_session_core::ParticipationMode,
+    ) -> Result<Uuid> {
         if self.is_host || self.join_participant.is_some() {
             return Err(crate::infrastructure::error::P2PError::SendFailed(
                 "A guest join is already configured or this session is the host".into(),
@@ -220,7 +231,8 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             Some(id) => konnekt_session_core::Participant::guest_with_id(id, name),
             None => konnekt_session_core::Participant::new_guest(name),
         }
-        .map_err(|error| crate::infrastructure::error::P2PError::SendFailed(error.to_string()))?;
+        .map_err(|error| crate::infrastructure::error::P2PError::SendFailed(error.to_string()))?
+        .with_participation_mode(mode);
         let id = participant.id();
         self.join_participant = Some(participant);
         Ok(id)

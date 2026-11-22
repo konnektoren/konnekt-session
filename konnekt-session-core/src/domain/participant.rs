@@ -221,6 +221,12 @@ impl Participant {
         self.participation_mode = mode;
     }
 
+    /// Builder for joining in a given mode, e.g. as a spectator.
+    pub fn with_participation_mode(mut self, mode: ParticipationMode) -> Self {
+        self.participation_mode = mode;
+        self
+    }
+
     pub fn promote_to_host(&mut self) {
         self.lobby_role = LobbyRole::Host;
     }
