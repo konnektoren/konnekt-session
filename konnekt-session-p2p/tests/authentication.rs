@@ -268,3 +268,68 @@ fn a_reloaded_host_with_the_same_key_is_followed_again() {
         );
     }
 }
+
+#[test]
+fn guests_that_saw_the_host_leave_follow_it_after_a_restore() {
+    use konnekt_session_p2p::ConnectionEvent;
+    use konnekt_session_p2p::application::persistence::MemoryStore;
+    let mut session = Session::new();
+    // A lone guest: with no peer left it drops its replica.
+    let bo = session.guests.pop().unwrap_or_else(|| panic!("no guest"));
+    let bo_peer = bo.local_peer_id().unwrap_or_else(|| panic!("no peer"));
+    drop(bo);
+    session
+        .network
+        .lock()
+        .unwrap_or_else(|error| panic!("{error}"))
+        .peers
+        .remove(&bo_peer);
+    let store = MemoryStore::new();
+    session.host.enable_persistence(Box::new(store.clone()));
+    session.queue(0, "Before");
+    session.tick(10);
+    let old_peer = session
+        .host
+        .local_peer_id()
+        .unwrap_or_else(|| panic!("no peer"));
+    {
+        let mut network = session
+            .network
+            .lock()
+            .unwrap_or_else(|error| panic!("{error}"));
+        network.peers.remove(&old_peer);
+        for guest in &session.guests {
+            let peer = guest.local_peer_id().unwrap_or_else(|| panic!("no peer"));
+            network
+                .events
+                .push_back((peer, ConnectionEvent::PeerDisconnected(old_peer)));
+        }
+    }
+    // The guests drop their replica while the host is gone.
+    session.tick(2);
+    for guest in &session.guests {
+        assert!(guest.get_lobby().is_none());
+    }
+    session.host = host(&session.network, session.lobby_id, [31; 32]);
+    session.host.enable_persistence(Box::new(store));
+    let state = session
+        .host
+        .stored_state()
+        .and_then(Result::ok)
+        .unwrap_or_else(|| panic!("nothing stored"));
+    session
+        .host
+        .restore_state(state)
+        .unwrap_or_else(|error| panic!("{error}"));
+    session.tick(80);
+    session.queue(0, "After");
+    session.tick(10);
+    assert_eq!(
+        queued(&session.host),
+        vec!["Before".to_string(), "After".to_string()]
+    );
+    for guest in &session.guests {
+        assert_eq!(guest.join_state(), Some(JoinSessionState::Ready));
+        assert_eq!(queued(guest), queued(&session.host));
+    }
+}

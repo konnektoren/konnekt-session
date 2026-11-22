@@ -86,6 +86,10 @@ pub struct SessionLoopV2<C: NetworkConnection> {
     peer_participants: HashMap<crate::domain::PeerId, Uuid>,
     /// Guest: host peer this guest last announced its participant to.
     announced_to: Option<crate::domain::PeerId>,
+    /// Guest: host participant of the last applied snapshot. Survives the
+    /// replica being dropped on disconnect, so an authenticated guest still
+    /// recognizes its host when it comes back on a new connection.
+    followed_host: Option<Uuid>,
     /// Where the session is saved after changes.
     store: Option<Box<dyn SessionStore>>,
     /// Last saved state, to skip unchanged writes.
@@ -198,6 +202,7 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             snapshot_run_limit: DEFAULT_SNAPSHOT_RUNS,
             peer_participants: HashMap::new(),
             announced_to: None,
+            followed_host: None,
             store: None,
             saved: None,
             restore_deadline: None,
@@ -2245,7 +2250,8 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         // An authenticated host that reconnected keeps its key and role.
         let same_host_key = self.authenticated_as.is_some()
             && self.bound_participant(from).is_some()
-            && self.bound_participant(from) == self.get_lobby().map(Lobby::host_id);
+            && self.bound_participant(from)
+                == self.get_lobby().map(Lobby::host_id).or(self.followed_host);
         if (self.failover.is_some() || self.authenticated_as.is_some())
             && !same_host_key
             && self.host_observation.as_ref().is_some_and(|observation| {
@@ -2257,6 +2263,7 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         }
         self.rejoin_if_missing(&snapshot);
         if self.apply_snapshot(snapshot) {
+            self.followed_host = self.get_lobby().map(Lobby::host_id);
             self.transport.snapshot_accepted(from, as_of_sequence);
             self.announce_to(from);
             if same_host_key && let Some(observation) = &mut self.host_observation {

@@ -74,6 +74,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             "rating-match",
             include_str!(concat!(env!("OUT_DIR"), "/rating-match.mmd")),
         ),
+        (
+            "Matchmaking",
+            "matchmaking",
+            include_str!(concat!(env!("OUT_DIR"), "/matchmaking.mmd")),
+        ),
     ];
     let mut section = String::from(
         "<!-- generated-protocol-diagrams:start -->\n## Generated state machines\n\nRun `just protocol-diagrams` to update these diagrams.\n",

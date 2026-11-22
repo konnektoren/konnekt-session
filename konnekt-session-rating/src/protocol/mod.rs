@@ -4,6 +4,7 @@
 //! sending and storing are actions run by the caller after a transition.
 //! See `konnekt-session-workspace/protocols/rating-match.md`.
 
+pub mod matchmaking;
 pub mod rating_match;
 
 pub use rating_match::{

@@ -56,6 +56,7 @@ stateDiagram-v2
     ComparingHistories --> Reconciled : histories_match
     ComparingHistories --> FindingAncestor : divergence_detected
     FindingAncestor --> SelectingHistory : ancestor_found
+    ComparingHistories --> InsufficientHistory : history_unavailable
     FindingAncestor --> InsufficientHistory : history_unavailable
     SelectingHistory --> PreparingMerge : history_selected
     PreparingMerge --> ApplyingMerge : merge_plan_validated
@@ -295,5 +296,29 @@ stateDiagram-v2
         SigningRound
         SigningMatch
     }
+```
+
+### Matchmaking
+
+```mermaid
+stateDiagram-v2
+    [*] --> Searching
+    Matched --> [*]
+    Cancelled --> [*]
+    Searching --> Offering : offer_sent
+    Searching --> Reserved : offer_received
+    Offering --> Committing : offer_accepted
+    Reserved --> Joining : commit_received
+    Committing --> Joining : commit_acknowledged
+    Offering --> Searching : attempt_aborted
+    Reserved --> Searching : attempt_aborted
+    Committing --> Searching : attempt_aborted
+    Joining --> Searching : attempt_aborted
+    Joining --> Matched : room_ready
+    Searching --> Cancelled : cancel
+    Offering --> Cancelled : cancel
+    Reserved --> Cancelled : cancel
+    Committing --> Cancelled : cancel
+    Joining --> Cancelled : cancel
 ```
 <!-- generated-protocol-diagrams:end -->

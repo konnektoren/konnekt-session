@@ -16,6 +16,7 @@ stateDiagram-v2
     ComparingHistories --> Reconciled : histories_match
     ComparingHistories --> FindingAncestor : divergence_detected
     FindingAncestor --> SelectingHistory : ancestor_found
+    ComparingHistories --> InsufficientHistory : history_unavailable
     FindingAncestor --> InsufficientHistory : history_unavailable
     SelectingHistory --> PreparingMerge : history_selected
     PreparingMerge --> ApplyingMerge : merge_plan_validated

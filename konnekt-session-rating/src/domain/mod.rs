@@ -6,3 +6,6 @@ pub use rating_key::RatingKey;
 
 mod match_protocol;
 pub use match_protocol::{MatchConfig, RejoinTimedOut, RoundSigned};
+
+mod matchmaking;
+pub use matchmaking::{Hello, Message, Offer, State, search_window};
