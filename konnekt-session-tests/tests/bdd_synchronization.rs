@@ -76,6 +76,79 @@ struct SyncWorld {
     request: Option<Uuid>,
     grace: Option<(PeerRegistry, PeerId)>,
     timed_out: Vec<PeerId>,
+    asset: Option<AssetFixture>,
+}
+
+struct AssetFixture {
+    sender: konnekt_session_core::application::asset_transfer::AssetSender,
+    receiver: konnekt_session_core::application::asset_transfer::AssetReceiver,
+}
+
+impl fmt::Debug for AssetFixture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AssetFixture").finish_non_exhaustive()
+    }
+}
+
+#[given("a player has an asset to share")]
+fn asset_to_share(world: &mut SyncWorld) {
+    use konnekt_session_core::application::asset_transfer::{
+        AssetReceiver, AssetSender, TransferLimits,
+    };
+    let limits = TransferLimits {
+        max_bytes: 32,
+        chunk_bytes: 3,
+    };
+    let sender = AssetSender::new(b"music".to_vec(), limits).unwrap_or_else(|e| panic!("{e}"));
+    let receiver =
+        AssetReceiver::new(sender.chunks().len(), limits).unwrap_or_else(|e| panic!("{e}"));
+    world.asset = Some(AssetFixture { sender, receiver });
+}
+
+#[when("the asset arrives out of order with a repeated chunk")]
+fn receive_asset(world: &mut SyncWorld) {
+    let Some(asset) = &mut world.asset else {
+        panic!("missing asset")
+    };
+    let chunks: Vec<_> = asset.sender.chunks().map(<[u8]>::to_vec).collect();
+    assert_eq!(asset.receiver.receive(1, chunks[1].clone()), Ok(false));
+    assert_eq!(asset.receiver.receive(1, chunks[1].clone()), Ok(false));
+    assert_eq!(asset.receiver.receive(0, chunks[0].clone()), Ok(true));
+    assert!(asset.receiver.acknowledge().is_ok());
+    assert!(asset.sender.chunks_complete().is_ok());
+    assert!(asset.sender.acknowledge().is_ok());
+}
+
+#[then("both players complete the transfer with the original asset")]
+fn asset_complete(world: &mut SyncWorld) {
+    use konnekt_session_core::protocol::asset_transfer::AssetTransferState;
+    let Some(asset) = &world.asset else {
+        panic!("missing asset")
+    };
+    assert_eq!(asset.receiver.asset().as_deref(), Some(&b"music"[..]));
+    assert_eq!(asset.receiver.state(), AssetTransferState::Completed);
+    assert_eq!(asset.sender.state(), AssetTransferState::Completed);
+}
+
+#[when("the receiving player cancels the transfer")]
+fn cancel_asset(world: &mut SyncWorld) {
+    let Some(asset) = &mut world.asset else {
+        panic!("missing asset")
+    };
+    assert!(asset.receiver.cancel().is_ok());
+}
+
+#[then("later chunks cannot complete the asset")]
+fn cancelled_asset(world: &mut SyncWorld) {
+    use konnekt_session_core::application::asset_transfer::TransferError;
+    let Some(asset) = &mut world.asset else {
+        panic!("missing asset")
+    };
+    assert_eq!(
+        asset.receiver.receive(0, b"mus".to_vec()),
+        Err(TransferError::InvalidState)
+    );
+    assert!(asset.receiver.asset().is_none());
 }
 
 #[given("a guest has synchronized with the host")]

@@ -1,4 +1,5 @@
 use konnekt_session_core::protocol::activity_run::{ActivityRunLifecycle, InProgress};
+use konnekt_session_core::protocol::asset_transfer::{AssetTransfer, Prepared as AssetPrepared};
 use konnekt_session_core::protocol::clock_probe::{ClockProbe, Prepared as ProbePrepared};
 use konnekt_session_core::protocol::player_readiness::{NotReady, PlayerReadiness};
 use konnekt_session_core::protocol::synchronized_start::{
@@ -14,6 +15,7 @@ use std::{env, fs, path::PathBuf};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=../konnekt-session-core/src/protocol/activity_run.rs");
+    println!("cargo:rerun-if-changed=../konnekt-session-core/src/protocol/asset_transfer.rs");
     println!("cargo:rerun-if-changed=../konnekt-session-core/src/protocol/synchronized_start.rs");
     println!("cargo:rerun-if-changed=../konnekt-session-core/src/protocol/clock_probe.rs");
     println!("cargo:rerun-if-changed=../konnekt-session-core/src/protocol/player_readiness.rs");
@@ -25,6 +27,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=../konnekt-session-p2p/src/protocol/synchronization.rs");
     println!("cargo:rerun-if-changed=../konnekt-session-rating/src/protocol/rating_match.rs");
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("OUT_DIR is missing")?);
+    fs::write(
+        output.join("asset-transfer.mmd"),
+        AssetTransfer::<AssetPrepared>::schema().to_mermaid(),
+    )?;
     fs::write(
         output.join("synchronized-start.mmd"),
         SynchronizedStart::<StartPrepared>::schema().to_mermaid(),

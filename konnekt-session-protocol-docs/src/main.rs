@@ -5,6 +5,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../konnekt-session-workspace/protocols");
     let diagrams = [
         (
+            "Asset transfer",
+            "asset-transfer",
+            include_str!(concat!(env!("OUT_DIR"), "/asset-transfer.mmd")),
+        ),
+        (
             "Synchronized start",
             "synchronized-start",
             include_str!(concat!(env!("OUT_DIR"), "/synchronized-start.mmd")),

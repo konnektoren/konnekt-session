@@ -1,3 +1,4 @@
+pub mod asset_transfer;
 mod commands;
 mod event_loop;
 mod events;
