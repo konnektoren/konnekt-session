@@ -10,6 +10,8 @@ Multi-step protocols between players and services. Each protocol is a sans-IO st
 
 | Protocol | Status | Crate | Summary |
 |---|---|---|---|
+| [[host-failover\|Host failover]] | partial | `konnekt-session-p2p` | Observe host loss and grace; authority transfer and reclaim remain open |
+| [[asset-transfer\|Asset transfer]] | partial | `konnekt-session-core` | Track transfer and provide bounded in-memory sender and receiver |
 | [[synchronized-start\|Synchronized start]] | partial | `konnekt-session-core` | Music retries and acknowledges count-in announcements; shared scheduling remains open |
 | [[clock-probe\|Clock probe]] | partial | `konnekt-session-core` | Music live link matches and validates one outstanding probe |
 | [[player-readiness\|Player readiness]] | partial | `konnekt-session-core` | Music lobby binds per-player readiness to a selection revision; shared API and ordering remain open |
@@ -39,6 +41,27 @@ The synchronization machine does not authenticate host messages.
 ## Generated state machines
 
 Run `just protocol-diagrams` to update these diagrams.
+
+### Host failover
+
+```mermaid
+stateDiagram-v2
+    [*] --> HostAvailable
+    HostAvailable --> GracePeriod : host_lost
+    GracePeriod --> HostAvailable : host_restored
+    Electing --> HostAvailable : host_restored
+    WaitingForCandidate --> HostAvailable : host_restored
+    GracePeriod --> Electing : grace_expired
+    Electing --> WaitingForCandidate : no_candidate
+    WaitingForCandidate --> Electing : retry_election
+    Electing --> Synchronizing : candidate_selected
+    Synchronizing --> WaitingForCandidate : candidate_lost
+    Synchronizing --> HostAvailable : synchronized
+    HostAvailable --> ReclaimPending : reclaim_requested
+    ReclaimPending --> Synchronizing : reclaim_accepted
+    ReclaimPending --> HostAvailable : reclaim_rejected
+    ReclaimPending --> GracePeriod : host_lost_during_reclaim
+```
 
 ### Asset transfer
 

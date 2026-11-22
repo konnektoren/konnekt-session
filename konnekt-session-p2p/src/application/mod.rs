@@ -1,6 +1,7 @@
 mod config;
 mod event_translator;
 mod events;
+mod host_failover;
 mod identity;
 pub(crate) mod identity_exchange;
 mod request_ledger;

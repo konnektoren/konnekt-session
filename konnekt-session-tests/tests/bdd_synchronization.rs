@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 #[path = "../../konnekt-session-p2p/tests/support/mock_connection.rs"]
 mod mock_connection;
-use mock_connection::{MockConnection, create_mock_network};
+use mock_connection::{MockConnection, MockNetwork, create_mock_network};
 
 impl NetworkConnection for MockConnection {
     fn local_peer_id(&self) -> Option<PeerId> {
@@ -41,6 +41,9 @@ struct Fixture {
     guest: SessionLoopV2<MockConnection>,
     guest_id: PeerId,
     lobby_id: Uuid,
+    network: std::sync::Arc<std::sync::Mutex<MockNetwork>>,
+    disconnected_host:
+        Option<std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<(PeerId, Vec<u8>)>>>>,
 }
 
 impl fmt::Debug for Fixture {
@@ -153,10 +156,19 @@ fn cancelled_asset(world: &mut SyncWorld) {
 
 #[given("a guest has synchronized with the host")]
 fn synchronized(world: &mut SyncWorld) {
+    setup_synchronized(world, std::time::Duration::from_secs(30));
+}
+
+#[given("a guest has synchronized with a host with no grace delay")]
+fn synchronized_with_expiring_grace(world: &mut SyncWorld) {
+    setup_synchronized(world, std::time::Duration::ZERO);
+}
+
+fn setup_synchronized(world: &mut SyncWorld, grace: std::time::Duration) {
     let network = create_mock_network();
     let host = MockConnection::new(network.clone());
     let host_sender = host.clone();
-    let guest = MockConnection::new(network);
+    let guest = MockConnection::new(network.clone());
     let guest_id = guest
         .local_peer_id()
         .unwrap_or_else(|| panic!("missing guest peer"));
@@ -178,6 +190,7 @@ fn synchronized(world: &mut SyncWorld) {
         false,
         lobby_id,
     );
+    assert!(guest_loop.set_host_grace_period(grace));
     for _ in 0..5 {
         host_loop.poll();
         guest_loop.poll();
@@ -192,7 +205,109 @@ fn synchronized(world: &mut SyncWorld) {
         guest: guest_loop,
         guest_id,
         lobby_id,
+        network,
+        disconnected_host: None,
     });
+}
+
+#[when("the observed host disconnects while another peer remains")]
+fn host_disconnects(world: &mut SyncWorld) {
+    let Some(fixture) = &mut world.fixture else {
+        panic!("missing session")
+    };
+    let _other = MockConnection::new(fixture.network.clone());
+    let Some(host) = fixture.host.local_peer_id() else {
+        panic!("missing host")
+    };
+    let mut network = fixture
+        .network
+        .lock()
+        .unwrap_or_else(|error| panic!("{error}"));
+    fixture.disconnected_host = network.peers.remove(&host);
+    network
+        .events
+        .push_back((fixture.guest_id, ConnectionEvent::PeerDisconnected(host)));
+    drop(network);
+    fixture.guest.poll();
+}
+
+#[when("the observed host disconnects and the grace period expires")]
+fn host_grace_expires(world: &mut SyncWorld) {
+    host_disconnects(world);
+}
+
+#[then("the guest waits for a candidate without taking authority")]
+fn host_candidate_waiting(world: &mut SyncWorld) {
+    use konnekt_session_p2p::protocol::host_failover::HostFailoverState;
+    let Some(fixture) = &world.fixture else {
+        panic!("missing session")
+    };
+    assert_eq!(
+        fixture.guest.host_failover_state(),
+        Some(HostFailoverState::WaitingForCandidate)
+    );
+    assert!(!fixture.guest.is_host());
+}
+
+#[given("the observed host disconnected while another peer remains")]
+fn host_disconnected(world: &mut SyncWorld) {
+    host_disconnects(world);
+}
+
+#[when("the same host reconnects and resynchronizes")]
+fn host_reconnects(world: &mut SyncWorld) {
+    let Some(fixture) = &mut world.fixture else {
+        panic!("missing session")
+    };
+    let Some(host) = fixture.host.local_peer_id() else {
+        panic!("missing host")
+    };
+    let Some(inbox) = fixture.disconnected_host.take() else {
+        panic!("missing host inbox")
+    };
+    let mut network = fixture
+        .network
+        .lock()
+        .unwrap_or_else(|error| panic!("{error}"));
+    network.peers.insert(host, inbox);
+    network
+        .events
+        .push_back((host, ConnectionEvent::PeerConnected(fixture.guest_id)));
+    network
+        .events
+        .push_back((fixture.guest_id, ConnectionEvent::PeerConnected(host)));
+    drop(network);
+    for _ in 0..5 {
+        fixture.host_loop.poll();
+        fixture.guest.poll();
+    }
+}
+
+#[then("the guest observes that the host is available again")]
+fn host_restored(world: &mut SyncWorld) {
+    use konnekt_session_p2p::protocol::host_failover::HostFailoverState;
+    let Some(fixture) = &world.fixture else {
+        panic!("missing session")
+    };
+    assert_eq!(
+        fixture.guest.host_failover_state(),
+        Some(HostFailoverState::HostAvailable)
+    );
+    assert!(!fixture.guest.is_host());
+}
+
+#[then("the guest observes the host grace period without taking authority")]
+fn host_grace_observed(world: &mut SyncWorld) {
+    use konnekt_session_p2p::protocol::host_failover::HostFailoverState;
+    let Some(fixture) = &world.fixture else {
+        panic!("missing session")
+    };
+    assert_eq!(
+        fixture.guest.host_failover_state(),
+        Some(HostFailoverState::GracePeriod)
+    );
+    assert!(!fixture.guest.is_host());
+    assert!(!fixture.guest.connected_peers().is_empty());
 }
 
 #[when("the host queues an activity")]

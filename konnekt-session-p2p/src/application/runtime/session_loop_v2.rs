@@ -1,3 +1,4 @@
+use crate::application::host_failover::{DEFAULT_GRACE, HostObservation};
 use crate::application::identity_exchange::{IdentityExchange, IdentityMessage};
 use crate::domain::VerifiedIdentity;
 use crate::infrastructure::error::Result;
@@ -5,6 +6,7 @@ use crate::infrastructure::transport::{NetworkConnection, P2PTransport, Transpor
 use crate::protocol::command_outcome::{
     CommandOutcomeEvent, CommandOutcomeState, DynamicCommandOutcome,
 };
+use crate::protocol::host_failover::HostFailoverState;
 use crate::protocol::join::{DynamicJoinSession, JoinSessionEvent, JoinSessionState};
 use crate::protocol::synchronization::{
     DynamicStateSynchronization, StateSynchronizationEvent, StateSynchronizationState,
@@ -40,6 +42,8 @@ pub struct SessionLoopV2<C: NetworkConnection> {
     command_outcomes: HashMap<Uuid, TrackedCommand>,
     pending_guest_commands: HashMap<Uuid, DomainCommand>,
     identity_exchange: Option<IdentityExchange>,
+    host_observation: Option<HostObservation>,
+    host_grace: std::time::Duration,
 }
 
 struct TrackedCommand {
@@ -74,6 +78,8 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             command_outcomes: HashMap::new(),
             pending_guest_commands: HashMap::new(),
             identity_exchange: None,
+            host_observation: None,
+            host_grace: DEFAULT_GRACE,
         }
     }
 
@@ -105,6 +111,23 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         self.synchronization
             .as_ref()
             .map(DynamicStateSynchronization::current_state)
+    }
+
+    /// Observed availability of the peer that supplied the first applied snapshot.
+    /// This peer is not authenticated, and this does not perform host election.
+    /// Returns `None` on hosts and before a guest applies its first snapshot.
+    pub fn host_failover_state(&self) -> Option<HostFailoverState> {
+        self.host_observation.as_ref().map(HostObservation::state)
+    }
+
+    /// Configure the grace period before host-loss observation begins.
+    /// Returns false once the first host snapshot has been applied.
+    pub fn set_host_grace_period(&mut self, grace: std::time::Duration) -> bool {
+        if self.host_observation.is_some() {
+            return false;
+        }
+        self.host_grace = grace;
+        true
     }
 
     fn update_join_connection(&mut self) {
@@ -331,11 +354,17 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
                     }
                 }
                 TransportEvent::SnapshotReceived {
+                    from,
                     snapshot,
                     as_of_sequence,
                 } => {
                     tracing::info!("📥 GUEST: Received snapshot (seq: {})", as_of_sequence);
                     if !self.is_host && self.apply_snapshot(snapshot) {
+                        if self.transport.connected_peers().contains(&from) {
+                            self.host_observation
+                                .get_or_insert_with(|| HostObservation::new(from, self.host_grace))
+                                .snapshot_applied(from);
+                        }
                         if let Some(sync) = &mut self.synchronization {
                             let _ = sync.handle(StateSynchronizationEvent::SnapshotApplied);
                         }
@@ -362,6 +391,13 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         // 2. Poll transport for messages
         let messages = self.transport.poll_with_sender();
         let disconnected = self.transport.drain_disconnected_peers();
+        let now = instant::Instant::now();
+        if let Some(observation) = &mut self.host_observation {
+            for &peer in &disconnected {
+                observation.disconnected(peer, now);
+            }
+            observation.advance(now);
+        }
         if let Some(exchange) = &mut self.identity_exchange {
             for peer in disconnected {
                 exchange.disconnected(peer);

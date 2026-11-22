@@ -15,6 +15,7 @@ pub enum TransportEvent {
 
     /// Received snapshot response (guest applies)
     SnapshotReceived {
+        from: PeerId,
         snapshot: serde_json::Value,
         as_of_sequence: u64,
     },
@@ -288,6 +289,7 @@ impl<C: NetworkConnection> P2PTransport<C> {
                                 }
                                 tracing::info!("📥 Received snapshot (seq: {})", as_of_sequence);
                                 self.pending_events.push(TransportEvent::SnapshotReceived {
+                                    from,
                                     snapshot,
                                     as_of_sequence,
                                 });
@@ -525,6 +527,7 @@ mod tests {
     fn test_snapshot_received_event() {
         let snapshot = serde_json::json!({"test": "data"});
         let event = TransportEvent::SnapshotReceived {
+            from: PeerId::new(matchbox_socket::PeerId(uuid::Uuid::new_v4())),
             snapshot: snapshot.clone(),
             as_of_sequence: 42,
         };
