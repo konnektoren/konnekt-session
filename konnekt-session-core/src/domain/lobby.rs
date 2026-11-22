@@ -111,6 +111,37 @@ impl Lobby {
         self.active_run_id.is_some()
     }
 
+    /// Check invariants of a lobby that was not built through its methods,
+    /// e.g. one received in a snapshot: exactly one host, stored under its
+    /// ID, and no duplicate queued activities.
+    pub fn validate(&self) -> Result<(), LobbyError> {
+        if let Some(id) = self
+            .participants
+            .iter()
+            .find(|(id, participant)| **id != participant.id())
+            .map(|(id, _)| *id)
+        {
+            return Err(LobbyError::ParticipantNotFound(id));
+        }
+        let hosts: Vec<_> = self
+            .participants
+            .values()
+            .filter(|participant| participant.is_host())
+            .collect();
+        if hosts.len() != 1 || hosts[0].id() != self.host_id {
+            return Err(LobbyError::NoHost);
+        }
+        let mut queued = HashSet::new();
+        if let Some(duplicate) = self
+            .activity_queue
+            .iter()
+            .find(|activity| !queued.insert(activity.id))
+        {
+            return Err(LobbyError::ActivityAlreadyExists(duplicate.id));
+        }
+        Ok(())
+    }
+
     // ===== Participant Management =====
 
     pub fn add_guest(&mut self, guest: Participant) -> Result<(), LobbyError> {

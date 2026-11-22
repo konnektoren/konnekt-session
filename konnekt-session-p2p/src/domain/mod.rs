@@ -17,6 +17,6 @@ pub use peer_participant_map::PeerParticipantMap;
 pub use peer_state::{PeerRegistry, PeerState};
 pub use session::SessionId;
 
-pub use identity::{IdentityChallenge, IdentityProofError, VerifiedIdentity};
+pub use identity::{IdentityChallenge, IdentityProofError, VerifiedIdentity, participant_id};
 pub use request::{RequestDisposition, RequestLedgerError, RequestResult};
 pub use signed_event::{EventHash, HistoryAnchor, SignedEvent, SignedHistoryBatch};

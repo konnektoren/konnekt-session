@@ -4,6 +4,9 @@
 //! finds a common ancestor, selects a history, validates and applies a merge
 //! plan, and handles timeouts. Events report those outcomes. This machine
 //! neither establishes distributed agreement nor merges or verifies events.
+//!
+//! History whose ancestry cannot be verified (for example a bounded segment
+//! without a trusted checkpoint) is insufficient before any comparison.
 
 use state_machines::state_machine;
 
@@ -19,7 +22,10 @@ state_machine! {
         histories_match { transition: { from: ComparingHistories, to: Reconciled } }
         divergence_detected { transition: { from: ComparingHistories, to: FindingAncestor } }
         ancestor_found { transition: { from: FindingAncestor, to: SelectingHistory } }
-        history_unavailable { transition: { from: FindingAncestor, to: InsufficientHistory } }
+        history_unavailable {
+            transition: { from: ComparingHistories, to: InsufficientHistory }
+            transition: { from: FindingAncestor, to: InsufficientHistory }
+        }
         history_selected { transition: { from: SelectingHistory, to: PreparingMerge } }
         merge_plan_validated { transition: { from: PreparingMerge, to: ApplyingMerge } }
         merge_applied { transition: { from: ApplyingMerge, to: Reconciled } }

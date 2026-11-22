@@ -164,6 +164,16 @@ impl ActivityRun {
         Ok(())
     }
 
+    /// Check a run that was not built through its methods, e.g. one received
+    /// in a snapshot: every result belongs to this run and is stored under
+    /// its participant, and a completed run has no missing results.
+    pub fn validate(&self) -> bool {
+        self.results
+            .iter()
+            .all(|(id, result)| *id == result.participant_id && result.run_id == self.id)
+            && (self.status != RunStatus::Completed || self.all_submitted())
+    }
+
     fn all_submitted(&self) -> bool {
         self.required_submitters
             .iter()

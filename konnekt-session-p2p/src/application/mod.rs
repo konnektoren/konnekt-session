@@ -1,10 +1,14 @@
+pub mod authorization;
 mod config;
 pub mod event_log_reconciliation;
 mod event_translator;
 mod events;
-mod host_failover;
+pub mod host_failover;
+mod host_reclaim;
 mod identity;
 pub(crate) mod identity_exchange;
+pub mod merge_plan;
+pub mod persistence;
 mod request_ledger;
 pub mod runtime;
 pub mod signed_history;

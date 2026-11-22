@@ -11,5 +11,7 @@ pub use p2p_loop::P2PLoop;
 pub use runtime_builder::P2PLoopBuilder;
 #[allow(deprecated)]
 pub use session_loop::SessionLoop;
-pub use session_loop_v2::{MatchboxSessionLoop, SessionLoopV2};
+pub use session_loop_v2::{
+    DEFAULT_SNAPSHOT_RUNS, MatchboxSessionLoop, MergeOutcome, SessionLoopV2,
+};
 pub use session_loop_v2_builder::SessionLoopV2Builder;

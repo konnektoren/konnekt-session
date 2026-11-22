@@ -9,6 +9,7 @@ pub mod pages;
 #[cfg(feature = "preview")]
 pub mod preview;
 pub mod providers;
+pub mod storage;
 
 // Re-exports for convenience
 pub use app::App;
@@ -18,3 +19,4 @@ pub use hooks::{
 };
 pub use pages::{LoginScreen, SessionScreen};
 pub use providers::{SessionProvider, SessionProviderProps};
+pub use storage::LocalStorageStore;

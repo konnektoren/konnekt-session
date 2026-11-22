@@ -122,6 +122,64 @@ impl<C: NetworkConnection> P2PTransport<C> {
         }
     }
 
+    /// Take over as host after failover. Sequencing continues after the last
+    /// message received from the previous host; peers adopt it from the
+    /// snapshot this host sends next.
+    pub(crate) fn promote_to_host(&mut self) {
+        self.is_host = true;
+        self.next_sequence = self.highest_received.saturating_add(1);
+        self.host_peer = None;
+        self.pending_messages.clear();
+        self.message_cache.clear();
+        self.managed_recovery = false;
+    }
+
+    /// Step down after handing the host role to `host`. Sequencing restarts
+    /// from the snapshot the new host sends.
+    pub(crate) fn demote_to_guest(&mut self, host: PeerId) {
+        self.is_host = false;
+        self.next_sequence = 0;
+        self.highest_received = 0;
+        self.host_peer = Some(host);
+        self.pending_messages.clear();
+        self.message_cache.clear();
+        self.managed_recovery = true;
+    }
+
+    /// Commit a snapshot the session validated and applied: follow its
+    /// sender and continue sequencing from it. A restarted host may begin
+    /// its sequence at zero again.
+    ///
+    /// Buffered updates newer than the snapshot from the same host are kept
+    /// and delivered on the next poll; others are discarded.
+    pub(crate) fn snapshot_accepted(&mut self, from: PeerId, as_of_sequence: u64) {
+        if !self.is_host {
+            let same_host = self.host_peer == Some(from);
+            self.host_peer = Some(from);
+            self.highest_received = as_of_sequence;
+            self.pending_messages
+                .retain(|sequence, _| same_host && *sequence > as_of_sequence);
+        }
+    }
+
+    /// Deliver buffered updates that became contiguous, e.g. after a snapshot.
+    fn deliver_contiguous(&mut self, delivered: &mut Vec<(PeerId, serde_json::Value)>) {
+        while let Some((from, pending)) = self
+            .pending_messages
+            .remove(&(self.highest_received.saturating_add(1)))
+        {
+            if let MessageKind::Application { payload } = pending.kind {
+                delivered.push((from, payload));
+                self.highest_received = pending.sequence;
+            }
+        }
+    }
+
+    /// Route guest commands to `host` until a snapshot names another host.
+    pub(crate) fn follow_host(&mut self, host: PeerId) {
+        self.host_peer = Some(host);
+    }
+
     /// Send an application message (HOST ONLY - broadcasts to ALL peers)
     pub fn send(&mut self, payload: serde_json::Value) -> Result<u64> {
         if !self.is_host {
@@ -248,6 +306,7 @@ impl<C: NetworkConnection> P2PTransport<C> {
     pub fn poll_with_sender(&mut self) -> Vec<(PeerId, serde_json::Value)> {
         let mut delivered = Vec::new();
         self.disconnected_peers.clear();
+        self.deliver_contiguous(&mut delivered);
 
         // Get raw network events
         for event in self.connection.poll_events() {
@@ -280,13 +339,6 @@ impl<C: NetworkConnection> P2PTransport<C> {
                                 snapshot,
                                 as_of_sequence,
                             } => {
-                                if !self.is_host {
-                                    // Snapshot responses are authoritative from host.
-                                    self.host_peer = Some(from);
-                                    // A restarted host may begin its sequence at zero again.
-                                    self.highest_received = as_of_sequence;
-                                    self.pending_messages.clear();
-                                }
                                 tracing::info!("📥 Received snapshot (seq: {})", as_of_sequence);
                                 self.pending_events.push(TransportEvent::SnapshotReceived {
                                     from,
@@ -375,6 +427,20 @@ impl<C: NetworkConnection> P2PTransport<C> {
             .filter(|msg| msg.sequence >= from && msg.sequence <= to)
             .cloned()
             .collect();
+
+        // The cache no longer holds the whole range (or the range is
+        // invalid): the guest cannot close its gap from updates, so it gets
+        // a complete snapshot instead.
+        let covered = from <= to
+            && to < self.next_sequence
+            && u64::try_from(messages.len()).ok()
+                == to.checked_sub(from).and_then(|n| n.checked_add(1));
+        if !covered {
+            tracing::info!(from, to, %peer, "Missed updates are no longer cached; sending a snapshot");
+            self.pending_events
+                .push(TransportEvent::SnapshotRequested { from: peer });
+            return;
+        }
 
         if !messages.is_empty() {
             let response = P2PMessage {
@@ -537,6 +603,53 @@ mod tests {
                 assert_eq!(as_of_sequence, 42);
             }
             _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[test]
+    fn a_snapshot_keeps_newer_buffered_updates_from_the_same_host() {
+        let mut transport = P2PTransport::new_guest(EmptyConnection, 10);
+        let host = PeerId::new(matchbox_socket::PeerId(uuid::Uuid::new_v4()));
+        let other = PeerId::new(matchbox_socket::PeerId(uuid::Uuid::new_v4()));
+        transport.snapshot_accepted(host, 0);
+        let mut delivered = Vec::new();
+        for sequence in [5, 7, 8] {
+            transport.handle_application_message(
+                host,
+                sequence,
+                serde_json::json!(sequence),
+                &mut delivered,
+            );
+        }
+        assert!(delivered.is_empty());
+        transport.snapshot_accepted(host, 6);
+        assert_eq!(
+            transport.poll_with_sender(),
+            vec![(host, serde_json::json!(7)), (host, serde_json::json!(8))]
+        );
+        assert!(!transport.has_sequence_gap());
+
+        // A snapshot from another host starts a new sequence space.
+        transport.handle_application_message(host, 10, serde_json::json!(10), &mut delivered);
+        transport.snapshot_accepted(other, 3);
+        assert!(!transport.has_sequence_gap());
+    }
+
+    #[test]
+    fn uncached_resend_ranges_ask_the_session_for_a_snapshot() {
+        let mut transport = P2PTransport::new_host(EmptyConnection, 2);
+        for value in 1..=4 {
+            assert!(transport.send(serde_json::json!(value)).is_ok());
+        }
+        let guest = PeerId::new(matchbox_socket::PeerId(uuid::Uuid::new_v4()));
+        transport.handle_resend_request(3, 4, guest);
+        assert!(transport.drain_events().is_empty());
+        for (from, to) in [(1, 4), (2, 3), (4, 9), (4, 3)] {
+            transport.handle_resend_request(from, to, guest);
+            assert!(matches!(
+                transport.drain_events().as_slice(),
+                [TransportEvent::SnapshotRequested { from }] if *from == guest
+            ));
         }
     }
 }

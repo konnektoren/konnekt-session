@@ -7,6 +7,8 @@ use uuid::Uuid;
 pub struct DomainEventLoop {
     lobbies: HashMap<Uuid, Lobby>,
     runs: HashMap<ActivityRunId, ActivityRun>,
+    /// Run IDs in the order the runs started (oldest first).
+    run_order: Vec<ActivityRunId>,
 }
 
 impl DomainEventLoop {
@@ -14,6 +16,7 @@ impl DomainEventLoop {
         Self {
             lobbies: HashMap::new(),
             runs: HashMap::new(),
+            run_order: Vec::new(),
         }
     }
 
@@ -414,7 +417,7 @@ impl DomainEventLoop {
             };
         }
 
-        self.runs.insert(run_id, run);
+        self.insert_run(run);
         DomainEvent::RunStarted {
             lobby_id,
             run_id,
@@ -566,7 +569,10 @@ impl DomainEventLoop {
                 reason: e.to_string(),
             };
         }
-        self.runs.insert(run_id, run);
+        // The host dequeued this activity when it started the run; mirror that
+        // so a replayed or synchronized start does not leave it queued.
+        let _ = lobby.remove_queued_activity(config.id);
+        self.insert_run(run);
         DomainEvent::RunStarted {
             lobby_id,
             run_id,
@@ -588,9 +594,94 @@ impl DomainEventLoop {
         self.runs.get(run_id)
     }
 
+    fn insert_run(&mut self, run: ActivityRun) {
+        let id = run.id();
+        if self.runs.insert(id, run).is_none() {
+            self.run_order.push(id);
+        }
+    }
+
+    /// All runs of one lobby in start order (oldest first), including
+    /// finished ones with their results.
+    pub fn runs_of(&self, lobby_id: &Uuid) -> Vec<&ActivityRun> {
+        self.run_order
+            .iter()
+            .filter_map(|id| self.runs.get(id))
+            .filter(|run| run.lobby_id() == *lobby_id)
+            .collect()
+    }
+
+    /// The `limit` most recently started runs of a lobby, oldest first. The
+    /// active run is always included, even beyond the limit.
+    pub fn recent_runs_of(&self, lobby_id: &Uuid, limit: usize) -> Vec<&ActivityRun> {
+        let runs = self.runs_of(lobby_id);
+        let mut recent = runs[runs.len().saturating_sub(limit)..].to_vec();
+        let active = self
+            .lobbies
+            .get(lobby_id)
+            .and_then(Lobby::active_run_id)
+            .and_then(|id| self.runs.get(&id));
+        if let Some(active) = active
+            && !recent.iter().any(|run| run.id() == active.id())
+        {
+            recent.push(active);
+        }
+        recent
+    }
+
+    /// Restore a lobby from a complete state, e.g. a host snapshot that may
+    /// carry only the most recent runs. The lobby and the given runs replace
+    /// the current ones; finished runs not in `runs` are kept (they cannot
+    /// change), runs still in progress are dropped. Everything is validated
+    /// first; on error nothing changes.
+    pub fn restore_lobby(
+        &mut self,
+        lobby: Lobby,
+        runs: Vec<ActivityRun>,
+    ) -> Result<(), RestoreError> {
+        lobby.validate().map_err(RestoreError::Lobby)?;
+        let lobby_id = lobby.id();
+        let mut ids = std::collections::HashSet::new();
+        for run in &runs {
+            if run.lobby_id() != lobby_id || !ids.insert(run.id()) || !run.validate() {
+                return Err(RestoreError::InvalidRun(run.id()));
+            }
+        }
+        let in_progress: Vec<_> = runs
+            .iter()
+            .filter(|run| run.status() == crate::domain::RunStatus::InProgress)
+            .map(ActivityRun::id)
+            .collect();
+        if in_progress.as_slice() != lobby.active_run_id().as_slice() {
+            return Err(RestoreError::ActiveRunMismatch);
+        }
+        self.runs.retain(|id, run| {
+            run.lobby_id() != lobby_id
+                || (run.status() != crate::domain::RunStatus::InProgress && !ids.contains(id))
+        });
+        let runs_map = &self.runs;
+        self.run_order.retain(|id| runs_map.contains_key(id));
+        for run in runs {
+            self.insert_run(run);
+        }
+        self.lobbies.insert(lobby_id, lobby);
+        Ok(())
+    }
+
     pub fn lobby_count(&self) -> usize {
         self.lobbies.len()
     }
+}
+
+/// Why a complete lobby state could not be restored.
+#[derive(Debug, PartialEq, thiserror::Error)]
+pub enum RestoreError {
+    #[error("lobby is inconsistent: {0}")]
+    Lobby(crate::domain::LobbyError),
+    #[error("run {0} is invalid, duplicated or belongs to another lobby")]
+    InvalidRun(Uuid),
+    #[error("the active run does not match the runs in progress")]
+    ActiveRunMismatch,
 }
 
 impl Default for DomainEventLoop {
@@ -770,5 +861,163 @@ mod tests {
             e => panic!("Expected RunEnded, got {:?}", e),
         }
         assert!(!el.get_lobby(&lobby_id).unwrap().has_active_run());
+    }
+}
+
+#[cfg(test)]
+mod restore_tests {
+    use super::*;
+    use crate::domain::{ActivityConfig, ActivityResult, Participant, RunStatus};
+    use std::collections::HashSet;
+
+    fn lobby_with_guest() -> (Lobby, Uuid) {
+        let host = Participant::new_host("Host".into()).unwrap_or_else(|e| panic!("{e}"));
+        let mut lobby = Lobby::new("Room".into(), host).unwrap_or_else(|e| panic!("{e}"));
+        let guest = Participant::new_guest("Guest".into()).unwrap_or_else(|e| panic!("{e}"));
+        let guest_id = guest.id();
+        lobby.add_guest(guest).unwrap_or_else(|e| panic!("{e}"));
+        (lobby, guest_id)
+    }
+
+    fn run(lobby: &Lobby, submitters: &[Uuid]) -> ActivityRun {
+        ActivityRun::new(
+            Uuid::new_v4(),
+            lobby.id(),
+            ActivityConfig::new("quiz".into(), "Quiz".into(), serde_json::Value::Null),
+            submitters.iter().copied().collect::<HashSet<_>>(),
+        )
+    }
+
+    /// Edit a value through its serialized form, like a peer could.
+    fn tamper<T: serde::Serialize + serde::de::DeserializeOwned>(
+        value: &T,
+        edit: impl FnOnce(&mut serde_json::Value),
+    ) -> T {
+        let mut json = serde_json::to_value(value).unwrap_or_else(|e| panic!("{e}"));
+        edit(&mut json);
+        serde_json::from_value(json).unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    #[test]
+    fn a_complete_state_replaces_the_lobby_and_its_runs() {
+        let (mut lobby, guest) = lobby_with_guest();
+        let mut events = DomainEventLoop::new();
+        let stale = run(&lobby, &[guest]);
+        events.add_lobby(lobby.clone());
+        events.insert_run(stale.clone());
+
+        let mut finished = run(&lobby, &[guest]);
+        let result = ActivityResult::new(finished.id(), guest);
+        assert_eq!(finished.submit_result(result), Ok(true));
+        let active = run(&lobby, &[guest]);
+        lobby
+            .set_active_run(active.id())
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(
+            events.restore_lobby(lobby.clone(), vec![finished.clone(), active.clone()]),
+            Ok(())
+        );
+        assert!(events.get_run(&stale.id()).is_none());
+        assert_eq!(
+            events.get_run(&finished.id()).map(ActivityRun::status),
+            Some(RunStatus::Completed)
+        );
+        assert_eq!(events.get_lobby(&lobby.id()), Some(&lobby));
+        assert_eq!(events.runs_of(&lobby.id()).len(), 2);
+    }
+
+    #[test]
+    fn an_inconsistent_state_is_rejected_without_changes() {
+        let (lobby, guest) = lobby_with_guest();
+        let mut events = DomainEventLoop::new();
+        events.add_lobby(lobby.clone());
+        let active = run(&lobby, &[guest]);
+
+        // Run in progress but the lobby has no active run.
+        assert_eq!(
+            events.restore_lobby(lobby.clone(), vec![active.clone()]),
+            Err(RestoreError::ActiveRunMismatch)
+        );
+        // Completed without all results.
+        let completed = tamper(&run(&lobby, &[guest]), |json| {
+            json["status"] = "Completed".into();
+        });
+        assert_eq!(
+            events.restore_lobby(lobby.clone(), vec![completed.clone()]),
+            Err(RestoreError::InvalidRun(completed.id()))
+        );
+        // Two hosts.
+        let two_hosts = tamper(&lobby, |json| {
+            json["participants"][guest.to_string()]["lobby_role"] = "Host".into();
+        });
+        assert!(matches!(
+            events.restore_lobby(two_hosts, vec![]),
+            Err(RestoreError::Lobby(_))
+        ));
+        // A run of another lobby.
+        let (other, other_guest) = lobby_with_guest();
+        let foreign = run(&other, &[other_guest]);
+        assert_eq!(
+            events.restore_lobby(lobby.clone(), vec![foreign.clone()]),
+            Err(RestoreError::InvalidRun(foreign.id()))
+        );
+        assert_eq!(events.get_lobby(&lobby.id()), Some(&lobby));
+    }
+
+    #[test]
+    fn snapshots_can_carry_only_recent_runs_without_losing_older_results() {
+        let (mut lobby, guest) = lobby_with_guest();
+        let mut events = DomainEventLoop::new();
+        let mut finished = Vec::new();
+        for _ in 0..4 {
+            let mut done = run(&lobby, &[guest]);
+            let result = ActivityResult::new(done.id(), guest);
+            assert_eq!(done.submit_result(result), Ok(true));
+            finished.push(done);
+        }
+        let active = run(&lobby, &[guest]);
+        lobby
+            .set_active_run(active.id())
+            .unwrap_or_else(|e| panic!("{e}"));
+        let mut all = finished.clone();
+        all.push(active.clone());
+        assert_eq!(events.restore_lobby(lobby.clone(), all), Ok(()));
+
+        let ids = |runs: Vec<&ActivityRun>| runs.iter().map(|run| run.id()).collect::<Vec<_>>();
+        assert_eq!(
+            ids(events.recent_runs_of(&lobby.id(), 2)),
+            vec![finished[3].id(), active.id()]
+        );
+        assert_eq!(
+            ids(events.recent_runs_of(&lobby.id(), 0)),
+            vec![active.id()]
+        );
+
+        // A guest restoring a bounded snapshot keeps its older finished runs.
+        let mut guest_loop = DomainEventLoop::new();
+        assert_eq!(
+            guest_loop.restore_lobby(lobby.clone(), finished[..2].to_vec()),
+            Err(RestoreError::ActiveRunMismatch)
+        );
+        let mut idle = lobby.clone();
+        idle.clear_active_run();
+        assert_eq!(
+            guest_loop.restore_lobby(idle, finished[..3].to_vec()),
+            Ok(())
+        );
+        let recent: Vec<_> = events
+            .recent_runs_of(&lobby.id(), 2)
+            .into_iter()
+            .cloned()
+            .collect();
+        assert_eq!(guest_loop.restore_lobby(lobby.clone(), recent), Ok(()));
+        assert_eq!(
+            ids(guest_loop.runs_of(&lobby.id())),
+            ids(events.runs_of(&lobby.id()))[..3]
+                .iter()
+                .copied()
+                .chain([finished[3].id(), active.id()])
+                .collect::<Vec<_>>()
+        );
     }
 }

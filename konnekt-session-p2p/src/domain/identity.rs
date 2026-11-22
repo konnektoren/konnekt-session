@@ -1,6 +1,17 @@
 use crate::domain::PeerId;
 use uuid::Uuid;
 
+/// Namespace for participant IDs derived from public keys.
+const PARTICIPANT_NAMESPACE: Uuid = Uuid::from_bytes([
+    0x6b, 0x6f, 0x6e, 0x6e, 0x65, 0x6b, 0x74, 0x2d, 0x70, 0x61, 0x72, 0x74, 0x69, 0x63, 0x69, 0x70,
+]);
+
+/// Stable participant ID for an Ed25519 public key (UUID v5). The same key
+/// yields the same participant in every lobby and after reloads.
+pub fn participant_id(public_key: &[u8; 32]) -> Uuid {
+    Uuid::new_v5(&PARTICIPANT_NAMESPACE, public_key)
+}
+
 /// Public, versioned challenge sent to a peer for signing.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IdentityChallenge {
