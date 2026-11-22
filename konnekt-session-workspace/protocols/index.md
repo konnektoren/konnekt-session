@@ -10,6 +10,7 @@ Multi-step protocols between players and services. Each protocol is a sans-IO st
 
 | Protocol | Status | Crate | Summary |
 |---|---|---|---|
+| [[synchronized-start\|Synchronized start]] | partial | `konnekt-session-core` | Music retries and acknowledges count-in announcements; shared scheduling remains open |
 | [[clock-probe\|Clock probe]] | partial | `konnekt-session-core` | Music live link matches and validates one outstanding probe |
 | [[player-readiness\|Player readiness]] | partial | `konnekt-session-core` | Music lobby binds per-player readiness to a selection revision; shared API and ordering remain open |
 | [[activity-run\|Activity run]] | partial | `konnekt-session-core` | Complete or cancel started runs; queued activities remain outside the machine |
@@ -38,6 +39,21 @@ The synchronization machine does not authenticate host messages.
 ## Generated state machines
 
 Run `just protocol-diagrams` to update these diagrams.
+
+### Synchronized start
+
+```mermaid
+stateDiagram-v2
+    [*] --> Prepared
+    Acknowledged --> [*]
+    TimedOut --> [*]
+    Cancelled --> [*]
+    Prepared --> AwaitingAcknowledgements : announced
+    AwaitingAcknowledgements --> Acknowledged : acknowledged
+    AwaitingAcknowledgements --> TimedOut : timed_out
+    Prepared --> Cancelled : cancelled
+    AwaitingAcknowledgements --> Cancelled : cancelled
+```
 
 ### Clock probe
 
