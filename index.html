@@ -7,9 +7,9 @@
         <link rel="stylesheet" href="/konnekt-session/styles-d29baee58a313d77.css" integrity="sha384-PuWF9b5wDCcCPTOa/r83e7yS4BOcCmjjZNlhIrWB7NABy148Sx1JMgUMGehrWD6M"/>
         
 <script type="module">
-import init, * as bindings from '/konnekt-session/basic-lobby-a24de6067f57b0cc.js';
+import init, * as bindings from '/konnekt-session/basic-lobby-fd833c7183bd8127.js';
 
-const wasm = await init({ module_or_path: '/konnekt-session/basic-lobby-e77902e7c70ae4b6_bg.wasm' });
+const wasm = await init({ module_or_path: '/konnekt-session/basic-lobby-434b9f38738a63d6_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -18,7 +18,7 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>
-    <link rel="modulepreload" href="/konnekt-session/basic-lobby-a24de6067f57b0cc.js" crossorigin="anonymous" integrity="sha384-HNvf/azlxMiliXT3GwHy9glJaiShZz62eZYqqrWPvUweE4rigF5ah0hpx5bbDjn+"><link rel="preload" href="/konnekt-session/basic-lobby-e77902e7c70ae4b6_bg.wasm" crossorigin="anonymous" integrity="sha384-/9UU3XxuZLS0V+UIN/BTVMog+laRlHsLmPY9Ld3XKVlm+Hb5SP8Ik40yjqhOJbIm" as="fetch" type="application/wasm"></head>
+    <link rel="modulepreload" href="/konnekt-session/basic-lobby-fd833c7183bd8127.js" crossorigin="anonymous" integrity="sha384-LEOkWbX8DVW/tqsESSAD551FRGTfVUHPuB0BdzdWF12h5WRPOdUvfNMqFFISP39+"><link rel="preload" href="/konnekt-session/basic-lobby-434b9f38738a63d6_bg.wasm" crossorigin="anonymous" integrity="sha384-GsvcnSHBe2U1esAIX3DG9RcYr3SG0V5XKbLMO3s59qHRuFfPIEszjW+nDP7asrs4" as="fetch" type="application/wasm"></head>
     <body>
         <div id="app"></div>
     </body>
