@@ -5,6 +5,9 @@ use konnekt_session_core::protocol::player_readiness::{NotReady, PlayerReadiness
 use konnekt_session_core::protocol::synchronized_start::{
     Prepared as StartPrepared, SynchronizedStart,
 };
+use konnekt_session_p2p::protocol::event_log_reconciliation::{
+    EventLogReconciliation, VerifyingAuthority,
+};
 use konnekt_session_p2p::protocol::host_failover::{HostAvailable, HostFailover};
 use konnekt_session_p2p::protocol::identity::{AwaitingChallenge, IdentityVerification};
 use konnekt_session_p2p::protocol::join::{Connecting, JoinSession};
@@ -21,6 +24,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=../konnekt-session-core/src/protocol/clock_probe.rs");
     println!("cargo:rerun-if-changed=../konnekt-session-core/src/protocol/player_readiness.rs");
     println!("cargo:rerun-if-changed=../konnekt-session-p2p/src/protocol/command_outcome.rs");
+    println!(
+        "cargo:rerun-if-changed=../konnekt-session-p2p/src/protocol/event_log_reconciliation.rs"
+    );
     println!("cargo:rerun-if-changed=../konnekt-session-p2p/src/protocol/join.rs");
     println!("cargo:rerun-if-changed=../konnekt-session-p2p/src/protocol/peer_grace.rs");
     println!("cargo:rerun-if-changed=../konnekt-session-p2p/src/protocol/request_ledger.rs");
@@ -29,6 +35,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=../konnekt-session-p2p/src/protocol/synchronization.rs");
     println!("cargo:rerun-if-changed=../konnekt-session-rating/src/protocol/rating_match.rs");
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("OUT_DIR is missing")?);
+    fs::write(
+        output.join("event-log-reconciliation.mmd"),
+        EventLogReconciliation::<VerifyingAuthority>::schema().to_mermaid(),
+    )?;
     fs::write(
         output.join("host-failover.mmd"),
         HostFailover::<HostAvailable>::schema().to_mermaid(),

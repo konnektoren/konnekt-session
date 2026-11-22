@@ -1,4 +1,5 @@
 mod config;
+pub mod event_log_reconciliation;
 mod event_translator;
 mod events;
 mod host_failover;

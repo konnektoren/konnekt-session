@@ -1,3 +1,7 @@
+use crate::application::event_log_reconciliation::{
+    HistoryMessage, MAX_HISTORY_BYTES, ReconciliationAttempt, ReconciliationError, SignedHistory,
+    valid_history,
+};
 use crate::application::host_failover::{DEFAULT_GRACE, HostObservation};
 use crate::application::identity_exchange::{IdentityExchange, IdentityMessage};
 use crate::domain::VerifiedIdentity;
@@ -6,6 +10,7 @@ use crate::infrastructure::transport::{NetworkConnection, P2PTransport, Transpor
 use crate::protocol::command_outcome::{
     CommandOutcomeEvent, CommandOutcomeState, DynamicCommandOutcome,
 };
+use crate::protocol::event_log_reconciliation::EventLogReconciliationState;
 use crate::protocol::host_failover::HostFailoverState;
 use crate::protocol::join::{DynamicJoinSession, JoinSessionEvent, JoinSessionState};
 use crate::protocol::synchronization::{
@@ -44,6 +49,22 @@ pub struct SessionLoopV2<C: NetworkConnection> {
     identity_exchange: Option<IdentityExchange>,
     host_observation: Option<HostObservation>,
     host_grace: std::time::Duration,
+    reconciliation: Option<PeerReconciliation>,
+    history_offer: Option<HistoryOffer>,
+}
+
+struct PeerReconciliation {
+    peer: crate::domain::PeerId,
+    attempt: ReconciliationAttempt,
+    request_id: Option<Uuid>,
+    expected_key: Option<[u8; 32]>,
+    received_history: Option<Vec<crate::domain::LobbyEvent>>,
+}
+
+struct HistoryOffer {
+    peer: crate::domain::PeerId,
+    expected_key: [u8; 32],
+    events: Vec<crate::domain::LobbyEvent>,
 }
 
 struct TrackedCommand {
@@ -80,6 +101,8 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
             identity_exchange: None,
             host_observation: None,
             host_grace: DEFAULT_GRACE,
+            reconciliation: None,
+            history_offer: None,
         }
     }
 
@@ -118,6 +141,260 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
     /// Returns `None` on hosts and before a guest applies its first snapshot.
     pub fn host_failover_state(&self) -> Option<HostFailoverState> {
         self.host_observation.as_ref().map(HostObservation::state)
+    }
+
+    /// Start a local reconciliation attempt for one currently connected peer.
+    /// This does not exchange histories or authenticate the peer.
+    pub fn begin_reconciliation(
+        &mut self,
+        peer: crate::domain::PeerId,
+    ) -> std::result::Result<(), ReconciliationError> {
+        if self.reconciliation.as_ref().is_some_and(|entry| {
+            !matches!(
+                entry.attempt.state(),
+                EventLogReconciliationState::Reconciled
+                    | EventLogReconciliationState::Rejected
+                    | EventLogReconciliationState::InsufficientHistory
+                    | EventLogReconciliationState::Cancelled
+            )
+        }) {
+            return Err(ReconciliationError::AlreadyInProgress);
+        }
+        if !self.transport.connected_peers().contains(&peer) {
+            return Err(ReconciliationError::PeerDisconnected);
+        }
+        self.reconciliation = Some(PeerReconciliation {
+            peer,
+            attempt: ReconciliationAttempt::new(self.lobby_id),
+            request_id: None,
+            expected_key: None,
+            received_history: None,
+        });
+        Ok(())
+    }
+
+    /// Local progress for the latest attempt; it is not distributed agreement.
+    pub fn reconciliation_state(&self) -> Option<EventLogReconciliationState> {
+        self.reconciliation
+            .as_ref()
+            .map(|entry| entry.attempt.state())
+    }
+
+    /// Supply the independently verified authority result for the selected peer.
+    pub fn reconciliation_authority_checked(
+        &mut self,
+        verified: bool,
+    ) -> std::result::Result<(), ReconciliationError> {
+        self.reconciliation
+            .as_mut()
+            .ok_or(ReconciliationError::InvalidState)?
+            .attempt
+            .authority_checked(verified)
+    }
+
+    /// Compare independently verified, complete logs for this lobby.
+    /// V2 does not collect, verify or apply these histories.
+    pub fn compare_reconciliation_histories(
+        &mut self,
+        local: &crate::domain::EventLog,
+        remote: &crate::domain::EventLog,
+    ) -> std::result::Result<EventLogReconciliationState, ReconciliationError> {
+        self.reconciliation
+            .as_mut()
+            .ok_or(ReconciliationError::InvalidState)?
+            .attempt
+            .compare(local, remote)
+    }
+
+    pub fn cancel_reconciliation(&mut self) -> std::result::Result<(), ReconciliationError> {
+        let entry = self
+            .reconciliation
+            .as_mut()
+            .ok_or(ReconciliationError::InvalidState)?;
+        entry.attempt.cancel()?;
+        entry.request_id = None;
+        entry.received_history = None;
+        Ok(())
+    }
+
+    /// Offer a bounded history to one connected peer. This replaces any prior
+    /// offer; the expected key must match the peer's key-possession proof.
+    /// The caller is responsible for choosing a trusted key.
+    pub fn offer_reconciliation_history(
+        &mut self,
+        peer: crate::domain::PeerId,
+        expected_key: [u8; 32],
+        events: Vec<crate::domain::LobbyEvent>,
+    ) -> Result<()> {
+        use crate::infrastructure::error::P2PError;
+        if !self.transport.connected_peers().contains(&peer) {
+            return Err(P2PError::SendFailed("History peer is not connected".into()));
+        }
+        if !self
+            .verified_peer_identity(peer)
+            .is_some_and(|identity| identity.public_key() == &expected_key)
+        {
+            return Err(P2PError::SendFailed(
+                "History peer key is not verified or does not match".into(),
+            ));
+        }
+        let sample = HistoryMessage::Response {
+            lobby_id: self.lobby_id,
+            request_id: Uuid::nil(),
+            events: events.clone(),
+        };
+        if !valid_history(self.lobby_id, &events)
+            || serde_json::to_vec(&sample)
+                .map_err(P2PError::Serialization)?
+                .len()
+                > MAX_HISTORY_BYTES
+        {
+            return Err(P2PError::SendFailed(
+                "History has invalid lobby or exceeds transfer limits".into(),
+            ));
+        }
+        self.history_offer = Some(HistoryOffer {
+            peer,
+            expected_key,
+            events,
+        });
+        Ok(())
+    }
+
+    /// Remove the current history offer.
+    pub fn clear_reconciliation_history_offer(&mut self) {
+        self.history_offer = None;
+    }
+
+    /// Request the selected peer's offered history after the caller reports a
+    /// successful authority check and key-possession proof matching the pinned
+    /// key. The received history still needs validation before comparison. A new request supersedes any
+    /// outstanding request or previously received response.
+    pub fn request_reconciliation_history(&mut self, expected_key: [u8; 32]) -> Result<Uuid> {
+        use crate::infrastructure::error::P2PError;
+        let Some(entry) = &self.reconciliation else {
+            return Err(P2PError::SendFailed("No reconciliation attempt".into()));
+        };
+        if entry.attempt.state() != EventLogReconciliationState::ComparingHistories {
+            return Err(P2PError::SendFailed(
+                "Reconciliation is not awaiting history".into(),
+            ));
+        }
+        let peer = entry.peer;
+        if !self
+            .verified_peer_identity(peer)
+            .is_some_and(|identity| identity.public_key() == &expected_key)
+        {
+            return Err(P2PError::SendFailed(
+                "History peer key is not verified or does not match".into(),
+            ));
+        }
+        let request_id = Uuid::new_v4();
+        let message = HistoryMessage::Request {
+            lobby_id: self.lobby_id,
+            request_id,
+        };
+        self.send_signed_history(peer, message)?;
+        let Some(entry) = &mut self.reconciliation else {
+            return Err(P2PError::SendFailed("No reconciliation attempt".into()));
+        };
+        entry.request_id = Some(request_id);
+        entry.expected_key = Some(expected_key);
+        entry.received_history = None;
+        Ok(request_id)
+    }
+
+    fn send_signed_history(
+        &mut self,
+        peer: crate::domain::PeerId,
+        message: HistoryMessage,
+    ) -> Result<()> {
+        use crate::infrastructure::error::P2PError;
+        let exchange = self
+            .identity_exchange
+            .as_ref()
+            .ok_or_else(|| P2PError::SendFailed("Identity exchange is disabled".into()))?;
+        let challenge = exchange
+            .peer_challenge(peer)
+            .ok_or_else(|| P2PError::SendFailed("Peer challenge not received".into()))?;
+        let local = self
+            .transport
+            .local_peer_id()
+            .ok_or_else(|| P2PError::SendFailed("Local peer ID is unavailable".into()))?;
+        let body = serde_json::to_string(&message).map_err(P2PError::Serialization)?;
+        if body.len() > MAX_HISTORY_BYTES {
+            return Err(P2PError::SendFailed(
+                "History message exceeds transfer limits".into(),
+            ));
+        }
+        let mut signed = SignedHistory {
+            reconciliation_history_v2: body,
+            challenge,
+            signature: Vec::new(),
+        };
+        signed.signature = exchange.sign(&signed.signing_bytes(local, peer)).to_vec();
+        let payload = serde_json::to_value(signed).map_err(P2PError::Serialization)?;
+        self.transport.send_control_to(peer, payload)
+    }
+
+    /// Take the unverified response to the most recent matching request.
+    pub fn take_reconciliation_history(&mut self) -> Option<Vec<crate::domain::LobbyEvent>> {
+        let entry = self.reconciliation.as_mut()?;
+        (entry.attempt.state() == EventLogReconciliationState::ComparingHistories)
+            .then(|| entry.received_history.take())?
+    }
+
+    fn receive_history_message(&mut self, sender: crate::domain::PeerId, message: HistoryMessage) {
+        match message {
+            HistoryMessage::Request {
+                lobby_id,
+                request_id,
+            } if lobby_id == self.lobby_id => {
+                let Some(offer) = self.history_offer.as_ref().filter(|offer| {
+                    offer.peer == sender
+                        && self
+                            .verified_peer_identity(sender)
+                            .is_some_and(|identity| identity.public_key() == &offer.expected_key)
+                }) else {
+                    return;
+                };
+                if !self
+                    .identity_exchange
+                    .as_mut()
+                    .is_some_and(|exchange| exchange.accept_history_request(sender, request_id))
+                {
+                    return;
+                }
+                let response = HistoryMessage::Response {
+                    lobby_id,
+                    request_id,
+                    events: offer.events.clone(),
+                };
+                if let Err(error) = self.send_signed_history(sender, response) {
+                    tracing::debug!(%error, "Unable to send reconciliation history");
+                }
+            }
+            HistoryMessage::Response {
+                lobby_id,
+                request_id,
+                events,
+            } if lobby_id == self.lobby_id && valid_history(lobby_id, &events) => {
+                if let Some(entry) = &mut self.reconciliation
+                    && entry.peer == sender
+                    && entry.request_id == Some(request_id)
+                    && self
+                        .identity_exchange
+                        .as_ref()
+                        .and_then(|exchange| exchange.verified(sender))
+                        .is_some_and(|identity| Some(*identity.public_key()) == entry.expected_key)
+                    && entry.attempt.state() == EventLogReconciliationState::ComparingHistories
+                {
+                    entry.request_id = None;
+                    entry.received_history = Some(events);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Configure the grace period before host-loss observation begins.
@@ -313,6 +590,13 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
     /// This does not authenticate a host, authorize commands, or gate admission.
     /// Callers must retain their own key if they need identity across reconnects.
     pub fn enable_identity_exchange(&mut self, secret: [u8; 32]) {
+        self.history_offer = None;
+        if let Some(entry) = &mut self.reconciliation {
+            let _ = entry.attempt.cancel();
+            entry.request_id = None;
+            entry.expected_key = None;
+            entry.received_history = None;
+        }
         self.identity_exchange = Some(IdentityExchange::new(secret));
     }
 
@@ -391,6 +675,20 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         // 2. Poll transport for messages
         let messages = self.transport.poll_with_sender();
         let disconnected = self.transport.drain_disconnected_peers();
+        if let Some(entry) = &mut self.reconciliation
+            && disconnected.contains(&entry.peer)
+        {
+            let _ = entry.attempt.cancel();
+            entry.request_id = None;
+            entry.received_history = None;
+        }
+        if self
+            .history_offer
+            .as_ref()
+            .is_some_and(|offer| disconnected.contains(&offer.peer))
+        {
+            self.history_offer = None;
+        }
         let now = instant::Instant::now();
         if let Some(observation) = &mut self.host_observation {
             for &peer in &disconnected {
@@ -422,6 +720,26 @@ impl<C: NetworkConnection> SessionLoopV2<C> {
         for (sender, payload) in messages {
             processed += 1;
             tracing::trace!(%sender, "Received application message");
+
+            if payload.get("reconciliation_history_v1").is_some() {
+                continue;
+            }
+            if payload.get("reconciliation_history_v2").is_some() {
+                if peers.contains(&sender)
+                    && let Ok(signed) = serde_json::from_value::<SignedHistory>(payload)
+                    && signed.reconciliation_history_v2.len() <= MAX_HISTORY_BYTES
+                    && let Some(local) = self.transport.local_peer_id()
+                    && let Some(exchange) = &self.identity_exchange
+                    && exchange.issued_challenge(sender) == Some(signed.challenge)
+                    && let Some(identity) = exchange.verified(sender)
+                    && signed.verify(sender, local, identity.public_key())
+                    && let Ok(message) =
+                        serde_json::from_str::<HistoryMessage>(&signed.reconciliation_history_v2)
+                {
+                    self.receive_history_message(sender, message);
+                }
+                continue;
+            }
 
             if let Ok(message) = serde_json::from_value::<IdentityMessage>(payload.clone()) {
                 if peers.contains(&sender)

@@ -33,6 +33,8 @@ struct Pending {
 pub(crate) struct IdentityExchange {
     signing_key: SigningKey,
     pending: HashMap<PeerId, Pending>,
+    peer_challenges: HashMap<PeerId, Uuid>,
+    history_requests: HashMap<PeerId, HashSet<Uuid>>,
 }
 
 impl IdentityExchange {
@@ -42,6 +44,8 @@ impl IdentityExchange {
         Self {
             signing_key,
             pending: HashMap::new(),
+            peer_challenges: HashMap::new(),
+            history_requests: HashMap::new(),
         }
     }
 
@@ -53,9 +57,29 @@ impl IdentityExchange {
     }
 
     pub(crate) fn disconnected(&mut self, peer: PeerId) {
+        self.peer_challenges.remove(&peer);
+        self.history_requests.remove(&peer);
         if let Some(mut pending) = self.pending.remove(&peer) {
             pending.verifier.disconnect();
         }
+    }
+
+    pub(crate) fn sign(&self, bytes: &[u8]) -> [u8; 64] {
+        self.signing_key.sign(bytes).to_bytes()
+    }
+
+    pub(crate) fn peer_challenge(&self, peer: PeerId) -> Option<Uuid> {
+        self.peer_challenges.get(&peer).copied()
+    }
+
+    pub(crate) fn issued_challenge(&self, peer: PeerId) -> Option<Uuid> {
+        self.verified(peer)?;
+        Some(self.pending.get(&peer)?.verifier.challenge().nonce)
+    }
+
+    pub(crate) fn accept_history_request(&mut self, peer: PeerId, id: Uuid) -> bool {
+        let seen = self.history_requests.entry(peer).or_default();
+        seen.len() < 1024 && seen.insert(id)
     }
 
     pub(crate) fn advance(
@@ -65,6 +89,10 @@ impl IdentityExchange {
         now: Instant,
     ) -> Vec<(PeerId, IdentityMessage)> {
         let connected: HashSet<_> = peers.iter().copied().collect();
+        self.peer_challenges
+            .retain(|peer, _| connected.contains(peer));
+        self.history_requests
+            .retain(|peer, _| connected.contains(peer));
         self.pending.retain(|peer, pending| {
             if !connected.contains(peer) {
                 pending.verifier.disconnect();
@@ -126,6 +154,7 @@ impl IdentityExchange {
             IdentityMessage::Challenge(challenge)
                 if challenge.lobby_id == lobby && challenge.peer == local =>
             {
+                self.peer_challenges.insert(sender, challenge.nonce);
                 Some(IdentityMessage::Proof {
                     nonce: challenge.nonce,
                     public_key: self.signing_key.verifying_key().to_bytes(),
@@ -160,6 +189,17 @@ impl IdentityExchange {
 mod tests {
     use super::*;
     use crate::domain::MatchboxPeerId;
+
+    #[test]
+    fn history_requests_cannot_be_replayed_during_a_connection() {
+        let peer = PeerId::new(MatchboxPeerId(Uuid::new_v4()));
+        let request = Uuid::new_v4();
+        let mut exchange = IdentityExchange::new([1; 32]);
+        assert!(exchange.accept_history_request(peer, request));
+        assert!(!exchange.accept_history_request(peer, request));
+        exchange.disconnected(peer);
+        assert!(exchange.accept_history_request(peer, request));
+    }
 
     #[test]
     fn rejected_challenge_is_not_retried_and_a_fresh_one_can_succeed() {

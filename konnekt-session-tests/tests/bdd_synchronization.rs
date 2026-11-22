@@ -80,6 +80,7 @@ struct SyncWorld {
     grace: Option<(PeerRegistry, PeerId)>,
     timed_out: Vec<PeerId>,
     asset: Option<AssetFixture>,
+    offered_history: Vec<konnekt_session_p2p::domain::LobbyEvent>,
 }
 
 struct AssetFixture {
@@ -308,6 +309,242 @@ fn host_grace_observed(world: &mut SyncWorld) {
     );
     assert!(!fixture.guest.is_host());
     assert!(!fixture.guest.connected_peers().is_empty());
+}
+
+#[given("the guest begins reconciling with the connected host")]
+fn begin_reconciliation(world: &mut SyncWorld) {
+    let Some(fixture) = &mut world.fixture else {
+        panic!("missing session")
+    };
+    let Some(host) = fixture.host.local_peer_id() else {
+        panic!("missing host")
+    };
+    fixture.host_loop.enable_identity_exchange([1; 32]);
+    fixture.guest.enable_identity_exchange([2; 32]);
+    for _ in 0..8 {
+        fixture.host_loop.poll();
+        fixture.guest.poll();
+    }
+    assert!(fixture.guest.verified_peer_identity(host).is_some());
+    assert!(
+        fixture
+            .host_loop
+            .verified_peer_identity(fixture.guest_id)
+            .is_some()
+    );
+    assert!(fixture.guest.begin_reconciliation(host).is_ok());
+}
+
+fn history_keys(fixture: &Fixture) -> ([u8; 32], [u8; 32]) {
+    let host = fixture
+        .host
+        .local_peer_id()
+        .unwrap_or_else(|| panic!("missing host"));
+    let host_key = *fixture
+        .guest
+        .verified_peer_identity(host)
+        .unwrap_or_else(|| panic!("unverified host"))
+        .public_key();
+    let guest_key = *fixture
+        .host_loop
+        .verified_peer_identity(fixture.guest_id)
+        .unwrap_or_else(|| panic!("unverified guest"))
+        .public_key();
+    (host_key, guest_key)
+}
+
+#[when("the host authority is verified and both histories match")]
+fn matching_histories(world: &mut SyncWorld) {
+    use konnekt_session_p2p::domain::{DomainEvent, EventLog, LobbyEvent};
+    let Some(fixture) = &mut world.fixture else {
+        panic!("missing session")
+    };
+    let mut history = EventLog::new();
+    history.add_event(LobbyEvent::new(
+        1,
+        fixture.lobby_id,
+        DomainEvent::GuestLeft {
+            participant_id: Uuid::new_v4(),
+        },
+    ));
+    assert!(fixture.guest.reconciliation_authority_checked(true).is_ok());
+    assert!(
+        fixture
+            .guest
+            .compare_reconciliation_histories(&history, &history)
+            .is_ok()
+    );
+}
+
+#[then("the local reconciliation reports matching histories")]
+fn reconciliation_matches(world: &mut SyncWorld) {
+    use konnekt_session_p2p::protocol::event_log_reconciliation::EventLogReconciliationState;
+    let Some(fixture) = &world.fixture else {
+        panic!("missing session")
+    };
+    assert_eq!(
+        fixture.guest.reconciliation_state(),
+        Some(EventLogReconciliationState::Reconciled)
+    );
+}
+
+#[when("the reconciliation peer disconnects")]
+fn reconciliation_peer_disconnects(world: &mut SyncWorld) {
+    host_disconnects(world);
+}
+
+#[then("the local reconciliation is cancelled")]
+fn reconciliation_cancelled(world: &mut SyncWorld) {
+    use konnekt_session_p2p::protocol::event_log_reconciliation::EventLogReconciliationState;
+    let Some(fixture) = &world.fixture else {
+        panic!("missing session")
+    };
+    assert_eq!(
+        fixture.guest.reconciliation_state(),
+        Some(EventLogReconciliationState::Cancelled)
+    );
+}
+
+#[when("the host shares its history with the guest")]
+fn exchange_history(world: &mut SyncWorld) {
+    use konnekt_session_p2p::domain::{DomainEvent, LobbyEvent};
+    let Some(fixture) = &mut world.fixture else {
+        panic!("missing session")
+    };
+    let history = vec![LobbyEvent::new(
+        1,
+        fixture.lobby_id,
+        DomainEvent::GuestLeft {
+            participant_id: Uuid::new_v4(),
+        },
+    )];
+    let (host_key, guest_key) = history_keys(fixture);
+    assert!(
+        fixture
+            .host_loop
+            .offer_reconciliation_history(fixture.guest_id, guest_key, history.clone())
+            .is_ok()
+    );
+    assert!(fixture.guest.reconciliation_authority_checked(true).is_ok());
+    assert!(
+        fixture
+            .guest
+            .request_reconciliation_history(host_key)
+            .is_ok()
+    );
+    for _ in 0..3 {
+        fixture.host_loop.poll();
+        fixture.guest.poll();
+    }
+    world.offered_history = history;
+}
+
+#[then("the guest receives the offered history for verification")]
+fn history_received(world: &mut SyncWorld) {
+    let Some(fixture) = &mut world.fixture else {
+        panic!("missing session")
+    };
+    assert_eq!(
+        fixture.guest.take_reconciliation_history(),
+        Some(world.offered_history.clone())
+    );
+    assert!(fixture.guest.take_reconciliation_history().is_none());
+}
+
+#[when("the guest receives an unsigned history reply")]
+fn replace_history_request(world: &mut SyncWorld) {
+    let Some(fixture) = &mut world.fixture else {
+        panic!("missing session")
+    };
+    let (host_key, _) = history_keys(fixture);
+    assert!(fixture.guest.reconciliation_authority_checked(true).is_ok());
+    let old = fixture
+        .guest
+        .request_reconciliation_history(host_key)
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert!(
+        fixture
+            .guest
+            .request_reconciliation_history(host_key)
+            .is_ok()
+    );
+    let payload = serde_json::json!({"reconciliation_history_v1": "Response", "payload": {"lobby_id": fixture.lobby_id, "request_id": old, "events": []}});
+    let data = serde_json::to_vec(&P2PMessage::application(payload))
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert!(fixture.host.send_to(fixture.guest_id, data).is_ok());
+    fixture.guest.poll();
+}
+
+#[then("the guest ignores the unsigned history reply")]
+fn old_history_ignored(world: &mut SyncWorld) {
+    let Some(fixture) = &mut world.fixture else {
+        panic!("missing session")
+    };
+    assert!(fixture.guest.take_reconciliation_history().is_none());
+}
+
+#[when("the guest requests history using an unexpected host key")]
+fn wrong_history_key(world: &mut SyncWorld) {
+    let Some(fixture) = &mut world.fixture else {
+        panic!("missing session")
+    };
+    assert!(fixture.guest.reconciliation_authority_checked(true).is_ok());
+    assert!(
+        fixture
+            .guest
+            .request_reconciliation_history([0; 32])
+            .is_err()
+    );
+}
+
+#[then("the guest does not receive a history")]
+fn history_not_received(world: &mut SyncWorld) {
+    let Some(fixture) = &mut world.fixture else {
+        panic!("missing session")
+    };
+    assert!(fixture.guest.take_reconciliation_history().is_none());
+}
+
+#[when("the host tries to offer more than 100 history events")]
+fn oversize_history_offer(world: &mut SyncWorld) {
+    use konnekt_session_p2p::domain::{DomainEvent, LobbyEvent};
+    let Some(fixture) = &mut world.fixture else {
+        panic!("missing session")
+    };
+    let event = LobbyEvent::new(
+        1,
+        fixture.lobby_id,
+        DomainEvent::GuestLeft {
+            participant_id: Uuid::new_v4(),
+        },
+    );
+    let (_, guest_key) = history_keys(fixture);
+    assert!(
+        fixture
+            .host_loop
+            .offer_reconciliation_history(fixture.guest_id, guest_key, vec![event; 101])
+            .is_err()
+    );
+}
+
+#[then("no history is offered to the guest")]
+fn oversized_history_not_offered(world: &mut SyncWorld) {
+    let Some(fixture) = &mut world.fixture else {
+        panic!("missing session")
+    };
+    let (host_key, _) = history_keys(fixture);
+    assert!(fixture.guest.reconciliation_authority_checked(true).is_ok());
+    assert!(
+        fixture
+            .guest
+            .request_reconciliation_history(host_key)
+            .is_ok()
+    );
+    for _ in 0..3 {
+        fixture.host_loop.poll();
+        fixture.guest.poll();
+    }
+    assert!(fixture.guest.take_reconciliation_history().is_none());
 }
 
 #[when("the host queues an activity")]

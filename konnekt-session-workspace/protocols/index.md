@@ -10,6 +10,7 @@ Multi-step protocols between players and services. Each protocol is a sans-IO st
 
 | Protocol | Status | Crate | Summary |
 |---|---|---|---|
+| [[event-log-reconciliation\|Event log reconciliation]] | partial | `konnekt-session-p2p` | Compare caller-verified complete histories; verification, merge and runtime integration remain open |
 | [[host-failover\|Host failover]] | partial | `konnekt-session-p2p` | Observe host loss and grace; authority transfer and reclaim remain open |
 | [[asset-transfer\|Asset transfer]] | partial | `konnekt-session-core` | Track transfer and provide bounded in-memory sender and receiver |
 | [[synchronized-start\|Synchronized start]] | partial | `konnekt-session-core` | Music retries and acknowledges count-in announcements; shared scheduling remains open |
@@ -41,6 +42,37 @@ The synchronization machine does not authenticate host messages.
 ## Generated state machines
 
 Run `just protocol-diagrams` to update these diagrams.
+
+### Event log reconciliation
+
+```mermaid
+stateDiagram-v2
+    [*] --> VerifyingAuthority
+    Reconciled --> [*]
+    Rejected --> [*]
+    InsufficientHistory --> [*]
+    Cancelled --> [*]
+    VerifyingAuthority --> ComparingHistories : authority_verified
+    ComparingHistories --> Reconciled : histories_match
+    ComparingHistories --> FindingAncestor : divergence_detected
+    FindingAncestor --> SelectingHistory : ancestor_found
+    FindingAncestor --> InsufficientHistory : history_unavailable
+    SelectingHistory --> PreparingMerge : history_selected
+    PreparingMerge --> ApplyingMerge : merge_plan_validated
+    ApplyingMerge --> Reconciled : merge_applied
+    VerifyingAuthority --> Rejected : rejected
+    ComparingHistories --> Rejected : rejected
+    FindingAncestor --> Rejected : rejected
+    SelectingHistory --> Rejected : rejected
+    PreparingMerge --> Rejected : rejected
+    ApplyingMerge --> Rejected : rejected
+    VerifyingAuthority --> Cancelled : cancelled
+    ComparingHistories --> Cancelled : cancelled
+    FindingAncestor --> Cancelled : cancelled
+    SelectingHistory --> Cancelled : cancelled
+    PreparingMerge --> Cancelled : cancelled
+    ApplyingMerge --> Cancelled : cancelled
+```
 
 ### Host failover
 
